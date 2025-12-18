@@ -44,16 +44,16 @@ development_status:
   1-2-langfuse-instrumentation: done
   1-3-slack-bolt-app-setup: done
   1-4-assistant-class-thread-handling: done
-  1-5-response-streaming: review
-  1-6-docker-cloud-run-deployment: ready-for-dev
+  1-5-response-streaming: done
+  1-6-docker-cloud-run-deployment: in-progress
   1-7-ci-cd-pipeline: ready-for-dev
   epic-1-retrospective: optional
 
   # Epic 2: Agent Core & Verified Responses
   epic-2: in-progress
-  2-1-claude-agent-sdk-integration: ready-for-dev
-  2-2-agent-loop-implementation: ready-for-dev
-  2-3-response-verification-retry: ready-for-dev
+  2-1-claude-agent-sdk-integration: done
+  2-2-agent-loop-implementation: done
+  2-3-response-verification-retry: done
   2-4-orion-error-graceful-degradation: ready-for-dev
   2-5-thread-context-history: ready-for-dev
   2-6-context-compaction: ready-for-dev
