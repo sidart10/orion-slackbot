@@ -1,0 +1,35 @@
+# BMM Workflow Status
+# Tracks progress through BMad Method phases
+# Generated: 2025-12-17
+
+generated: "2025-12-17"
+project: "2025-12 orion-slack-agent"
+project_type: "software"
+selected_track: "bmad-method"
+field_type: "greenfield"
+workflow_path: "method-greenfield.yaml"
+
+# STATUS KEY:
+# - required/optional/recommended/conditional = pending
+# - file path = completed
+# - skipped = explicitly skipped
+
+workflow_status:
+  # Phase 0: Discovery (Optional)
+  brainstorm-project: skipped
+  research: "_bmad-output/analysis/research/technical-orion-slack-agent-research-2024-12-17.md"
+  product-brief: "_bmad-output/analysis/product-brief-2025-12-orion-slack-agent-2025-12-17.md"
+
+  # Phase 1: Planning
+  prd: "_bmad-output/prd.md"
+  create-ux-design: conditional
+
+  # Phase 2: Solutioning
+  create-architecture: "_bmad-output/architecture.md"
+  create-epics-and-stories: "_bmad-output/epics.md"
+  test-design: "_bmad-output/test-design-system.md"
+  validate-architecture: optional
+  implementation-readiness: "_bmad-output/implementation-readiness-report-2025-12-17.md"
+
+  # Phase 3: Implementation
+  sprint-planning: required

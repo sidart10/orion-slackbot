@@ -1,0 +1,27 @@
+# Orion Agent Configuration
+# This file defines the agent's behavior and capabilities
+
+name: orion
+version: 0.1.0
+description: AI-powered Slack assistant built with Claude Agent SDK
+
+# Model configuration (used by Claude Agent SDK)
+model:
+  provider: anthropic
+  default: claude-sonnet-4-20250514
+
+# Agent behavior settings
+behavior:
+  max_retries: 3
+  response_timeout_ms: 30000
+  streaming_enabled: true
+
+# Directories for agent components
+paths:
+  agents: .orion/agents
+  workflows: .orion/workflows
+  tasks: .orion/tasks
+  skills: .claude/skills
+  commands: .claude/commands
+  context: orion-context
+
