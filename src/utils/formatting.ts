@@ -64,17 +64,25 @@ export function formatSlackMrkdwn(text: string, options: FormatOptions = {}): st
  * @returns Text with unicode emojis removed
  */
 export function stripEmojis(text: string): string {
-  // Comprehensive emoji regex covering:
+  // M2 fix: Comprehensive emoji regex covering all major emoji ranges
   // - Emoticons (U+1F600-1F64F)
   // - Miscellaneous Symbols and Pictographs (U+1F300-1F5FF)
   // - Transport and Map Symbols (U+1F680-1F6FF)
   // - Regional Indicator Symbols (U+1F1E0-1F1FF)
   // - Supplemental Symbols and Pictographs (U+1F900-1F9FF)
+  // - Symbols and Pictographs Extended-A (U+1FA00-1FA6F)
+  // - Symbols and Pictographs Extended-B (U+1FA70-1FAFF)
   // - Miscellaneous Symbols (U+2600-26FF)
   // - Dingbats (U+2700-27BF)
+  // - Miscellaneous Technical (U+2300-23FF) - includes ⌚ ⌛
+  // - Enclosed Alphanumerics (U+2460-24FF)
+  // - Enclosed Alphanumeric Supplement (U+1F100-1F1FF)
   // - Variation selectors (U+FE00-FE0F)
+  // - Zero Width Joiner (U+200D) - used in compound emojis
+  // - Skin tone modifiers (U+1F3FB-1F3FF)
+  // - Keycap sequences (digit + U+FE0F + U+20E3)
   const emojiRegex =
-    /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F900}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{FE00}-\u{FE0F}]/gu;
+    /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{2300}-\u{23FF}]|[\u{2460}-\u{24FF}]|[\u{1F100}-\u{1F1FF}]|[\u{FE00}-\u{FE0F}]|[\u{200D}]|[\u{1F3FB}-\u{1F3FF}]|[\u{20E3}]/gu;
   return text.replace(emojiRegex, '');
 }
 

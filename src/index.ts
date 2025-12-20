@@ -19,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { createSlackApp } from './slack/app.js';
 import { assistant } from './slack/assistant.js';
 import { handleUserMessage } from './slack/handlers/user-message.js';
+import { handleAppMention } from './slack/handlers/app-mention.js';
 import { config } from './config/environment.js';
 import { logger } from './utils/logger.js';
 import { startActiveObservation } from './observability/tracing.js';
@@ -57,6 +58,10 @@ export async function startApp(): Promise<void> {
       // Also handle legacy DM message events (Story 1-3)
       // This enables "DM the bot" flows outside the Assistant UI.
       app.message(handleUserMessage);
+
+      // Handle @mentions in channels (Story 2.5, AC#5, FR17)
+      // This enables "@Orion what is X?" flows in public/private channels
+      app.event('app_mention', handleAppMention);
 
       // Start the app
       await app.start(config.port);

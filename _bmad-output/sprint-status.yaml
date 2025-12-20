@@ -1,7 +1,20 @@
 # generated: 2025-12-17
+# updated: 2025-12-18
 # project: 2025-12 orion-slack-agent
 # tracking_system: file-system
 # story_location: _bmad-output/implementation-artifacts/stories
+
+# COURSE CORRECTION (2025-12-18):
+# ================================
+# Decision: Migrate from GCP Cloud Run + E2B to Full Vercel Stack
+# Reason: E2B implementation was a workaround; Vercel Sandbox has first-party Claude SDK support
+# See: sprint-change-proposal-vercel-migration-2025-12-18.md
+#
+# Key Changes:
+#   - Story 3-0: Retargeted from E2B to Vercel Sandbox
+#   - Story 1-6: Deprecated (Cloud Run no longer used)
+#   - Story 1-7: Needs rework for Vercel deployment
+#   - All E2B/GCP infrastructure to be removed
 
 # STATUS DEFINITIONS:
 # ==================
@@ -39,33 +52,39 @@ story_location: _bmad-output/implementation-artifacts/stories
 
 development_status:
   # Epic 1: Project Foundation & Slack Connection
-  epic-1: in-progress
+  # NOTE (2025-12-18): Stories 1-6 and 1-7 affected by Vercel migration
+  epic-1: in-progress  # Reopened for Vercel migration
   1-1-project-scaffolding: done
   1-2-langfuse-instrumentation: done
   1-3-slack-bolt-app-setup: done
   1-4-assistant-class-thread-handling: done
   1-5-response-streaming: done
-  1-6-docker-cloud-run-deployment: in-progress
-  1-7-ci-cd-pipeline: ready-for-dev
-  epic-1-retrospective: optional
+  1-6-docker-cloud-run-deployment: deprecated  # Vercel replaces Cloud Run
+  1-7-ci-cd-pipeline: ready-for-dev  # Reworked for Vercel deployment
+  1-8-vercel-project-setup: done  # Vercel project config, vercel.json - code review complete
+  1-9-vercel-slack-integration: done
+  epic-1-retrospective: done  # Post-migration review completed 2025-12-19
 
   # Epic 2: Agent Core & Verified Responses
   epic-2: in-progress
   2-1-claude-agent-sdk-integration: done
   2-2-agent-loop-implementation: done
   2-3-response-verification-retry: done
-  2-4-orion-error-graceful-degradation: ready-for-dev
-  2-5-thread-context-history: ready-for-dev
-  2-6-context-compaction: ready-for-dev
-  2-7-source-citations: ready-for-dev
-  2-8-file-based-memory: ready-for-dev
-  2-9-basic-qa-knowledge-search: ready-for-dev
+  2-4-orion-error-graceful-degradation: done
+  2-5-thread-context-history: done
+  2-6-context-compaction: done
+  2-7-source-citations: done
+  2-8-file-based-memory: ready-for-dev  # Vercel KV migration needed
+  2-9-basic-qa-knowledge-search: done
   epic-2-retrospective: optional
 
   # Epic 3: MCP Tool Integration
+  # NOTE (2025-12-18): Story 3.2 cancelled - Claude Agent SDK handles tool discovery natively.
+  # NOTE (2025-12-18): Story 3.0 retargeted from E2B to Vercel Sandbox per course correction.
   epic-3: in-progress
-  3-1-mcp-client-infrastructure: ready-for-dev
-  3-2-tool-discovery-registration: ready-for-dev
+  3-0-vercel-sandbox-runtime: in-progress  # Retargeted: E2B → Vercel Sandbox
+  3-1-mcp-client-infrastructure: done   # Config/health code valid, discovery code removed
+  3-2-tool-discovery-registration: cancelled  # SDK handles this natively
   3-3-tool-execution-timeout: ready-for-dev
   3-4-multiple-mcp-servers: ready-for-dev
   3-5-intelligent-tool-selection: ready-for-dev
@@ -132,4 +151,3 @@ development_status:
   9-4-prompt-version-management: ready-for-dev
   9-5-budget-alerts-limits: ready-for-dev
   epic-9-retrospective: optional
-

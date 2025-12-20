@@ -178,3 +178,61 @@ export async function shutdown(): Promise<void> {
 export function _resetForTesting(): void {
   langfuseInstance = null;
 }
+
+/**
+ * Langfuse prompt object interface
+ */
+export interface LangfusePrompt {
+  /** Compile the prompt with variables */
+  compile: (variables: Record<string, unknown>) => string;
+  /** Raw prompt content */
+  prompt: string;
+  /** Prompt name */
+  name: string;
+  /** Prompt version */
+  version: number;
+}
+
+/**
+ * Fetch a prompt from Langfuse by name.
+ *
+ * @param promptName - Name of the prompt to fetch
+ * @returns Prompt object with compile method
+ * @throws Error if prompt not found or Langfuse not configured
+ *
+ * @see Story 2.1 - Claude Agent SDK Integration
+ * @see AC#4 - Fetch system prompt from Langfuse
+ */
+export async function getPrompt(promptName: string): Promise<LangfusePrompt> {
+  const client = getLangfuse();
+
+  if (!client) {
+    throw new Error('Langfuse client not configured');
+  }
+
+  // Check if client has getPrompt method (real Langfuse client)
+  const langfuseClient = client as unknown as {
+    getPrompt?: (name: string) => Promise<LangfusePrompt>;
+  };
+
+  if (typeof langfuseClient.getPrompt !== 'function') {
+    throw new Error('Langfuse prompt management not available (no-op client)');
+  }
+
+  try {
+    const prompt = await langfuseClient.getPrompt(promptName);
+    
+    logStructured('info', 'langfuse_prompt_fetched', {
+      promptName,
+      version: prompt.version,
+    });
+
+    return prompt;
+  } catch (error) {
+    logStructured('error', 'langfuse_prompt_fetch_failed', {
+      promptName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}

@@ -114,3 +114,83 @@ describe('Structured Logger', () => {
   });
 });
 
+describe('logOrionError', () => {
+  const originalConsole = {
+    error: console.error,
+  };
+
+  let capturedOutput: string[] = [];
+
+  beforeEach(async () => {
+    capturedOutput = [];
+    console.error = vi.fn((msg) => capturedOutput.push(msg));
+  });
+
+  afterEach(() => {
+    console.error = originalConsole.error;
+  });
+
+  it('should log all OrionError fields', async () => {
+    const { logOrionError, createOrionError, ErrorCode } = await import('./errors.js');
+    const error = createOrionError(ErrorCode.AGENT_TIMEOUT, 'Operation timed out');
+
+    logOrionError(error);
+
+    const parsed = JSON.parse(capturedOutput[0]);
+    expect(parsed.event).toBe('orion_error');
+    expect(parsed.level).toBe('error');
+    expect(parsed.errorCode).toBe('AGENT_TIMEOUT');
+    expect(parsed.message).toBe('Operation timed out');
+    expect(parsed.userMessage).toBeDefined();
+    expect(parsed.recoverable).toBe(false);
+  });
+
+  it('should include stack trace when cause is provided', async () => {
+    const { logOrionError, createOrionError, ErrorCode } = await import('./errors.js');
+    const originalError = new Error('Original error');
+    const error = createOrionError(ErrorCode.UNKNOWN_ERROR, 'Wrapped', {
+      cause: originalError,
+    });
+
+    logOrionError(error);
+
+    const parsed = JSON.parse(capturedOutput[0]);
+    expect(parsed.stack).toBeDefined();
+    expect(parsed.stack).toContain('Original error');
+  });
+
+  it('should include traceId when provided', async () => {
+    const { logOrionError, createOrionError, ErrorCode } = await import('./errors.js');
+    const error = createOrionError(ErrorCode.SLACK_API_ERROR, 'API failed');
+
+    logOrionError(error, 'trace-abc-123');
+
+    const parsed = JSON.parse(capturedOutput[0]);
+    expect(parsed.traceId).toBe('trace-abc-123');
+  });
+
+  it('should include metadata when present', async () => {
+    const { logOrionError, createOrionError, ErrorCode } = await import('./errors.js');
+    const error = createOrionError(ErrorCode.SLACK_API_ERROR, 'Rate limited', {
+      metadata: { statusCode: 429, retryAfter: 30 },
+    });
+
+    logOrionError(error);
+
+    const parsed = JSON.parse(capturedOutput[0]);
+    expect(parsed.metadata).toEqual({ statusCode: 429, retryAfter: 30 });
+  });
+
+  it('should include retryCount when present', async () => {
+    const { logOrionError, createOrionError, ErrorCode } = await import('./errors.js');
+    const error = createOrionError(ErrorCode.TOOL_TIMEOUT, 'Retry exhausted', {
+      retryCount: 3,
+    });
+
+    logOrionError(error);
+
+    const parsed = JSON.parse(capturedOutput[0]);
+    expect(parsed.retryCount).toBe(3);
+  });
+});
+

@@ -12,6 +12,12 @@ import type { WebClient } from '@slack/web-api';
 import { logger } from '../utils/logger.js';
 
 /**
+ * Maximum number of thread messages to fetch for context.
+ * Used across all handlers for consistency.
+ */
+export const THREAD_HISTORY_LIMIT = 20;
+
+/**
  * Represents a single message in a thread.
  */
 export interface ThreadMessage {
@@ -145,5 +151,18 @@ export function formatThreadHistoryForContext(
       return `${role}: ${msg.text}`;
     })
     .join('\n\n');
+}
+
+/**
+ * Format thread history as an array for agent context.
+ *
+ * Converts thread messages into role-prefixed strings for agent context.
+ * Used by runOrionAgent() to pass thread history.
+ *
+ * @param messages - Array of thread messages
+ * @returns Array of "Role: message" strings
+ */
+export function formatThreadHistoryForAgent(messages: ThreadMessage[]): string[] {
+  return messages.map((m) => `${m.isBot ? 'Orion' : 'User'}: ${m.text}`);
 }
 

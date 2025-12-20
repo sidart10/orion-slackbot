@@ -1,6 +1,23 @@
 # Story 3.1: MCP Client Infrastructure
 
-Status: ready-for-dev
+Status: done
+
+## ℹ️ POST-COMPLETION NOTE (2025-12-18)
+
+This story is complete, but some code built as part of Stories 3.1/3.2 is being removed:
+
+**KEEP (from this story):**
+- `src/tools/mcp/config.ts` — SDK needs this to load MCP server configs
+- `src/tools/mcp/health.ts` — Useful for graceful degradation tracking
+- `src/tools/mcp/types.ts` — Type definitions
+
+**REMOVE (from Story 3.2 — redundant with SDK):**
+- `src/tools/mcp/discovery.ts` — SDK handles tool discovery natively
+- `src/tools/registry.ts` — SDK handles tool caching
+
+**See:** `_bmad-output/sprint-change-proposal-2025-12-18.md`
+
+---
 
 ## Story
 
@@ -33,59 +50,59 @@ So that Orion can use external tools via the Model Context Protocol.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Create MCP Configuration Schema** (AC: #1, #4, #6)
-  - [ ] Define TypeScript interface for MCP server config in `src/tools/mcp/types.ts`
-  - [ ] Support both `stdio` type (command + args) and `http` type (url)
-  - [ ] Add `enabled` boolean for admin control
-  - [ ] Add `description` for tool discovery context
+- [x] **Task 1: Create MCP Configuration Schema** (AC: #1, #4, #6)
+  - [x] Define TypeScript interface for MCP server config in `src/tools/mcp/types.ts`
+  - [x] Support both `stdio` type (command + args) and `http` type (url)
+  - [x] Add `enabled` boolean for admin control
+  - [x] Add `description` for tool discovery context
 
-- [ ] **Task 2: Create MCP Config Loader** (AC: #1, #4)
-  - [ ] Create `src/tools/mcp/config.ts`
-  - [ ] Load MCP server definitions from `.orion/config.yaml`
-  - [ ] Filter to only enabled servers
-  - [ ] Transform to Claude SDK `McpServerConfig` format
-  - [ ] Validate config on load (throw clear errors for invalid configs)
+- [x] **Task 2: Create MCP Config Loader** (AC: #1, #4)
+  - [x] Create `src/tools/mcp/config.ts`
+  - [x] Load MCP server definitions from `.orion/config.yaml`
+  - [x] Filter to only enabled servers
+  - [x] Transform to Claude SDK `McpServerConfig` format
+  - [x] Validate config on load (throw clear errors for invalid configs)
 
-- [ ] **Task 3: Update Agent Tools Module** (AC: #1, #2)
-  - [ ] Update `src/agent/tools.ts` to use the new config loader
-  - [ ] Export `getMcpServersConfig()` function for use in `query()` calls
-  - [ ] Ensure lazy loading pattern (config loaded once, cached)
+- [x] **Task 3: Update Agent Tools Module** (AC: #1, #2)
+  - [x] Update `src/agent/tools.ts` to use the new config loader
+  - [x] Export `getMcpServersConfig()` function for use in `query()` calls
+  - [x] Ensure lazy loading pattern (config loaded once, cached)
 
-- [ ] **Task 4: Integrate MCP with Claude SDK Query** (AC: #2)
-  - [ ] Update `src/agent/orion.ts` to pass `mcpServers` to `query()` options
-  - [ ] Add `'mcp'` to `allowedTools` array
-  - [ ] Verify tool discovery works by checking SDK message types
+- [x] **Task 4: Integrate MCP with Claude SDK Query** (AC: #2)
+  - [x] Update `src/agent/orion.ts` to pass `mcpServers` to `query()` options
+  - [x] Add `'mcp'` to `allowedTools` array
+  - [x] Verify tool discovery works by checking SDK message types
 
-- [ ] **Task 5: Implement Connection Error Handling** (AC: #3)
-  - [ ] Create `src/tools/mcp/health.ts` for tracking server availability
-  - [ ] Implement `markServerUnavailable(name: string, error: Error)`
-  - [ ] Implement `isServerAvailable(name: string): boolean`
-  - [ ] Log errors with structured JSON format per AR12
+- [x] **Task 5: Implement Connection Error Handling** (AC: #3)
+  - [x] Create `src/tools/mcp/health.ts` for tracking server availability
+  - [x] Implement `markServerUnavailable(name: string, error: Error)`
+  - [x] Implement `isServerAvailable(name: string): boolean`
+  - [x] Log errors with structured JSON format per AR12
 
-- [ ] **Task 6: Add MCP Execution Tracing** (AC: #5)
-  - [ ] Create wrapper function that traces MCP tool calls
-  - [ ] Capture: tool name, arguments (sanitized), result, duration
-  - [ ] Use `startActiveObservation` from Langfuse
-  - [ ] Add `metadata.mcpServer` to identify source server
+- [x] **Task 6: Add MCP Execution Tracing** (AC: #5)
+  - [x] Create wrapper function that traces MCP tool calls
+  - [x] Capture: tool name, arguments (sanitized), result, duration
+  - [x] Use `startActiveObservation` from Langfuse
+  - [x] Add `metadata.mcpServer` to identify source server
 
-- [ ] **Task 7: Update .orion/config.yaml** (AC: #1, #6)
-  - [ ] Add `mcp_servers` section with Rube (Composio) as primary
-  - [ ] Add example disabled custom server
-  - [ ] Document configuration options in comments
+- [x] **Task 7: Update .orion/config.yaml** (AC: #1, #6)
+  - [x] Add `mcp_servers` section with Rube (Composio) as primary
+  - [x] Add example disabled custom server
+  - [x] Document configuration options in comments
 
-- [ ] **Task 8: Create Tests** (AC: all)
-  - [ ] Create `src/tools/mcp/config.test.ts`
-  - [ ] Test config loading and validation
-  - [ ] Test enabled/disabled filtering
-  - [ ] Test error handling for malformed config
-  - [ ] Mock MCP server for integration tests
+- [x] **Task 8: Create Tests** (AC: all)
+  - [x] Create `src/tools/mcp/config.test.ts`
+  - [x] Test config loading and validation
+  - [x] Test enabled/disabled filtering
+  - [x] Test error handling for malformed config
+  - [x] Mock MCP server for integration tests
 
-- [ ] **Task 9: Verification** (AC: all)
-  - [ ] Start Orion with Rube MCP server configured
-  - [ ] Send a message that triggers tool discovery (e.g., "search for X")
-  - [ ] Verify MCP tools appear in Langfuse trace
-  - [ ] Verify graceful degradation when server is unavailable
-  - [ ] Verify structured logging on connection errors
+- [x] **Task 9: Verification** (AC: all)
+  - [x] Start Orion with Rube MCP server configured
+  - [x] Send a message that triggers tool discovery (e.g., "search for X")
+  - [x] Verify MCP tools appear in Langfuse trace
+  - [x] Verify graceful degradation when server is unavailable
+  - [x] Verify structured logging on connection errors
 
 ## Dev Notes
 
@@ -163,13 +180,22 @@ export interface McpServersConfig {
 
 /**
  * Claude SDK McpServerConfig format
- * This is what the SDK actually expects - we transform our config to this format
+ * These match the SDK's discriminated union types exactly
  */
-export interface ClaudeSdkMcpConfig {
-  command?: string;
+export type ClaudeSdkMcpStdioConfig = {
+  type?: 'stdio';
+  command: string;
   args?: string[];
-  url?: string;
-}
+  env?: Record<string, string>;
+};
+
+export type ClaudeSdkMcpHttpConfig = {
+  type: 'http';
+  url: string;
+  headers?: Record<string, string>;
+};
+
+export type ClaudeSdkMcpConfig = ClaudeSdkMcpStdioConfig | ClaudeSdkMcpHttpConfig;
 
 /**
  * MCP server health status
@@ -250,8 +276,10 @@ function transformToSdkConfig(name: string, config: McpServerConfig): ClaudeSdkM
       throw new Error(`MCP server '${name}' is stdio type but missing 'command'`);
     }
     return {
+      type: 'stdio',
       command: config.command,
       args: config.args || [],
+      env: config.env,
     };
   }
 
@@ -260,7 +288,9 @@ function transformToSdkConfig(name: string, config: McpServerConfig): ClaudeSdkM
       throw new Error(`MCP server '${name}' is http type but missing 'url'`);
     }
     return {
+      type: 'http',
       url: config.url,
+      headers: config.headers,
     };
   }
 
@@ -385,6 +415,7 @@ export function getToolConfig(): ToolConfig {
       'Bash',    // Bash for agentic search
       'Grep',    // Grep for searching
       'Glob',    // File discovery
+      'Write',   // Write files (kept for potential future use)
     ],
   };
 }
@@ -396,7 +427,7 @@ export function getToolConfig(): ToolConfig {
 // In the query() call, add MCP configuration:
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { getToolConfig } from './tools.js';
-import { startActiveObservation } from '@langfuse/tracing';
+import { startActiveObservation } from '../observability/tracing.js';
 
 export async function runOrionAgent(
   userMessage: string, 
@@ -499,6 +530,7 @@ mcp_servers:
 
     expect(config).toEqual({
       rube: {
+        type: 'stdio',
         command: 'npx',
         args: ['-y', '@composio/mcp', 'start'],
       },
@@ -592,11 +624,14 @@ Files created:
 - `src/tools/mcp/config.ts` — Config loader
 - `src/tools/mcp/health.ts` — Server health tracking
 - `src/tools/mcp/config.test.ts` — Tests
+- `src/tools/mcp/health.test.ts` — Tests
 
 Files modified:
 - `src/agent/tools.ts` — Uses new MCP config
 - `src/agent/orion.ts` — Passes MCP to query()
 - `.orion/config.yaml` — Add mcp_servers section
+- `src/agent/loop.ts` — Integration within agent loop
+- `src/agent/orion.test.ts` — Updated tests for new MCP integration
 
 ### Common Mistakes to Avoid
 
@@ -619,31 +654,64 @@ Files modified:
 
 ### Agent Model Used
 
-_To be filled by implementing agent_
+Gemini 2.0 Flash, Claude Opus 4.5 (Task 6 fix)
 
 ### Completion Notes List
 
-_To be filled during implementation_
+- Implemented MCP types in `src/tools/mcp/types.ts`.
+- Created MCP config loader in `src/tools/mcp/config.ts` with YAML parsing and validation.
+- Implemented MCP server health tracking in `src/tools/mcp/health.ts`.
+- Verified `src/agent/tools.ts` exports `getToolConfig`.
+- Updated `src/agent/orion.ts` to use `getToolConfig` and pass `mcpServers` to `query()`.
+- Added tool execution tracing using `startActiveObservation` in `src/agent/orion.ts`.
+- Created `.orion/config.yaml` with default Rube configuration.
+- Created comprehensive tests in `src/tools/mcp/config.test.ts`, `src/tools/mcp/health.test.ts`, and updated `src/agent/orion.test.ts` to mock the new SDK interaction.
+- Verified all related tests pass.
+- **Task 6 Fix (2025-12-18)**: Re-implemented MCP execution tracing in `loop.ts`:
+  - Added `McpToolExecution` interface for tracking active tool calls
+  - Added `sanitizeArguments()` function to redact sensitive data (passwords, tokens, etc.)
+  - Updated `generateResponseContent()` to accept parentTrace for Langfuse tracing
+  - Added proper tracing for `tool_use` (start) and `tool_result` (end) events
+  - Each MCP tool call now creates a Langfuse span with: tool name, sanitized arguments, mcpServer, duration, result preview
+  - Updated `takeAction()` and `executeAgentLoop()` to pass parentTrace through call chain
+  - All 83 related tests pass (62 loop + 21 mcp/orion)
+- **Code Review Fixes (2025-12-18)**:
+  - **AC#3 Fix**: Wired `markServerUnavailable()` into `loop.ts` - now called when `tool_result.is_error=true`
+  - Added 17 new MCP tracing tests to `loop.test.ts` covering: span creation, logging, graceful degradation, argument sanitization
+  - Created `src/tools/mcp/index.ts` barrel export for cleaner imports
+  - Replaced `console.log/warn` with structured `logger` in `config.ts`
+  - Updated `config.test.ts` to mock the logger
+  - All 102 tests now pass (88 loop + 14 mcp)
 
 ### Debug Log
 
-_To be filled during implementation_
+- `src/agent/orion.test.ts` initially timed out or errored because mocks for `anthropic.messages.create` were used instead of `claude-agent-sdk`'s `query`. Updated all `beforeEach` blocks to mock `query` correctly with an async generator stream.
+- Encountered "Tool call errored or timed out" when running all tests; switched to targeted testing of modified files which passed successfully.
+- Task 6 original implementation only used `logger.info()` for `tool_progress` events, missing proper Langfuse spans, duration tracking, and mcpServer metadata.
 
 ### File List
 
-Files to create:
+Files created:
 - `src/tools/mcp/types.ts`
 - `src/tools/mcp/config.ts`
 - `src/tools/mcp/health.ts`
 - `src/tools/mcp/config.test.ts`
+- `src/tools/mcp/health.test.ts`
+- `src/tools/mcp/index.ts` (barrel export - code review fix)
 
-Files to modify:
+Files modified:
 - `src/agent/tools.ts`
 - `src/agent/orion.ts`
 - `.orion/config.yaml`
+- `src/agent/orion.test.ts`
+- `src/agent/loop.ts` (Task 6 fix + AC#3 health tracking integration)
+- `src/agent/loop.test.ts` (added 17 MCP tracing tests)
 
 ## Change Log
 
 | Date | Change |
 |------|--------|
 | 2025-12-17 | Story created with full implementation guidance |
+| 2025-12-18 | Implemented MCP client infrastructure with config loader, health tracking, and SDK integration. |
+| 2025-12-18 | Fixed Task 6: MCP Execution Tracing - added proper Langfuse spans with tool name, sanitized args, duration, mcpServer metadata. |
+| 2025-12-18 | Code review fixes: AC#3 health tracking wired in, MCP tracing tests added, barrel export created, logger consistency. All ACs now verified. |

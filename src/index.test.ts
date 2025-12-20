@@ -16,6 +16,7 @@ vi.mock('./instrumentation.js', () => ({}));
 const mockApp = {
   message: vi.fn(),
   assistant: vi.fn(),
+  event: vi.fn(), // Story 2.5: app_mention events
   start: vi.fn().mockResolvedValue(undefined),
 };
 
@@ -33,6 +34,12 @@ vi.mock('./slack/assistant.js', () => ({
 const mockHandleUserMessage = vi.fn();
 vi.mock('./slack/handlers/user-message.js', () => ({
   handleUserMessage: mockHandleUserMessage,
+}));
+
+// Mock the app_mention handler (Story 2.5)
+const mockHandleAppMention = vi.fn();
+vi.mock('./slack/handlers/app-mention.js', () => ({
+  handleAppMention: mockHandleAppMention,
 }));
 
 // Mock the logger
@@ -86,6 +93,14 @@ describe('Application Startup', () => {
     await startApp();
 
     expect(mockApp.message).toHaveBeenCalledWith(mockHandleUserMessage);
+  });
+
+  it('should register app_mention handler for @mentions (Story 2.5)', async () => {
+    const { startApp } = await import('./index.js');
+
+    await startApp();
+
+    expect(mockApp.event).toHaveBeenCalledWith('app_mention', mockHandleAppMention);
   });
 
   it('should start app on configured port', async () => {

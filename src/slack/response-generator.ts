@@ -8,6 +8,9 @@
  * @see AC#1 - Response streams to Slack
  */
 
+/** Delay between placeholder chunks in milliseconds (L2 fix) */
+const PLACEHOLDER_CHUNK_DELAY_MS = 20;
+
 /**
  * Placeholder response generator
  * Simulates streaming by yielding chunks with delays
@@ -44,7 +47,7 @@ export async function* generatePlaceholderResponse(
 
   for (const word of words) {
     // Small delay to simulate typing/streaming
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, PLACEHOLDER_CHUNK_DELAY_MS));
     yield word;
   }
 }

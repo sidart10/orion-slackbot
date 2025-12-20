@@ -37,13 +37,9 @@ import { searchKnowledge, type Knowledge } from '../memory/knowledge.js';
 import { getToolConfig } from './tools.js';
 import { markServerUnavailable } from '../tools/mcp/health.js';
 import { getToolContextSummary } from '../tools/context.js';
-import {
-  needsDiscovery,
-  logDiscoveryStats,
-  extractToolFromSdkMessage,
-  registerDiscoveredTools,
-} from '../tools/mcp/discovery.js';
-import type { ToolSchema } from '../tools/registry.js';
+// NOTE (2025-12-18): Discovery imports removed after course correction.
+// Claude Agent SDK handles tool discovery natively — no custom discovery layer needed.
+// See: sprint-change-proposal-2025-12-18.md
 
 // Initialize Anthropic client (kept for other uses if any, but query uses its own)
 const anthropic = new Anthropic({
@@ -889,17 +885,17 @@ Respond naturally and helpfully to the user's message.`;
 ${toolContext}`;
   }
 
-  // Log discovery status for debugging (Story 3.2 AC#6)
-  if (needsDiscovery()) {
-    logger.debug({
-      event: 'tool_discovery_pending',
-      message: 'Tool discovery will occur during query execution',
-    });
-  } else {
-    logDiscoveryStats();
-  }
+  // NOTE: Tool discovery handled natively by Claude SDK
 
   try {
+    logger.info({
+      event: 'query_starting',
+      promptLength: prompt.length,
+      hasSystemPrompt: !!systemPrompt,
+      mcpServers: Object.keys(toolConfig.mcpServers),
+      timestamp: new Date().toISOString(),
+    });
+
     const responseStream = query({
       prompt,
       options: {
@@ -910,18 +906,28 @@ ${toolContext}`;
       },
     });
 
+    logger.info({
+      event: 'query_stream_created',
+      timestamp: new Date().toISOString(),
+    });
+
     let fullText = '';
     
     // Track active MCP tool executions for duration calculation
     const activeToolExecutions = new Map<string, McpToolExecution>();
     
-    // Story 3.2: Collect discovered tools for registry population
-    const discoveredTools: ToolSchema[] = [];
+    let messageCount = 0;
     
     // Iterate stream to capture text and trace MCP tools
     // SDK message types: 'user' | 'assistant' | 'result' | 'system' | 'stream_event' | 'tool_progress' | 'auth_status'
     // Tool events may come through stream_event or have extended types at runtime
     for await (const message of responseStream) {
+      messageCount++;
+      logger.info({
+        event: 'stream_message_received',
+        messageCount,
+        timestamp: new Date().toISOString(),
+      });
       // Cast to access runtime type - SDK types may not include all runtime event types
       const msgType = (message as { type: string }).type;
       
@@ -1018,22 +1024,6 @@ ${toolContext}`;
           arguments: sanitizeArguments(toolMsg.input),
           timestamp: new Date().toISOString(),
         });
-        
-        // Story 3.2: Extract tool schema for registry (AC#1, AC#2)
-        const toolSchema = extractToolFromSdkMessage(
-          {
-            type: 'tool_use',
-            tool: {
-              name: toolName,
-              description: '', // SDK doesn't provide description in tool_use
-              input_schema: toolMsg.input,
-            },
-          },
-          mcpServer
-        );
-        if (toolSchema) {
-          discoveredTools.push(toolSchema);
-        }
       }
       
       if (msgType === 'tool_result') {
@@ -1099,18 +1089,6 @@ ${toolContext}`;
           timestamp: new Date().toISOString(),
         });
       }
-    }
-
-    // Story 3.2 AC#2, AC#4: Register discovered tools in cache
-    if (discoveredTools.length > 0) {
-      // Fire-and-forget registration (don't block response)
-      registerDiscoveredTools(discoveredTools).catch((err) => {
-        logger.warn({
-          event: 'tool_registration_failed',
-          error: err instanceof Error ? err.message : String(err),
-          toolCount: discoveredTools.length,
-        });
-      });
     }
 
     if (fullText) {

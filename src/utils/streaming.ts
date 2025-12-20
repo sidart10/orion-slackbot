@@ -70,15 +70,24 @@ export class SlackStreamer {
   async start(): Promise<void> {
     this.startTime = Date.now();
 
-    // Use type assertion since chatStream types may not be complete in @slack/web-api
-    this.streamer = (this.client as unknown as {
-      chatStream: (params: {
+    // M1 fix: Runtime validation before type assertion
+    // chatStream is part of Slack's AI features, may not be in all SDK type definitions
+    const clientWithStream = this.client as unknown as {
+      chatStream?: (params: {
         channel: string;
         thread_ts: string;
         recipient_user_id: string;
         recipient_team_id: string;
       }) => ChatStreamHandle;
-    }).chatStream({
+    };
+
+    if (typeof clientWithStream.chatStream !== 'function') {
+      throw new Error(
+        'Slack client does not support chatStream. Ensure you are using a compatible @slack/web-api version with AI features enabled.'
+      );
+    }
+
+    this.streamer = clientWithStream.chatStream({
       channel: this.channel,
       thread_ts: this.threadTs,
       recipient_user_id: this.userId,

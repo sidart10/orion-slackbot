@@ -1,6 +1,6 @@
 # Story 2.6: Context Compaction
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -10,9 +10,11 @@ So that complex discussions can continue uninterrupted.
 
 ## Acceptance Criteria
 
-1. **Given** a conversation exceeds the context window, **When** the 200k token limit is approached (NFR24), **Then** Claude Agent SDK compaction is triggered (AR30)
+1. **Given** a conversation exceeds the context window, **When** the 200k token limit is approached (NFR24), **Then** manual compaction via summarization is triggered (AR30)
 
 2. **Given** compaction is triggered, **When** summarization runs, **Then** older context is summarized to free up space
+
+> **Note:** Claude Agent SDK does NOT have a built-in compaction API. AR30 is satisfied via manual implementation using Claude to summarize older messages.
 
 3. **Given** context is being compacted, **When** summarization completes, **Then** key information is preserved in the compacted context
 
@@ -22,39 +24,40 @@ So that complex discussions can continue uninterrupted.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Detect Context Limit Approach** (AC: #1)
-  - [ ] Create `src/agent/compaction.ts`
-  - [ ] Implement `shouldTriggerCompaction()` function
-  - [ ] Calculate token count for current context
-  - [ ] Set threshold at 80% of 200k limit
+- [x] **Task 1: Detect Context Limit Approach** (AC: #1)
+  - [x] Create `src/agent/compaction.ts`
+  - [x] Implement `shouldTriggerCompaction()` function
+  - [x] Calculate token count for current context
+  - [x] Set threshold at 80% of 200k limit
 
-- [ ] **Task 2: Implement Summarization-Based Compaction** (AC: #1)
-  - [ ] Claude SDK does NOT have a built-in compaction API
-  - [ ] Implement manual compaction: call Claude to summarize older context
-  - [ ] Strategy: When threshold hit, summarize oldest 50% of messages
-  - [ ] Replace old messages with summary in context window
+- [x] **Task 2: Implement Manual Summarization-Based Compaction** (AC: #1)
+  - [x] Implement `compactConversation()` function
+  - [x] Call Claude API directly to summarize older context
+  - [x] Strategy: When threshold hit, summarize oldest 50% of messages
+  - [x] Replace old messages with summary in context window
+  - [x] Use claude-sonnet-4-20250514 for summarization (cost-effective)
 
-- [ ] **Task 3: Preserve Key Information** (AC: #3)
-  - [ ] Include in summarization prompt: "Preserve user preferences, key facts, and decisions"
-  - [ ] Keep most recent N messages (e.g., last 10) in full detail
-  - [ ] Structure summary with sections: Preferences, Facts, Previous Discussion
+- [x] **Task 3: Preserve Key Information** (AC: #3)
+  - [x] Include in summarization prompt: "Preserve user preferences, key facts, and decisions"
+  - [x] Keep most recent N messages (e.g., last 10) in full detail
+  - [x] Structure summary with sections: Preferences, Facts, Previous Discussion
 
-- [ ] **Task 4: Seamless Continuation** (AC: #4)
-  - [ ] Ensure response streaming continues
-  - [ ] No visible interruption to user
-  - [ ] Maintain conversation coherence
+- [x] **Task 4: Seamless Continuation** (AC: #4)
+  - [x] Ensure response streaming continues
+  - [x] No visible interruption to user
+  - [x] Maintain conversation coherence
 
-- [ ] **Task 5: Add Compaction Logging** (AC: #5)
-  - [ ] Create Langfuse span for compaction
-  - [ ] Log pre/post token counts
-  - [ ] Log preserved information summary
-  - [ ] Track compaction frequency
+- [x] **Task 5: Add Compaction Logging** (AC: #5)
+  - [x] Create Langfuse span for compaction
+  - [x] Log pre/post token counts
+  - [x] Log preserved information summary
+  - [x] Track compaction frequency
 
-- [ ] **Task 6: Verification** (AC: all)
-  - [ ] Simulate long conversation (many messages)
-  - [ ] Verify compaction triggers
-  - [ ] Verify key info preserved
-  - [ ] Check conversation continues smoothly
+- [x] **Task 6: Verification** (AC: all)
+  - [x] Simulate long conversation (many messages)
+  - [x] Verify compaction triggers
+  - [x] Verify key info preserved
+  - [x] Check conversation continues smoothly
 
 ## Dev Notes
 
@@ -142,12 +145,27 @@ Claude Opus 4
 - **IMPORTANT**: Claude SDK does NOT have automatic compaction—implement manually via summarization
 - Monitor compaction frequency as a health metric
 - Consider storing compacted summaries in orion-context/
+- Implemented `TOKEN_LIMIT = 200_000` and `COMPACTION_THRESHOLD = 0.8` (triggers at 160k tokens)
+- Added `@anthropic-ai/sdk` dependency for direct Claude API calls
+- `compactConversation()` supports configurable `minRecentMessages` option (default: 10)
+- Structured summarization prompt with Preferences, Facts, Previous Discussion sections
+- `buildCompactedContext()` prepends summary as context for seamless continuation
+- `compactWithLogging()` creates Langfuse spans and logs compaction metrics
+- 32 unit tests covering all acceptance criteria
 
 ### File List
 
-Files to create:
+Files created:
 - `src/agent/compaction.ts`
+- `src/agent/compaction.test.ts`
 
-Files to modify:
-- `src/agent/loop.ts` (integrate compaction check)
+Files modified:
+- `package.json` (added @anthropic-ai/sdk dependency)
+- `src/agent/loop.ts` (integrated compaction into agent loop)
 
+## Change Log
+
+| Date | Change |
+|------|--------|
+| 2025-12-18 | Story implementation complete - all 6 tasks done, 32 tests passing |
+| 2025-12-18 | Code Review: Fixed H1 (integration), H2 (error tests), M1-M3. 38 tests passing |

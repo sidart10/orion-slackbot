@@ -1,6 +1,6 @@
 # Story 1.5: Response Streaming
 
-Status: review
+Status: done
 
 ## Story
 
@@ -557,17 +557,30 @@ Claude Opus 4.5 (via Cursor)
 - NFR4 compliance: `timeToStreamStart` tracked and logged with `nfr4Met` boolean
 - 140 tests passing including 12 streaming tests, 29 formatting tests, and 4 response generator tests
 
+### Code Review Fixes Applied
+
+**2025-12-18 - Amelia (Dev Agent) Code Review:**
+
+- **H1 Fixed:** Added 4 tests for `streamFromSource()` function (was untested)
+- **H2 Fixed:** Added validation for required streaming fields (threadTs, userId, teamId) with explicit error logging and fallback to `say()` instead of passing empty strings to Slack API
+- **M1 Fixed:** Added runtime check `typeof chatStream !== 'function'` before type assertion with helpful error message
+- **M2 Fixed:** Expanded emoji regex to cover U+2300-23FF (watch/hourglass), U+1F3FB-1F3FF (skin tones), U+200D (ZWJ), U+1FA00-1FAFF (extended pictographs), U+20E3 (keycaps)
+- **M3 Fixed:** Corrected misleading test comment about "preserve existing mrkdwn bold" to accurately describe italic conversion behavior
+- **L1 Fixed:** Extracted magic number `20` to `THREAD_HISTORY_LIMIT` constant
+- **L2 Fixed:** Extracted magic number `20`ms to `PLACEHOLDER_CHUNK_DELAY_MS` constant
+- **Tests added:** 10 new tests covering fixes (150 total, up from 140)
+
 ### File List
 
 Files created:
 - `src/utils/streaming.ts` - SlackStreamer class for chatStream API
-- `src/utils/streaming.test.ts` - 12 tests for streaming utility
+- `src/utils/streaming.test.ts` - 13 tests for streaming utility (12 original + 1 M1 fix)
 - `src/utils/formatting.ts` - Slack mrkdwn formatting utilities
-- `src/utils/formatting.test.ts` - 29 tests for formatting utility
+- `src/utils/formatting.test.ts` - 33 tests for formatting utility (29 original + 4 M2 fix)
 - `src/slack/response-generator.ts` - Async generator for streaming responses
-- `src/slack/response-generator.test.ts` - 4 tests for response generator
+- `src/slack/response-generator.test.ts` - 8 tests for response generator (4 original + 4 H1 fix)
 
 Files modified:
-- `src/slack/handlers/user-message.ts` - Updated to use streaming, added Langfuse spans
-- `src/slack/handlers/user-message.test.ts` - Updated with streaming tests (21 tests total)
+- `src/slack/handlers/user-message.ts` - Updated to use streaming, added Langfuse spans, added field validation (H2, L1 fix)
+- `src/slack/handlers/user-message.test.ts` - 22 tests total (21 original + 1 H2 fix)
 

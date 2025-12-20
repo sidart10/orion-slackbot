@@ -2,7 +2,7 @@
 stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 inputDocuments:
   - "_bmad-output/analysis/product-brief-2025-12-orion-slack-agent-2025-12-17.md"
-  - "_bmad-output/analysis/research/technical-orion-slack-agent-research-2024-12-17.md"
+  - "_bmad-output/analysis/research/technical-orion-slack-agent-research-2025-12-17.md"
 documentCounts:
   briefs: 1
   research: 1
@@ -173,7 +173,7 @@ Orion becomes the intelligent layer between employees and enterprise systems—t
 
 ### Journey 1: Alex Chen — The 30-Second Answer
 
-Alex is a Product Manager at SambaTV preparing for a cross-functional planning meeting. She needs to understand how a competitor's new product announcement affects their Q1 roadmap, but the relevant information is scattered across Slack threads from three months ago, a Confluence page she vaguely remembers, and an analyst report someone mentioned in passing.
+Alex is a Product Manager at Samba preparing for a cross-functional planning meeting. She needs to understand how a competitor's new product announcement affects their Q1 roadmap, but the relevant information is scattered across Slack threads from three months ago, a Confluence page she vaguely remembers, and an analyst report someone mentioned in passing.
 
 Normally, this would take 45 minutes of hunting—opening tabs, searching Slack, scrolling through old threads, piecing together fragments. Instead, Alex opens Orion in Slack and types: "What do we know about [Competitor X]'s product announcement in October and how does it affect our Q1 priorities?"
 
@@ -205,7 +205,7 @@ Priya is an Account Executive with a discovery call in one hour. The prospect—
 
 She opens Orion: "Build me a prospect brief for [VP Name] at [Retail Brand]. Include recent company news, their likely priorities based on industry trends, and any connections to our existing clients."
 
-Orion runs a deep research workflow: web search for recent news, LinkedIn insights, analysis of retail industry trends, and a cross-reference against SambaTV's client list. Three minutes later, Priya has a one-page dossier: the company just announced a new streaming partnership, the VP previously worked at a brand that's a current client, and retail media networks are their likely priority for Q1.
+Orion runs a deep research workflow: web search for recent news, LinkedIn insights, analysis of retail industry trends, and a cross-reference against Samba's client list. Three minutes later, Priya has a one-page dossier: the company just announced a new streaming partnership, the VP previously worked at a brand that's a current client, and retail media networks are their likely priority for Q1.
 
 Priya opens the call with: "I noticed you just announced the streaming partnership—congratulations. I'm curious how you're thinking about connected TV measurement for that." The VP leans in. The call extends by 20 minutes.
 
@@ -215,7 +215,7 @@ Priya opens the call with: "I noticed you just announced the streaming partnersh
 
 ### Journey 4: Jordan Taylor — Day One Questions
 
-Jordan is a new Software Engineer starting their first day at SambaTV. They've completed the formal onboarding checklist, but now they're staring at a Slack workspace with 200 channels, a Confluence space they can't navigate, and a codebase they've never seen. Their manager is in back-to-back meetings until 3pm.
+Jordan is a new Software Engineer starting their first day at Samba. They've completed the formal onboarding checklist, but now they're staring at a Slack workspace with 200 channels, a Confluence space they can't navigate, and a codebase they've never seen. Their manager is in back-to-back meetings until 3pm.
 
 Jordan remembers someone mentioning Orion during orientation. They open it and type: "I'm a new engineer. How do I set up my local development environment for the data pipeline team?"
 
@@ -346,7 +346,7 @@ Orion's differentiation: enterprise-wide, Slack-native, composable architecture 
 ### Platform Model
 
 **Deployment Model:** Single-tenant internal enterprise tool
-- Deployed for SambaTV organization only
+- Deployed for Samba organization only
 - Not a multi-tenant SaaS product
 - No external customer billing or subscription tiers
 

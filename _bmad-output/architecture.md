@@ -2,7 +2,7 @@
 stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8]
 inputDocuments:
   - "_bmad-output/prd.md"
-  - "_bmad-output/analysis/research/technical-orion-slack-agent-research-2024-12-17.md"
+  - "_bmad-output/analysis/research/technical-orion-slack-agent-research-2025-12-17.md"
   - "_bmad-output/analysis/product-brief-2025-12-orion-slack-agent-2025-12-17.md"
 workflowType: 'architecture'
 lastStep: 8
@@ -46,14 +46,14 @@ Orion's 43 functional requirements span 7 architectural domains:
 | Uptime | >99.5% | Min 1 instance, health checks |
 | Tool success rate | >98% | Retry logic, fallbacks |
 | Cost per query | <$0.10 | Token optimization, caching |
-| Concurrent users | 50 | Cloud Run auto-scaling |
+| Concurrent users | 50 | Vercel serverless auto-scaling |
 
 **Scale & Complexity:**
 
 - Primary domain: Backend platform with Slack integration
 - Complexity level: Medium-High
 - Estimated architectural components: 8-10 major subsystems
-- Deployment: Google Cloud Run (serverless, HTTP mode)
+- Deployment: Vercel (serverless functions)
 
 ### Technical Constraints & Dependencies
 
@@ -63,7 +63,7 @@ Orion's 43 functional requirements span 7 architectural domains:
 | **LLM provider + model selection** | Must be runtime-configurable (provider + model ID) to avoid hardcoding and enable switching/routing |
 | **Slack Bolt + Assistant API** | HTTP webhooks, streaming, thread management |
 | **MCP 1.0 Protocol** | Standard interface for all external tools |
-| **Cloud Run** | Stateless, auto-scaling; request/response size and request-timeout limits apply |
+| **Vercel Serverless** | Stateless, auto-scaling; 60s timeout on Pro plan |
 | **Langfuse** | OpenTelemetry integration, prompt management |
 | **Large model context (model-dependent)** | Requires compaction for long threads |
 
@@ -74,7 +74,7 @@ Orion's 43 functional requirements span 7 architectural domains:
 3. **Streaming** — All user-facing responses streamed for perceived performance
 4. **Tool Abstraction** — MCP, code gen, agentic search unified under single interface
 5. **Context Management** — Thread compaction, subagent isolation, prompt caching
-6. **Security** — Secrets in GCP Secret Manager, request signature verification, sandboxed code
+6. **Security** — Secrets in Vercel Environment Variables, request signature verification, sandboxed code
 
 ## Starter Template Evaluation
 
@@ -135,8 +135,7 @@ orion-slack-agent/
 │   ├── conversations/
 │   ├── user-preferences/
 │   └── knowledge/
-├── Dockerfile
-├── docker-compose.yml              # Local development
+├── vercel.json                     # Vercel configuration
 ├── package.json
 ├── tsconfig.json
 ├── .env.example
@@ -186,7 +185,7 @@ orion-slack-agent/
 | `pnpm build` | TypeScript compilation |
 | `pnpm test` | Run Vitest tests |
 | `pnpm lint` | ESLint + Prettier check |
-| `pnpm docker:build` | Build Docker image |
+| `vercel` | Deploy to Vercel preview |
 
 **Note:** Project initialization using this structure should be the first implementation story.
 
@@ -214,7 +213,7 @@ orion-slack-agent/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Thread Context** | Slack API fetch + LLM provider in-context | Stateless Cloud Run, leverage Slack as source of truth |
+| **Thread Context** | Slack API fetch + LLM provider in-context | Stateless Vercel serverless, leverage Slack as source of truth |
 | **Long Thread Handling** | Claude Agent SDK compaction | Built-in, triggers when context fills |
 | **Persistent Memory** | File-based (`orion-context/`) | Simple, searchable via agentic search, no extra infra |
 | **Prompt Caching** | In-memory cache for Langfuse prompt fetches (TTL configurable) | Reduce prompt-fetch latency and limit API calls |
@@ -255,7 +254,7 @@ orion-slack-agent/
 |----------|--------|-----------|
 | **MCP Management** | Lazy initialization, agent tool discovery | Agent discovers available tools, Rube/Composio patterns |
 | **Tool Fallback** | Code generation in sandbox | When MCP tool doesn't exist, agent writes code |
-| **Code Sandbox** | Claude Agent SDK built-in | Native sandbox first, GCP/Modal as upgrade path |
+| **Code Sandbox** | Vercel Sandbox | First-party Claude Agent SDK support for secure code execution |
 | **Tool Discovery** | Minimal tools in context | Agent discovers what it needs, not preloaded |
 
 **Tool Selection Pattern:**
@@ -286,16 +285,25 @@ User Request
 | **Tool Failures** | Graceful degradation | Continue with available tools, inform user |
 | **Retry Strategy** | Exponential backoff (2-3 retries) | Transient failures recovered |
 | **Long Operations** | Progress callbacks + periodic updates | Keep user informed via Slack status |
-| **Timeout** | 4 minutes hard limit | Below Cloud Run default, graceful failure |
+| **Timeout** | 60 seconds | Vercel Pro plan function timeout |
 
 ### Infrastructure & Deployment
 
+> ⚠️ **UPDATED 2025-12-19:** Migrated from GCP Cloud Run + E2B to Full Vercel Stack. See `sprint-change-proposal-vercel-migration-2025-12-18.md`.
+
+| Component | Runtime | Purpose |
+|-----------|---------|---------|
+| **API Routes** | Vercel Serverless Functions | Receives Slack events, executes agent |
+| **Agent Execution** | Vercel Sandbox | Runs Claude Agent SDK with subprocess support |
+
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **CI/CD** | GitHub Actions → Cloud Build | Actions for tests, Cloud Build for deploy |
-| **Environments** | Cloud Run revision tags | Simple for single-tenant, `--tag staging` workflow |
-| **Cold Start** | min-instances: 1 | Avoid cold starts for better UX |
-| **Secrets** | GCP Secret Manager | Native integration, no secrets in code |
+| **Platform** | Vercel Pro | First-party Claude SDK support, 60s function timeout |
+| **Agent Runtime** | Vercel Sandbox | Claude Agent SDK spawns subprocess — Vercel Sandbox provides isolation |
+| **API Layer** | Vercel Serverless | Thin wrappers in `api/` importing from `dist/` |
+| **CI/CD** | Vercel (automatic) + GitHub Actions | Automatic deploys on push, tests via Actions |
+| **Cold Start** | Vercel edge caching | Fast cold starts with serverless |
+| **Secrets** | Vercel Environment Variables | Dashboard-managed, pulled via `vercel env pull` |
 
 ### Decision Impact Analysis
 
@@ -307,7 +315,7 @@ User Request
 5. MCP tool layer
 6. Agent loop (gather → act → verify)
 7. File-based memory
-8. Cloud Run deployment
+8. Vercel deployment
 
 **Cross-Component Dependencies:**
 - Langfuse must be initialized before Claude SDK (instrumentation first)
@@ -698,9 +706,8 @@ orion-slack-agent/
 │   │   └── mcp.test.ts                    # MCP integration tests
 │   └── e2e/
 │       └── conversation.test.ts           # End-to-end conversation tests
-├── docker/
-│   └── Dockerfile                         # Production Docker image
-├── docker-compose.yml                     # Local development
+├── api/                                   # Vercel serverless functions
+│   └── health.ts                          # Health check endpoint
 ├── package.json
 ├── pnpm-lock.yaml
 ├── tsconfig.json
@@ -780,7 +787,7 @@ orion-slack-agent/
 | LLM Provider API | `src/agent/orion.ts` | Provider SDK (Anthropic Agent SDK initially) |
 | Langfuse | `src/instrumentation.ts` | OpenTelemetry SDK |
 | MCP Servers | `src/tools/mcp/servers.ts` | Dynamic per-server |
-| GCP Secret Manager | `src/config/environment.ts` | SDK at startup |
+| Vercel Env Vars | `src/config/environment.ts` | Available at runtime |
 
 **Data Flow:**
 
@@ -846,15 +853,15 @@ pnpm dev                       # Runs with hot reload
 
 ```bash
 pnpm build                     # tsc → dist/
-pnpm docker:build              # Build Docker image
+vercel                         # Deploy to preview
 ```
 
 **Deployment Pipeline:**
 
 1. PR → GitHub Actions (lint + test)
-2. Merge → Cloud Build trigger
-3. Build Docker image → Artifact Registry
-4. Deploy → Cloud Run (revision tag)
+2. Merge → Vercel automatic deploy
+3. Build TypeScript → Vercel serverless
+4. Deploy → Vercel (preview/production)
 
 ## Architecture Validation Results
 
@@ -867,7 +874,7 @@ pnpm docker:build              # Build Docker image
 | Claude Agent SDK + Slack Bolt | ✅ Compatible | Both TypeScript, async-native, work together |
 | Langfuse + OpenTelemetry | ✅ Compatible | Langfuse provides OTEL SDK integration |
 | MCP 1.0 + Claude SDK | ✅ Compatible | SDK has native MCP support |
-| Cloud Run + Stateless design | ✅ Compatible | File-based memory with external source of truth (Slack) |
+| Vercel + Stateless design | ✅ Compatible | File-based memory with external source of truth (Slack) |
 | pnpm + TypeScript 5.x | ✅ Compatible | Standard modern stack |
 
 **Pattern Consistency:**
@@ -893,7 +900,7 @@ pnpm docker:build              # Build Docker image
 | Agent Core | FR1-6 | ✅ Full | `src/agent/loop.ts`, subagents pattern |
 | Research | FR7-12 | ✅ Full | Research subagent, parallel execution |
 | Communication | FR13-18 | ✅ Full | `src/slack/handlers/`, streaming pattern |
-| Code Execution | FR19-23 | ✅ Full | `src/tools/sandbox/`, Claude SDK built-in |
+| Code Execution | FR19-23 | ✅ Full | `src/tools/sandbox/`, Vercel Sandbox |
 | Extensions | FR24-29 | ✅ Full | MCP layer, `.claude/skills/`, `.claude/commands/` |
 | Knowledge | FR30-34 | ✅ Full | `orion-context/knowledge/`, `.orion/workflows/` |
 | Observability | FR35-40 | ✅ Full | Langfuse integration, tracing pattern |
@@ -908,7 +915,7 @@ pnpm docker:build              # Build Docker image
 | Uptime | >99.5% | ✅ min-instances: 1, health checks |
 | Tool success rate | >98% | ✅ Graceful degradation, retries |
 | Cost per query | <$0.10 | ✅ Prompt caching, token optimization |
-| Concurrent users | 50 | ✅ Cloud Run auto-scaling |
+| Concurrent users | 50 | ✅ Vercel serverless auto-scaling |
 
 ### Implementation Readiness Validation ✅
 

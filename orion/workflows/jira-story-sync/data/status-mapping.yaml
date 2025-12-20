@@ -1,0 +1,30 @@
+# Jira Story Sync - Status Mapping
+# Maps BMAD story statuses to Jira workflow states
+
+# BMAD Status → Jira Status
+bmad_to_jira:
+  todo: "To Do"
+  in-progress: "In Progress"
+  done: "Done"
+
+# Jira Status → BMAD Status
+# Maps various Jira statuses to normalized BMAD statuses
+jira_to_bmad:
+  "To Do": todo
+  "Open": todo
+  "Backlog": todo
+  "In Progress": in-progress
+  "In Development": in-progress
+  "In Review": in-progress
+  "Code Review": in-progress
+  "Testing": in-progress
+  "Done": done
+  "Closed": done
+  "Resolved": done
+  "Complete": done
+
+# Default status if no mapping found
+defaults:
+  bmad_unmapped: "To Do"
+  jira_unmapped: todo
+

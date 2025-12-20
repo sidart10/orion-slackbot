@@ -41,17 +41,15 @@ describe('Verification Metrics Module', () => {
   });
 
   describe('Module Exports', () => {
-    it('should export VerificationMetrics interface', async () => {
+    it('should export VerificationMetrics interface via getMetrics', async () => {
       const metricsModule = await import('./metrics.js');
-      // Type check - interface exists if we can use it
-      const metrics: typeof metricsModule.VerificationMetrics = {
-        totalAttempts: 0,
-        passedFirstAttempt: 0,
-        passedAfterRetry: 0,
-        failedAllAttempts: 0,
-        issuesByType: {},
-      };
-      expect(metrics.totalAttempts).toBe(0);
+      // Interface check - getMetrics returns VerificationMetrics shape
+      const metrics = metricsModule.getMetrics();
+      expect(metrics).toHaveProperty('totalAttempts');
+      expect(metrics).toHaveProperty('passedFirstAttempt');
+      expect(metrics).toHaveProperty('passedAfterRetry');
+      expect(metrics).toHaveProperty('failedAllAttempts');
+      expect(metrics).toHaveProperty('issuesByType');
     });
 
     it('should export trackVerification function', async () => {
@@ -230,6 +228,187 @@ describe('Verification Metrics Module', () => {
       expect(metrics.passedAfterRetry).toBe(0);
       expect(metrics.failedAllAttempts).toBe(0);
       expect(Object.keys(metrics.issuesByType)).toHaveLength(0);
+    });
+  });
+});
+
+/**
+ * Tests for Citation Metrics
+ *
+ * @see Story 2.7 - Source Citations
+ * @see AC#3 - Citation rate is tracked (target: >90%)
+ */
+describe('Citation Metrics Module', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  describe('Module Exports', () => {
+    it('should export CITATION_RATE_TARGET as 0.9', async () => {
+      const { CITATION_RATE_TARGET } = await import('./metrics.js');
+      expect(CITATION_RATE_TARGET).toBe(0.9);
+    });
+
+    it('should export trackCitations function', async () => {
+      const metricsModule = await import('./metrics.js');
+      expect(metricsModule.trackCitations).toBeDefined();
+      expect(typeof metricsModule.trackCitations).toBe('function');
+    });
+
+    it('should export getCitationMetrics function', async () => {
+      const metricsModule = await import('./metrics.js');
+      expect(metricsModule.getCitationMetrics).toBeDefined();
+      expect(typeof metricsModule.getCitationMetrics).toBe('function');
+    });
+
+    it('should export resetCitationMetrics function', async () => {
+      const metricsModule = await import('./metrics.js');
+      expect(metricsModule.resetCitationMetrics).toBeDefined();
+      expect(typeof metricsModule.resetCitationMetrics).toBe('function');
+    });
+  });
+
+  describe('trackCitations', () => {
+    it('should increment responsesWithSources when sources > 0', async () => {
+      const { trackCitations, getCitationMetrics, resetCitationMetrics } =
+        await import('./metrics.js');
+      resetCitationMetrics();
+
+      trackCitations(3, 2);
+
+      const metrics = getCitationMetrics();
+      expect(metrics.responsesWithSources).toBe(1);
+    });
+
+    it('should not track when no sources gathered', async () => {
+      const { trackCitations, getCitationMetrics, resetCitationMetrics } =
+        await import('./metrics.js');
+      resetCitationMetrics();
+
+      trackCitations(0, 0);
+
+      const metrics = getCitationMetrics();
+      expect(metrics.responsesWithSources).toBe(0);
+    });
+
+    it('should increment responsesWithCitations when citations > 0', async () => {
+      const { trackCitations, getCitationMetrics, resetCitationMetrics } =
+        await import('./metrics.js');
+      resetCitationMetrics();
+
+      trackCitations(2, 1);
+      trackCitations(3, 0); // Sources but no citations
+
+      const metrics = getCitationMetrics();
+      expect(metrics.responsesWithSources).toBe(2);
+      expect(metrics.responsesWithCitations).toBe(1);
+    });
+
+    it('should accumulate totalCitations and totalSourcesGathered', async () => {
+      const { trackCitations, getCitationMetrics, resetCitationMetrics } =
+        await import('./metrics.js');
+      resetCitationMetrics();
+
+      trackCitations(3, 2);
+      trackCitations(5, 4);
+
+      const metrics = getCitationMetrics();
+      expect(metrics.totalSourcesGathered).toBe(8);
+      expect(metrics.totalCitations).toBe(6);
+    });
+
+    it('should log citation metric event', async () => {
+      const { trackCitations, resetCitationMetrics } = await import('./metrics.js');
+      resetCitationMetrics();
+
+      trackCitations(2, 1, 'trace-123');
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'citation_metric',
+          sourcesGathered: 2,
+          citationsUsed: 1,
+          traceId: 'trace-123',
+        })
+      );
+    });
+
+    it('should log warning when citation rate falls below 90%', async () => {
+      const { trackCitations, resetCitationMetrics } = await import('./metrics.js');
+      resetCitationMetrics();
+
+      // 10 responses with sources, only 8 with citations = 80% rate
+      for (let i = 0; i < 8; i++) {
+        trackCitations(2, 1); // Has citations
+      }
+      trackCitations(2, 0); // No citations
+      trackCitations(2, 0); // No citations - now at 80%
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'citation_rate_below_target',
+          target: 0.9,
+        })
+      );
+    });
+  });
+
+  describe('getCitationMetrics', () => {
+    it('should return current citation metrics state', async () => {
+      const { getCitationMetrics, resetCitationMetrics } = await import('./metrics.js');
+      resetCitationMetrics();
+
+      const metrics = getCitationMetrics();
+
+      expect(metrics).toHaveProperty('responsesWithSources');
+      expect(metrics).toHaveProperty('responsesWithCitations');
+      expect(metrics).toHaveProperty('totalCitations');
+      expect(metrics).toHaveProperty('totalSourcesGathered');
+      expect(metrics).toHaveProperty('citationRate');
+    });
+
+    it('should calculate citationRate correctly', async () => {
+      const { trackCitations, getCitationMetrics, resetCitationMetrics } =
+        await import('./metrics.js');
+      resetCitationMetrics();
+
+      // 4 responses with sources, 3 with citations = 75%
+      trackCitations(2, 1);
+      trackCitations(2, 1);
+      trackCitations(2, 1);
+      trackCitations(2, 0);
+
+      const metrics = getCitationMetrics();
+      expect(metrics.citationRate).toBeCloseTo(0.75);
+    });
+
+    it('should return 1 for citationRate when no sources gathered', async () => {
+      const { getCitationMetrics, resetCitationMetrics } = await import('./metrics.js');
+      resetCitationMetrics();
+
+      const metrics = getCitationMetrics();
+      expect(metrics.citationRate).toBe(1);
+    });
+  });
+
+  describe('resetCitationMetrics', () => {
+    it('should reset all citation counters to zero', async () => {
+      const { trackCitations, getCitationMetrics, resetCitationMetrics } =
+        await import('./metrics.js');
+
+      // Add some metrics
+      trackCitations(3, 2);
+      trackCitations(2, 1);
+
+      // Reset
+      resetCitationMetrics();
+
+      const metrics = getCitationMetrics();
+      expect(metrics.responsesWithSources).toBe(0);
+      expect(metrics.responsesWithCitations).toBe(0);
+      expect(metrics.totalCitations).toBe(0);
+      expect(metrics.totalSourcesGathered).toBe(0);
     });
   });
 });

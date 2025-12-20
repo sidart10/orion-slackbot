@@ -146,7 +146,7 @@ This document provides the complete epic and story breakdown for 2025-12 orion-s
 **From Architecture - Tool Layer**
 - AR14: MCP servers initialize lazily after Claude SDK ready
 - AR15: Tool fallback to code generation when MCP tool doesn't exist
-- AR16: Claude Agent SDK built-in sandbox for code execution
+- AR16: E2B sandbox for secure code execution (Firecracker-based isolation)
 - AR17: Agent discovers available tools dynamically (minimal tools preloaded in context)
 
 **From Architecture - Error Handling**
@@ -773,7 +773,7 @@ So that untrusted code cannot harm the system.
 
 **Given** code has been generated
 **When** the sandbox is initialized
-**Then** the Claude Agent SDK built-in sandbox is configured (AR16)
+**Then** E2B sandbox is created with appropriate runtime (AR16)
 **And** The sandbox has no filesystem access outside its container
 **And** The sandbox has no network escape capabilities (NFR8)
 **And** Resource limits (CPU, memory, time) are enforced

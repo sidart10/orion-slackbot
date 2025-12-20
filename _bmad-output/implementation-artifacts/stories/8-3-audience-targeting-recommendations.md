@@ -9,7 +9,7 @@ As a **programmatic consultant**, I want Orion to recommend audience segments, S
 ## Acceptance Criteria
 
 1. **Given** I describe a client targeting need, **When** I ask for recommendations, **Then** relevant audience segments are recommended (FR33)
-2. Recommendations are based on SambaTV audience data in orion-context/knowledge/
+2. Recommendations are based on Samba audience data in orion-context/knowledge/
 3. Each recommendation includes rationale for the match
 4. Recommendations include reach estimates when available
 5. Both regular and contextual segments are suggested when appropriate

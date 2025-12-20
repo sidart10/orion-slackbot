@@ -6,11 +6,16 @@
  *
  * @see Story 2.3 - Response Verification & Retry
  * @see AC#5 - Verification pass rate is tracked (target: >95%)
+ * @see Story 2.7 - Source Citations
+ * @see AC#3 - Citation rate is tracked (target: >90%)
  */
 
 import { logger } from '../utils/logger.js';
 import type { VerificationResult } from '../agent/loop.js';
 import { MAX_ATTEMPTS } from '../agent/loop.js';
+
+/** Target citation rate threshold (90%) */
+export const CITATION_RATE_TARGET = 0.9;
 
 /**
  * Verification metrics for tracking pass rates and failure reasons
@@ -30,6 +35,24 @@ export interface VerificationMetrics {
   passRate?: number;
 }
 
+/**
+ * Citation metrics for tracking source citation usage
+ *
+ * @see Story 2.7 AC#3 - Citation rate is tracked (target: >90%)
+ */
+export interface CitationMetrics {
+  /** Total responses with sources gathered */
+  responsesWithSources: number;
+  /** Responses that included citations */
+  responsesWithCitations: number;
+  /** Total citations used across all responses */
+  totalCitations: number;
+  /** Total sources gathered across all responses */
+  totalSourcesGathered: number;
+  /** Calculated citation rate (0-1) */
+  citationRate?: number;
+}
+
 // In-memory metrics state (reset on service restart)
 let metrics: VerificationMetrics = {
   totalAttempts: 0,
@@ -37,6 +60,14 @@ let metrics: VerificationMetrics = {
   passedAfterRetry: 0,
   failedAllAttempts: 0,
   issuesByType: {},
+};
+
+// In-memory citation metrics state (reset on service restart)
+let citationMetrics: CitationMetrics = {
+  responsesWithSources: 0,
+  responsesWithCitations: 0,
+  totalCitations: 0,
+  totalSourcesGathered: 0,
 };
 
 /**
@@ -98,6 +129,88 @@ export function resetMetrics(): void {
     passedAfterRetry: 0,
     failedAllAttempts: 0,
     issuesByType: {},
+  };
+}
+
+/**
+ * Track citation usage for a response
+ *
+ * Logs warning to Langfuse when citation rate falls below 90% target.
+ *
+ * @param sourcesGathered - Number of sources gathered during gather phase
+ * @param citationsUsed - Number of unique citations in the response
+ * @param traceId - Optional trace ID for observability
+ *
+ * @see Story 2.7 AC#3 - Citation rate is tracked (target: >90%)
+ */
+export function trackCitations(
+  sourcesGathered: number,
+  citationsUsed: number,
+  traceId?: string
+): void {
+  // Only track if sources were gathered
+  if (sourcesGathered > 0) {
+    citationMetrics.responsesWithSources++;
+    citationMetrics.totalSourcesGathered += sourcesGathered;
+
+    if (citationsUsed > 0) {
+      citationMetrics.responsesWithCitations++;
+      citationMetrics.totalCitations += citationsUsed;
+    }
+
+    // Calculate current citation rate
+    const rate = citationMetrics.responsesWithSources > 0
+      ? citationMetrics.responsesWithCitations / citationMetrics.responsesWithSources
+      : 1;
+
+    // Log citation metric event
+    logger.info({
+      event: 'citation_metric',
+      sourcesGathered,
+      citationsUsed,
+      currentRate: rate,
+      traceId,
+    });
+
+    // Log warning if citation rate falls below target
+    if (rate < CITATION_RATE_TARGET) {
+      logger.warn({
+        event: 'citation_rate_below_target',
+        currentRate: rate,
+        target: CITATION_RATE_TARGET,
+        responsesWithSources: citationMetrics.responsesWithSources,
+        responsesWithCitations: citationMetrics.responsesWithCitations,
+        traceId,
+      });
+    }
+  }
+}
+
+/**
+ * Get current citation metrics with calculated rate
+ *
+ * @returns Current citation metrics
+ */
+export function getCitationMetrics(): CitationMetrics {
+  const rate = citationMetrics.responsesWithSources > 0
+    ? citationMetrics.responsesWithCitations / citationMetrics.responsesWithSources
+    : 1;
+
+  return {
+    ...citationMetrics,
+    citationRate: rate,
+  };
+}
+
+/**
+ * Reset citation metrics to zero (for testing)
+ */
+export function resetCitationMetrics(): void {
+  citationMetrics = {
+    responsesWithSources: 0,
+    responsesWithCitations: 0,
+    totalCitations: 0,
+    totalSourcesGathered: 0,
   };
 }
 

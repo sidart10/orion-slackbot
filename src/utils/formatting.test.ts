@@ -29,7 +29,9 @@ describe('formatSlackMrkdwn', () => {
       );
     });
 
-    it('should preserve existing mrkdwn bold', () => {
+    it('should convert single-asterisk markdown italic to mrkdwn underscore italic', () => {
+      // Note: *text* in markdown is italic, converted to _text_ in mrkdwn
+      // After bold conversion, remaining single asterisks are treated as italic markers
       expect(formatSlackMrkdwn('Already *bold* text')).toBe('Already _bold_ text');
     });
   });
@@ -162,6 +164,25 @@ describe('stripEmojis', () => {
 
   it('should preserve slack shortcodes', () => {
     expect(stripEmojis(':smile: :wave:')).toBe(':smile: :wave:');
+  });
+
+  // M2 fix: Additional emoji range coverage tests
+  it('should remove watch and hourglass symbols (U+2300-23FF)', () => {
+    expect(stripEmojis('Time: ⌚⌛')).toBe('Time: ');
+  });
+
+  it('should remove skin tone modifiers (U+1F3FB-1F3FF)', () => {
+    // Skin tone modifiers are stripped, leaving base emoji handling to other ranges
+    expect(stripEmojis('Wave: 👋🏻👋🏿')).toBe('Wave: ');
+  });
+
+  it('should remove ZWJ characters used in compound emojis', () => {
+    // The ZWJ (U+200D) is stripped, which breaks compound emojis into parts that are also stripped
+    expect(stripEmojis('Family: 👨‍👩‍👧')).toBe('Family: ');
+  });
+
+  it('should remove extended pictographs (U+1FA00-1FAFF)', () => {
+    expect(stripEmojis('Health: 🩺🩹')).toBe('Health: ');
   });
 });
 

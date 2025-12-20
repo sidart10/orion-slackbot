@@ -1,79 +1,31 @@
-/**
- * Tool Configuration Module
- *
- * Configures MCP servers and allowed tools for the Orion agent.
- * MCP servers are lazily initialized by the Claude SDK.
- *
- * @see Story 2.1 - Claude Agent SDK Integration
- * @see AC#1 - Tool configuration for query()
- */
+import { getMcpServersConfig } from '../tools/mcp/config.js';
+import type { ClaudeSdkMcpConfig } from '../tools/mcp/types.js';
 
 /**
- * MCP server configuration shape
- */
-export interface McpServerConfig {
-  /** Command to start the MCP server */
-  command: string;
-  /** Command arguments */
-  args: string[];
-  /** Environment variables */
-  env?: Record<string, string>;
-}
-
-/**
- * Tool configuration for the Orion agent
+ * Tool configuration for Claude Agent SDK
+ * 
+ * MCP servers are loaded from .orion/config.yaml (lazy initialization per AR14)
+ * Only enabled servers are included in the config
  */
 export interface ToolConfig {
-  /** MCP server configurations keyed by name */
-  mcpServers: Record<string, McpServerConfig>;
-  /** List of allowed tool names */
+  mcpServers: Record<string, ClaudeSdkMcpConfig>;
   allowedTools: string[];
 }
 
 /**
- * Tool configuration for Orion agent
- *
- * MCP servers are lazily initialized by the Claude SDK.
- * Tools are discovered at runtime via MCP protocol.
+ * Get the complete tool configuration for query() options
+ * Includes MCP servers and allowed tool types
  */
-export const toolConfig: ToolConfig = {
-  mcpServers: {
-    // Rube (Composio) for 500+ app integrations
-    // TODO: Enable in Story 3.1 (MCP Client Infrastructure)
-    // rube: {
-    //   command: 'npx',
-    //   args: ['-y', '@composio/mcp', 'start']
-    // },
-  },
-
-  // Allowed tools for agent
-  // Start minimal, expand as needed
-  allowedTools: [
-    'Read', // Read files
-    'Write', // Write files
-    'Bash', // Execute commands
-    // 'mcp',    // MCP tools (enabled in Story 3.1)
-    // 'Skill',  // Skills (enabled in Story 7.1)
-  ],
-};
-
-/**
- * Get MCP server configuration by name
- *
- * @param name - Server name
- * @returns Server config or undefined if not found
- */
-export function getMcpServer(name: string): McpServerConfig | undefined {
-  return toolConfig.mcpServers[name];
+export function getToolConfig(): ToolConfig {
+  return {
+    mcpServers: getMcpServersConfig(),
+    allowedTools: [
+      'mcp',     // MCP tool calls
+      'Read',    // File reading for agentic search
+      'Bash',    // Bash for agentic search
+      'Grep',    // Grep for searching
+      'Glob',    // File discovery
+      'Write',   // Write files (Keeping this from original config as it seems useful for agent)
+    ],
+  };
 }
-
-/**
- * Check if a tool is allowed
- *
- * @param toolName - Name of the tool
- * @returns true if tool is in allowedTools list
- */
-export function isToolAllowed(toolName: string): boolean {
-  return toolConfig.allowedTools.includes(toolName);
-}
-

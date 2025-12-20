@@ -157,6 +157,16 @@ describe('SlackStreamer', () => {
 
       await expect(streamer.stop()).rejects.toThrow('Stream close error');
     });
+
+    it('should throw if chatStream is not available on client (M1 fix)', async () => {
+      const clientWithoutStream = {} as unknown as WebClient;
+      const configWithBadClient = { ...config, client: clientWithoutStream };
+      const streamer = new SlackStreamer(configWithBadClient);
+
+      await expect(streamer.start()).rejects.toThrow(
+        'Slack client does not support chatStream'
+      );
+    });
   });
 });
 

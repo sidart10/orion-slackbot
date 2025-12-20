@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { DEFAULT_MODEL, isValidModel } from './models.js';
 
 export const config = {
   // Slack
@@ -8,6 +9,7 @@ export const config = {
 
   // Anthropic
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
+  anthropicModel: process.env.ANTHROPIC_MODEL ?? DEFAULT_MODEL,
 
   // Langfuse
   langfusePublicKey: process.env.LANGFUSE_PUBLIC_KEY ?? '',
@@ -34,6 +36,14 @@ if (config.nodeEnv === 'production') {
     if (!config[key]) {
       throw new Error(`Missing required environment variable for ${key}`);
     }
+  }
+
+  // Validate model identifier
+  if (!isValidModel(config.anthropicModel)) {
+    throw new Error(
+      `Invalid ANTHROPIC_MODEL: "${config.anthropicModel}". ` +
+        `Valid options: claude-sonnet-4-20250514, claude-opus-4-20250514, claude-3-5-haiku-20241022`
+    );
   }
 }
 

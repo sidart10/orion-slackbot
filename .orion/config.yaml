@@ -1,27 +1,35 @@
-# Orion Agent Configuration
-# This file defines the agent's behavior and capabilities
+# MCP Server Configuration
+# =========================
+# Define external tool servers that Orion can connect to via Model Context Protocol.
+# Servers can be stdio (local process) or http (remote endpoint).
+#
+# Each server has:
+#   enabled: boolean - Set to false to disable without removing config
+#   type: 'stdio' | 'http' - Transport type
+#   description: string - Helps agent understand when to use this server
+#
+# For stdio servers:
+#   command: string - The command to run (e.g., 'npx', 'node')
+#   args: string[] - Arguments to pass to the command
+#
+# For http servers:
+#   url: string - The HTTP endpoint URL
 
-name: orion
-version: 0.1.0
-description: AI-powered Slack assistant built with Claude Agent SDK
+mcp_servers:
+  # Rube (Composio) - Primary MCP server providing 500+ app integrations
+  # Includes: GitHub, Atlassian, Slack, Google, and many more
+  rube:
+    enabled: true
+    type: stdio
+    command: npx
+    args: ["-y", "@composio/mcp", "start"]
+    description: "500+ app integrations via Composio - use for GitHub, Jira, Confluence, Google, Slack, and other external services"
 
-# Model configuration (used by Claude Agent SDK)
-model:
-  provider: anthropic
-  default: claude-sonnet-4-20250514
-
-# Agent behavior settings
-behavior:
-  max_retries: 3
-  response_timeout_ms: 30000
-  streaming_enabled: true
-
-# Directories for agent components
-paths:
-  agents: .orion/agents
-  workflows: .orion/workflows
-  tasks: .orion/tasks
-  skills: .claude/skills
-  commands: .claude/commands
-  context: orion-context
-
+  # Example custom MCP server (disabled by default)
+  # Uncomment and modify for internal tools
+  # custom-tools:
+  #   enabled: false
+  #   type: stdio
+  #   command: node
+  #   args: ["./mcp-servers/custom-tools.js"]
+  #   description: "Internal company tools and APIs"

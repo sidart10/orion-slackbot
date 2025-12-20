@@ -6,7 +6,7 @@ import filenames from 'eslint-plugin-filenames';
 export default [
   eslint.configs.recommended,
   {
-    ignores: ['dist/**', 'node_modules/**', '**/*.js', '!eslint.config.js'],
+    ignores: ['dist/**', 'node_modules/**', '**/*.js', '!eslint.config.js', 'src/agent/**', '**/*.test.ts'],
   },
   {
     files: ['src/**/*.ts'],

@@ -1,20 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the langfuse tracing SDK
-// Note: vi.mock is hoisted, so we can't reference external variables
+// Creates fresh mock functions for each Langfuse instance
 vi.mock('langfuse', () => {
-  const mockTrace = vi.fn().mockReturnValue({
-    id: 'test-trace-id',
-    update: vi.fn(),
-  });
-  const mockFlushAsync = vi.fn().mockResolvedValue(undefined);
-  const mockShutdownAsync = vi.fn().mockResolvedValue(undefined);
-
   return {
     Langfuse: vi.fn().mockImplementation(() => ({
-      trace: mockTrace,
-      flushAsync: mockFlushAsync,
-      shutdownAsync: mockShutdownAsync,
+      trace: vi.fn().mockReturnValue({
+        id: 'test-trace-id',
+        update: vi.fn(),
+      }),
+      flushAsync: vi.fn().mockResolvedValue(undefined),
+      shutdownAsync: vi.fn().mockResolvedValue(undefined),
     })),
   };
 });
@@ -110,25 +106,76 @@ describe('langfuse singleton', () => {
     expect(result).toBe(true);
   });
 
-  // Integration test - requires real Langfuse connection
-  // The mock does not properly simulate the Langfuse client behavior
-  // Verified manually with real credentials
-  it.skip('should return true from healthCheck when client is configured', async () => {
+  it('should return true from healthCheck when client is configured', async () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-test');
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-test');
+
+    // Reset modules and re-mock to get fresh instance
+    vi.resetModules();
+    vi.doMock('langfuse', () => ({
+      Langfuse: vi.fn().mockImplementation(() => ({
+        trace: vi.fn().mockReturnValue({ id: 'test-trace-id', update: vi.fn() }),
+        flushAsync: vi.fn().mockResolvedValue(undefined),
+        shutdownAsync: vi.fn().mockResolvedValue(undefined),
+      })),
+    }));
 
     const { healthCheck } = await import('./langfuse.js');
     const result = await healthCheck();
     expect(result).toBe(true);
   });
 
-  // Integration test - requires real Langfuse connection
-  it.skip('should call shutdownAsync on shutdown', async () => {
+  it('should call shutdownAsync on shutdown', async () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-test');
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-test');
 
+    const mockShutdownAsync = vi.fn().mockResolvedValue(undefined);
+
+    vi.resetModules();
+    vi.doMock('langfuse', () => ({
+      Langfuse: vi.fn().mockImplementation(() => ({
+        trace: vi.fn().mockReturnValue({ id: 'test-trace-id', update: vi.fn() }),
+        flushAsync: vi.fn().mockResolvedValue(undefined),
+        shutdownAsync: mockShutdownAsync,
+      })),
+    }));
+
     const { getLangfuse, shutdown } = await import('./langfuse.js');
-    getLangfuse();
+    const client = getLangfuse();
+    expect(client).not.toBeNull();
     await shutdown();
+    expect(mockShutdownAsync).toHaveBeenCalled();
+  });
+});
+
+describe('getPrompt (Story 2.1)', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', '');
+    vi.stubEnv('LANGFUSE_SECRET_KEY', '');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('should export getPrompt function', async () => {
+    const { getPrompt } = await import('./langfuse.js');
+    expect(getPrompt).toBeDefined();
+    expect(typeof getPrompt).toBe('function');
+  });
+
+  it('should throw error when Langfuse client not configured', async () => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', '');
+    vi.stubEnv('LANGFUSE_SECRET_KEY', '');
+
+    const { getPrompt } = await import('./langfuse.js');
+
+    // No-op client doesn't have getPrompt method
+    await expect(getPrompt('test-prompt')).rejects.toThrow(
+      'Langfuse prompt management not available'
+    );
   });
 });

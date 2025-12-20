@@ -15,9 +15,11 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { loadAgentPrompt } from './loader.js';
 import { executeAgentLoop, type AgentContext as LoopAgentContext } from './loop.js';
-import { toolConfig } from './tools.js';
+import { getToolConfig } from './tools.js';
 import { getPrompt, type LangfuseTrace } from '../observability/langfuse.js';
 import { logger } from '../utils/logger.js';
+import { startActiveObservation } from '../observability/tracing.js';
+import { buildCitationRegistry, formatCitationFooter } from './citations.js';
 
 /**
  * Context for agent execution within a Slack thread
@@ -86,10 +88,13 @@ export async function* runOrionAgent(
   const startTime = Date.now();
   const parentTrace = options.parentTrace ?? createNoOpTrace();
 
+  const toolConfig = getToolConfig();
+
   logger.info({
     event: 'orion_agent_start',
     userId: options.context.userId,
     traceId: options.context.traceId,
+    mcpServers: Object.keys(toolConfig.mcpServers),
   });
 
   // Convert context to loop format
@@ -113,11 +118,12 @@ export async function* runOrionAgent(
   // Chunked streaming will be enhanced when Claude SDK is fully integrated
   yield response.content;
 
-  // Add source citations if available
+  // Add source citations if available (Story 2.7 AC#1, AC#2)
   if (response.sources.length > 0) {
-    yield '\n\n_Sources:_\n';
-    for (const source of response.sources) {
-      yield `• ${source.reference}\n`;
+    const registry = buildCitationRegistry(response.sources);
+    const citationFooter = formatCitationFooter(registry.citations);
+    if (citationFooter) {
+      yield citationFooter;
     }
   }
 
@@ -146,85 +152,141 @@ export async function* runOrionAgentDirect(
   userMessage: string,
   options: AgentOptions
 ): AsyncGenerator<string, void, unknown> {
-  const startTime = Date.now();
+  // Wrap in Langfuse observation
+  yield* await startActiveObservation({
+    name: 'agent_direct_execution',
+    userId: options.context.userId,
+    sessionId: options.context.threadTs,
+    input: userMessage,
+    metadata: {
+      channelId: options.context.channelId,
+      traceId: options.context.traceId,
+    }
+  }, async (trace) => {
+    const startTime = Date.now();
+    const toolConfig = getToolConfig();
 
-  // Load system prompt (Langfuse first, fallback to local)
-  let systemPrompt: string;
-  try {
-    const promptObj = await getPrompt('orion-system-prompt');
-    // Langfuse prompt objects have a compile method
-    if (promptObj && typeof promptObj === 'object' && 'compile' in promptObj) {
-      systemPrompt = (
-        promptObj as { compile: (vars: Record<string, unknown>) => string }
-      ).compile({
-        threadHistory: options.context.threadHistory.join('\n'),
+    // Load system prompt (Langfuse first, fallback to local)
+    let systemPrompt: string;
+    try {
+      const promptObj = await getPrompt('orion-system-prompt');
+      // Langfuse prompt objects have a compile method
+      if (promptObj && typeof promptObj === 'object' && 'compile' in promptObj) {
+        systemPrompt = (
+          promptObj as { compile: (vars: Record<string, unknown>) => string }
+        ).compile({
+          threadHistory: options.context.threadHistory.join('\n'),
+        });
+      } else {
+        throw new Error('Invalid prompt object');
+      }
+    } catch (error) {
+      logger.warn({
+        event: 'langfuse_prompt_fallback',
+        error: error instanceof Error ? error.message : String(error),
+        traceId: options.context.traceId,
       });
-    } else {
-      throw new Error('Invalid prompt object');
+      systemPrompt = await loadAgentPrompt('orion');
     }
-  } catch (error) {
-    logger.warn({
-      event: 'langfuse_prompt_fallback',
-      error: error instanceof Error ? error.message : String(error),
-      traceId: options.context.traceId,
-    });
-    systemPrompt = await loadAgentPrompt('orion');
-  }
 
-  // Override if provided
-  if (options.systemPromptOverride) {
-    systemPrompt = options.systemPromptOverride;
-  }
-
-  logger.info({
-    event: 'agent_start',
-    userId: options.context.userId,
-    promptLength: systemPrompt.length,
-    traceId: options.context.traceId,
-  });
-
-  // Execute agent query
-  const response = query({
-    prompt: userMessage,
-    options: {
-      systemPrompt,
-      mcpServers: toolConfig.mcpServers,
-      settingSources: ['user', 'project'] as const,
-      allowedTools: toolConfig.allowedTools,
-      cwd: process.cwd(),
-    },
-  });
-
-  // Stream responses - only yield text content
-  let tokenCount = 0;
-  let messageCount = 0;
-  for await (const message of response as AsyncIterable<SDKMessage>) {
-    if (message.type === 'text' && typeof message.content === 'string') {
-      tokenCount += estimateTokens(message.content);
-      messageCount++;
-      yield message.content;
+    // Override if provided
+    if (options.systemPromptOverride) {
+      systemPrompt = options.systemPromptOverride;
     }
-  }
 
-  // M1: Log warning if no messages were yielded (empty response)
-  if (messageCount === 0) {
-    logger.warn({
-      event: 'agent_empty_response',
+    logger.info({
+      event: 'agent_start',
       userId: options.context.userId,
+      promptLength: systemPrompt.length,
       traceId: options.context.traceId,
-      hint: 'Agent returned no text messages - check if prompt is valid',
+      mcpServers: Object.keys(toolConfig.mcpServers),
     });
-  }
 
-  const duration = Date.now() - startTime;
-  logger.info({
-    event: 'agent_complete',
-    userId: options.context.userId,
-    duration,
-    tokenCount,
-    messageCount,
-    traceId: options.context.traceId,
-    nfr1Met: duration < 3000,
+    trace.update({
+      metadata: {
+        mcpServers: Object.keys(toolConfig.mcpServers),
+        allowedTools: toolConfig.allowedTools,
+      }
+    });
+
+    // Execute agent query
+    const response = query({
+      prompt: userMessage,
+      options: {
+        systemPrompt,
+        mcpServers: toolConfig.mcpServers,
+        settingSources: ['user', 'project'] as const,
+        allowedTools: toolConfig.allowedTools,
+        cwd: process.cwd(),
+      },
+    });
+
+    // Stream responses - yield text and trace tools
+    const chunks: string[] = [];
+    let tokenCount = 0;
+    let messageCount = 0;
+    
+    // We need to yield values from inside the callback
+    // But this is an async function returning Promise, not Generator
+    // So we need to consume the generator here and buffer/yield?
+    // Wait, runOrionAgentDirect is a Generator.
+    // startActiveObservation returns Promise<T>.
+    // If T is AsyncGenerator, we can yield* it.
+    
+    // So we return the generator from this callback
+    return (async function* () {
+        for await (const message of response as AsyncIterable<SDKMessage>) {
+            if (message.type === 'text' && typeof message.content === 'string') {
+              tokenCount += estimateTokens(message.content);
+              messageCount++;
+              chunks.push(message.content);
+              yield message.content;
+            } else if (message.type === 'tool_use' || message.type === 'tool_result') {
+                // Trace tool execution events
+                // Note: Actual detailed tracing of tool duration might require SDK hooks or more complex event handling
+                // For now, we log the event as part of the trace
+                logger.info({
+                    event: message.type,
+                    content: message.content,
+                    traceId: options.context.traceId
+                });
+                
+                // Add tool event to trace metadata or logs
+                // trace.event({ ... }) if supported, or just update metadata
+            }
+        }
+
+        // M1: Log warning if no messages were yielded (empty response)
+        if (messageCount === 0) {
+            logger.warn({
+              event: 'agent_empty_response',
+              userId: options.context.userId,
+              traceId: options.context.traceId,
+              hint: 'Agent returned no text messages - check if prompt is valid',
+            });
+        }
+
+        const duration = Date.now() - startTime;
+        logger.info({
+            event: 'agent_complete',
+            userId: options.context.userId,
+            duration,
+            tokenCount,
+            messageCount,
+            traceId: options.context.traceId,
+            nfr1Met: duration < 3000,
+        });
+        
+        // Update trace with output
+        trace.update({
+            output: {
+                fullResponse: chunks.join(''),
+                tokenCount,
+                messageCount,
+                duration
+            }
+        });
+    })();
   });
 }
 
