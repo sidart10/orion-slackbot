@@ -382,7 +382,7 @@ export async function handleUserMessage({
 
         // Generate and stream response
         // For now, simulate streaming with a placeholder response
-        // Claude Agent SDK integration comes in Story 2.1
+        // Anthropic API integration comes in Story 2.1
         const responseChunks = generatePlaceholderResponse(threadHistory.length);
         
         let fullResponse = '';
@@ -440,7 +440,7 @@ export async function handleUserMessage({
 /**
  * Placeholder response generator
  * Simulates streaming by yielding chunks with delays
- * Will be replaced by Claude Agent SDK in Story 2.1
+ * Will be replaced by Anthropic API in Story 2.1
  */
 async function* generatePlaceholderResponse(contextCount: number): AsyncGenerator<string> {
   const words = [

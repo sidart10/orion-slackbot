@@ -326,7 +326,7 @@ export async function handleUserMessage({
       });
 
       // For now, send acknowledgment response
-      // Claude Agent SDK integration comes in Story 2.1
+      // Anthropic API integration comes in Story 2.1
       const response = `I received your message and have ${threadHistory.length} messages of context. Full agent capabilities coming in the next story!`;
 
       await say({
@@ -557,7 +557,7 @@ Claude Opus 4 (claude-opus-4-20250514)
 - Thread history is fetched from Slack API (stateless pattern per AR29)
 - Thread history pagination implemented — handles threads with >100 messages via cursor
 - Token limiting implemented — stops fetching when ~4000 tokens reached (configurable)
-- Claude Agent SDK integration deferred to Story 2.1 — response includes context count
+- Anthropic API integration deferred to Story 2.1 — response includes context count
 - All three handlers wrapped in Langfuse traces via `startActiveObservation`
 - 88 tests passing (2 skipped for integration tests requiring real credentials)
 - Task 7 (Slack App Configuration) requires manual update in Slack App settings

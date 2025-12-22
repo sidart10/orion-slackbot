@@ -146,7 +146,7 @@ This document provides the complete epic and story breakdown for 2025-12 orion-s
 **From Architecture - Tool Layer**
 - AR14: MCP servers initialize lazily after Claude SDK ready
 - AR15: Tool fallback to code generation when MCP tool doesn't exist
-- AR16: Claude Agent SDK built-in sandbox for code execution
+- AR16: Rube RUBE_REMOTE_WORKBENCH for code execution (Python/bash)
 - AR17: Agent discovers available tools dynamically (minimal tools preloaded in context)
 
 **From Architecture - Error Handling**
@@ -168,7 +168,7 @@ This document provides the complete epic and story breakdown for 2025-12 orion-s
 
 **From Architecture - Memory & Context**
 - AR29: Slack API fetch for thread context (stateless Cloud Run)
-- AR30: Claude Agent SDK compaction for long thread handling
+- AR30: Manual sliding window compaction for long thread handling
 - AR31: File-based persistent memory in `orion-context/`
 - AR32: Langfuse SDK prompt caching (5 min TTL)
 
@@ -311,7 +311,7 @@ So that I can start building Orion with consistent tooling and patterns.
 
 **Given** a new project directory
 **When** I run `pnpm install`
-**Then** all dependencies are installed including @anthropic-ai/claude-agent-sdk, @slack/bolt, @langfuse/client
+**Then** all dependencies are installed including @anthropic-ai/sdk, @slack/bolt, @langfuse/client
 **And** TypeScript compiles without errors via `pnpm build`
 **And** ESLint and Prettier are configured with the architecture's naming conventions
 **And** Vitest is configured and runs with `pnpm test`
@@ -433,7 +433,7 @@ So that code changes are validated and deployed consistently.
 
 Users get verified, accurate responses with source citations and proper context management across long conversations.
 
-### Story 2.1: Claude Agent SDK Integration
+### Story 2.1: Anthropic API Integration
 
 As a *user*,
 I want Orion to respond intelligently to my messages,
@@ -443,7 +443,7 @@ So that I get helpful answers powered by Claude.
 
 **Given** the Slack app is receiving messages
 **When** a user sends a message to Orion
-**Then** the message is passed to the Claude Agent SDK via `query()`
+**Then** the message is passed to Anthropic API via `messages.create()`
 **And** A system prompt is constructed from `.orion/agents/orion.md`
 **And** The response is streamed back to Slack
 **And** The full interaction (input, output, tokens) is traced in Langfuse
@@ -533,7 +533,7 @@ So that complex discussions can continue uninterrupted.
 
 **Given** a conversation exceeds the context window
 **When** the 200k token limit is approached (NFR24)
-**Then** Claude Agent SDK compaction is triggered (AR30)
+**Then** manual sliding window compaction is triggered (AR30)
 **And** Older context is summarized to free up space
 **And** Key information is preserved in the compacted context
 **And** The conversation continues without user interruption
@@ -773,7 +773,7 @@ So that untrusted code cannot harm the system.
 
 **Given** code has been generated
 **When** the sandbox is initialized
-**Then** the Claude Agent SDK built-in sandbox is configured (AR16)
+**Then** Rube RUBE_REMOTE_WORKBENCH is configured for code execution (AR16)
 **And** The sandbox has no filesystem access outside its container
 **And** The sandbox has no network escape capabilities (NFR8)
 **And** Resource limits (CPU, memory, time) are enforced

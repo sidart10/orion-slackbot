@@ -46,24 +46,24 @@ Orion's 43 functional requirements span 7 architectural domains:
 | Uptime | >99.5% | Min 1 instance, health checks |
 | Tool success rate | >98% | Retry logic, fallbacks |
 | Cost per query | <$0.10 | Token optimization, caching |
-| Concurrent users | 50 | Cloud Run auto-scaling |
+| Concurrent users | 50 | Vercel serverless auto-scaling |
 
 **Scale & Complexity:**
 
 - Primary domain: Backend platform with Slack integration
 - Complexity level: Medium-High
 - Estimated architectural components: 8-10 major subsystems
-- Deployment: Google Cloud Run (serverless, HTTP mode)
+- Deployment: Vercel Serverless Functions
 
 ### Technical Constraints & Dependencies
 
 | Constraint | Impact |
 |------------|--------|
-| **Claude Agent SDK (TypeScript)** | Primary agent framework, dictates tool patterns |
+| **Anthropic API (messages.create with tools)** | Direct API calls with tool_use for MCP integration; no subprocess requirements |
 | **LLM provider + model selection** | Must be runtime-configurable (provider + model ID) to avoid hardcoding and enable switching/routing |
 | **Slack Bolt + Assistant API** | HTTP webhooks, streaming, thread management |
-| **MCP 1.0 Protocol** | Standard interface for all external tools |
-| **Cloud Run** | Stateless, auto-scaling; request/response size and request-timeout limits apply |
+| **MCP 1.0 Protocol** | Standard interface for all external tools (Rube/Composio as primary provider) |
+| **Vercel Serverless** | Stateless, auto-scaling; 60s timeout on Pro plan |
 | **Langfuse** | OpenTelemetry integration, prompt management |
 | **Large model context (model-dependent)** | Requires compaction for long threads |
 
@@ -95,7 +95,7 @@ Orion's 43 functional requirements span 7 architectural domains:
 **Rationale:**
 - Research document already defines optimal structure for agentic Slack bots
 - BMAD-inspired file-based agent definitions require specific organization
-- No existing starter matches Claude Agent SDK + Slack Bolt + Langfuse pattern
+- No existing starter matches Anthropic API + Slack Bolt + Langfuse pattern
 - Avoids fighting against starter assumptions designed for web apps
 
 **Project Structure:**
@@ -118,9 +118,9 @@ orion-slack-agent/
 │   │       ├── threadContextChanged.ts
 │   │       └── userMessage.ts
 │   ├── agent/
-│   │   ├── orion.ts                # Claude Agent SDK integration
+│   │   ├── orion.ts                # Anthropic API integration (messages.create with tools)
 │   │   ├── loader.ts               # BMAD-style agent loader
-│   │   └── tools.ts                # Tool/MCP server configurations
+│   │   └── tools.ts                # MCP tool definitions for Claude
 │   └── utils/
 │       └── streaming.ts            # Streaming utilities
 ├── .orion/                         # Agent definitions (BMAD-inspired)
@@ -128,7 +128,7 @@ orion-slack-agent/
 │   ├── workflows/                  # Multi-step workflows
 │   ├── tasks/                      # Reusable tasks
 │   └── config.yaml
-├── .claude/                        # Claude SDK native extensions
+├── .claude/                        # Agent skill and command definitions
 │   ├── skills/                     # Auto-discovered Skills
 │   └── commands/                   # Slash Commands
 ├── orion-context/                  # Agentic search context directory
@@ -147,7 +147,7 @@ orion-slack-agent/
 
 | Category | Decision | Rationale |
 |----------|----------|-----------|
-| **Language** | TypeScript 5.x | Claude Agent SDK primary, type safety |
+| **Language** | TypeScript 5.x | Anthropic SDK + type safety |
 | **Runtime** | Node.js 20 LTS | Long-term support, modern features |
 | **Package Manager** | pnpm | Fast, disk efficient |
 | **Linting** | ESLint + Prettier | Standard, well-supported |
@@ -159,7 +159,7 @@ orion-slack-agent/
 ```json
 {
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "latest",
+    "@anthropic-ai/sdk": "^0.x",
     "@slack/bolt": "^3.x",
     "@langfuse/client": "^4.x",
     "@langfuse/tracing": "^4.x",
@@ -195,7 +195,7 @@ orion-slack-agent/
 ### Decision Priority Analysis
 
 **Critical Decisions (Block Implementation):**
-- Agent execution model (pluggable LLM layer; Claude Agent SDK initially)
+- Agent execution model (pluggable LLM layer; Anthropic API initially)
 - Context management strategy
 - Tool layer architecture
 - Deployment infrastructure
@@ -214,8 +214,8 @@ orion-slack-agent/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Thread Context** | Slack API fetch + LLM provider in-context | Stateless Cloud Run, leverage Slack as source of truth |
-| **Long Thread Handling** | Claude Agent SDK compaction | Built-in, triggers when context fills |
+| **Thread Context** | Slack API fetch + LLM provider in-context | Stateless Vercel serverless, leverage Slack as source of truth |
+| **Long Thread Handling** | Manual sliding window compaction | Truncate oldest messages when context fills |
 | **Persistent Memory** | File-based (`orion-context/`) | Simple, searchable via agentic search, no extra infra |
 | **Prompt Caching** | In-memory cache for Langfuse prompt fetches (TTL configurable) | Reduce prompt-fetch latency and limit API calls |
 | **Model selection** | Config-driven (provider + model ID) | Switch models/providers without code changes; route larger-context tasks to larger-context models |
@@ -245,7 +245,8 @@ orion-slack-agent/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Subagent Execution** | Claude Agent SDK native | SDK manages agent spawning, parallelism via Promise.all |
+| **Agent Execution** | Direct Anthropic API with tool_use | Simple `messages.create()` with streaming, tools exposed as Claude tool definitions |
+| **Subagent Execution** | Sequential or parallel API calls | Parallelism via Promise.all on multiple messages.create calls |
 | **Verification Strategy** | LLM-as-Judge via Langfuse Evals | Langfuse provides eval infrastructure, track quality over time |
 | **Verification Loop** | Rules-based + Langfuse async evals | Fast rules for blocking, LLM evals for quality monitoring |
 
@@ -253,10 +254,10 @@ orion-slack-agent/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **MCP Management** | Lazy initialization, agent tool discovery | Agent discovers available tools, Rube/Composio patterns |
-| **Tool Fallback** | Code generation in sandbox | When MCP tool doesn't exist, agent writes code |
-| **Code Sandbox** | Claude Agent SDK built-in | Native sandbox first, GCP/Modal as upgrade path |
-| **Tool Discovery** | Minimal tools in context | Agent discovers what it needs, not preloaded |
+| **MCP Management** | Rube (Composio) as primary MCP server | 500+ app integrations, includes code execution via RUBE_REMOTE_WORKBENCH |
+| **Tool Exposure** | MCP tools as Claude tool definitions | Convert MCP tool schemas to Anthropic tool format for messages.create() |
+| **Code Execution** | Via Rube RUBE_REMOTE_WORKBENCH | No custom sandbox needed; Rube provides Python/bash execution |
+| **Tool Discovery** | RUBE_SEARCH_TOOLS for dynamic discovery | Agent discovers what it needs at runtime |
 
 **Tool Selection Pattern:**
 
@@ -286,32 +287,32 @@ User Request
 | **Tool Failures** | Graceful degradation | Continue with available tools, inform user |
 | **Retry Strategy** | Exponential backoff (2-3 retries) | Transient failures recovered |
 | **Long Operations** | Progress callbacks + periodic updates | Keep user informed via Slack status |
-| **Timeout** | 4 minutes hard limit | Below Cloud Run default, graceful failure |
+| **Timeout** | 60 seconds | Vercel Pro plan function timeout |
 
 ### Infrastructure & Deployment
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **CI/CD** | GitHub Actions → Cloud Build | Actions for tests, Cloud Build for deploy |
-| **Environments** | Cloud Run revision tags | Simple for single-tenant, `--tag staging` workflow |
-| **Cold Start** | min-instances: 1 | Avoid cold starts for better UX |
-| **Secrets** | GCP Secret Manager | Native integration, no secrets in code |
+| **Platform** | Vercel Pro | Fast serverless, 60s function timeout, simple deploys |
+| **CI/CD** | GitHub Actions + Vercel | Actions for tests, Vercel for automatic deploys |
+| **Environments** | Vercel preview/production | Automatic preview deploys on PR |
+| **Secrets** | Vercel Environment Variables | Dashboard-managed, no secrets in code |
 
 ### Decision Impact Analysis
 
 **Implementation Sequence:**
 1. Project scaffolding (structure, dependencies)
-2. Slack Bolt + Assistant setup
-3. Claude Agent SDK integration
+2. Slack Bolt + event handlers setup
+3. Anthropic API integration (messages.create with streaming)
 4. Langfuse observability
-5. MCP tool layer
+5. MCP tool layer (Rube as primary server)
 6. Agent loop (gather → act → verify)
 7. File-based memory
-8. Cloud Run deployment
+8. Vercel deployment
 
 **Cross-Component Dependencies:**
-- Langfuse must be initialized before Claude SDK (instrumentation first)
-- MCP servers initialize lazily after Claude SDK ready
+- Langfuse must be initialized before Anthropic calls (instrumentation first)
+- MCP servers initialize lazily when first tool call needed
 - Memory layer depends on file structure being in place
 - Verification depends on Langfuse eval infrastructure
 
@@ -375,7 +376,7 @@ src/
 │   ├── app.ts           # Bolt app setup
 │   ├── assistant.ts     # Assistant class
 │   └── handlers/        # Event handlers (one file per handler)
-├── agent/                # Claude Agent SDK integration
+├── agent/                # Anthropic API integration
 │   ├── orion.ts         # Main agent orchestration
 │   ├── loop.ts          # Agent loop implementation
 │   ├── subagents/       # Subagent definitions
@@ -634,7 +635,7 @@ orion-slack-agent/
 │   └── tasks/
 │       ├── verify-response.md             # Verification task
 │       └── format-slack.md                # Slack formatting task
-├── .claude/                               # Claude SDK native extensions
+├── .claude/                               # Agent skill and command definitions
 │   ├── skills/
 │   │   └── search-workspace.md            # Auto-discovered Skills
 │   └── commands/
@@ -663,7 +664,7 @@ orion-slack-agent/
 │   │       ├── thread-context-changed.ts  # Context switch handler
 │   │       └── user-message.ts            # Main message handler
 │   ├── agent/
-│   │   ├── orion.ts                       # Claude Agent SDK integration
+│   │   ├── orion.ts                       # Anthropic API integration
 │   │   ├── loop.ts                        # Agent loop (gather → act → verify)
 │   │   ├── loader.ts                      # BMAD-style agent loader
 │   │   ├── types.ts                       # Agent types
@@ -698,9 +699,10 @@ orion-slack-agent/
 │   │   └── mcp.test.ts                    # MCP integration tests
 │   └── e2e/
 │       └── conversation.test.ts           # End-to-end conversation tests
-├── docker/
-│   └── Dockerfile                         # Production Docker image
-├── docker-compose.yml                     # Local development
+├── api/                                   # Vercel serverless functions
+│   ├── slack.ts                           # Slack webhook handler
+│   └── health.ts                          # Health check endpoint
+├── vercel.json                            # Vercel configuration
 ├── package.json
 ├── pnpm-lock.yaml
 ├── tsconfig.json
@@ -719,7 +721,7 @@ orion-slack-agent/
 | Boundary | Location | Protocol |
 |----------|----------|----------|
 | Slack → Orion | `src/slack/handlers/` | HTTP webhooks, Slack Events API |
-| Orion → LLM Provider | `src/agent/orion.ts` | Provider SDK (Anthropic Claude Agent SDK initially; other providers via adapters) |
+| Orion → LLM Provider | `src/agent/orion.ts` | Anthropic SDK (messages.create with tools); other providers via adapters |
 | Orion → MCP Servers | `src/tools/mcp/client.ts` | MCP 1.0 Protocol (stdio/HTTP) |
 | Orion → Langfuse | `src/observability/` | OpenTelemetry (HTTP) |
 
@@ -777,10 +779,10 @@ orion-slack-agent/
 | System | Integration Point | Connection |
 |--------|-------------------|------------|
 | Slack | `src/slack/app.ts` | Bolt SDK (HTTP mode) |
-| LLM Provider API | `src/agent/orion.ts` | Provider SDK (Anthropic Agent SDK initially) |
+| LLM Provider API | `src/agent/orion.ts` | Anthropic SDK (messages.create) |
 | Langfuse | `src/instrumentation.ts` | OpenTelemetry SDK |
-| MCP Servers | `src/tools/mcp/servers.ts` | Dynamic per-server |
-| GCP Secret Manager | `src/config/environment.ts` | SDK at startup |
+| MCP Servers | `src/tools/mcp/servers.ts` | Dynamic per-server (Rube primary) |
+| Vercel Env Vars | `src/config/environment.ts` | Available at runtime |
 
 **Data Flow:**
 
@@ -851,10 +853,9 @@ pnpm docker:build              # Build Docker image
 
 **Deployment Pipeline:**
 
-1. PR → GitHub Actions (lint + test)
-2. Merge → Cloud Build trigger
-3. Build Docker image → Artifact Registry
-4. Deploy → Cloud Run (revision tag)
+1. PR → GitHub Actions (lint + test) + Vercel preview deploy
+2. Merge → Vercel automatic production deploy
+3. No Docker required — Vercel builds from source
 
 ## Architecture Validation Results
 
@@ -864,10 +865,10 @@ pnpm docker:build              # Build Docker image
 
 | Decision Pair | Status | Assessment |
 |---------------|--------|------------|
-| Claude Agent SDK + Slack Bolt | ✅ Compatible | Both TypeScript, async-native, work together |
+| Anthropic API + Slack Bolt | ✅ Compatible | Both TypeScript, async-native, work together |
 | Langfuse + OpenTelemetry | ✅ Compatible | Langfuse provides OTEL SDK integration |
-| MCP 1.0 + Claude SDK | ✅ Compatible | SDK has native MCP support |
-| Cloud Run + Stateless design | ✅ Compatible | File-based memory with external source of truth (Slack) |
+| MCP 1.0 + Anthropic tools | ✅ Compatible | MCP tools exposed as Claude tool definitions |
+| Vercel + Stateless design | ✅ Compatible | File-based memory with external source of truth (Slack) |
 | pnpm + TypeScript 5.x | ✅ Compatible | Standard modern stack |
 
 **Pattern Consistency:**
@@ -893,7 +894,7 @@ pnpm docker:build              # Build Docker image
 | Agent Core | FR1-6 | ✅ Full | `src/agent/loop.ts`, subagents pattern |
 | Research | FR7-12 | ✅ Full | Research subagent, parallel execution |
 | Communication | FR13-18 | ✅ Full | `src/slack/handlers/`, streaming pattern |
-| Code Execution | FR19-23 | ✅ Full | `src/tools/sandbox/`, Claude SDK built-in |
+| Code Execution | FR19-23 | ✅ Full | Via Rube RUBE_REMOTE_WORKBENCH for Python/bash execution |
 | Extensions | FR24-29 | ✅ Full | MCP layer, `.claude/skills/`, `.claude/commands/` |
 | Knowledge | FR30-34 | ✅ Full | `orion-context/knowledge/`, `.orion/workflows/` |
 | Observability | FR35-40 | ✅ Full | Langfuse integration, tracing pattern |
@@ -908,7 +909,7 @@ pnpm docker:build              # Build Docker image
 | Uptime | >99.5% | ✅ min-instances: 1, health checks |
 | Tool success rate | >98% | ✅ Graceful degradation, retries |
 | Cost per query | <$0.10 | ✅ Prompt caching, token optimization |
-| Concurrent users | 50 | ✅ Cloud Run auto-scaling |
+| Concurrent users | 50 | ✅ Vercel serverless auto-scaling |
 
 ### Implementation Readiness Validation ✅
 
@@ -982,9 +983,10 @@ pnpm docker:build              # Build Docker image
 
 - Clear separation of concerns (Slack → Agent → Tools)
 - Consistent patterns prevent AI agent conflicts
-- Built on production-ready frameworks (Claude SDK, Bolt, Langfuse)
+- Built on production-ready frameworks (Anthropic API, Bolt, Langfuse)
 - Simple memory model with upgrade path
 - Comprehensive observability from day one
+- No complex subprocess/sandbox requirements — direct API calls
 
 **Areas for Future Enhancement:**
 
@@ -1044,7 +1046,7 @@ pnpm init
 
 1. Initialize project using documented structure
 2. Set up development environment per architecture
-3. Implement core architectural foundations (Slack Bolt + Claude SDK + Langfuse)
+3. Implement core architectural foundations (Slack Bolt + Anthropic API + Langfuse)
 4. Build features following established patterns
 5. Maintain consistency with documented rules
 

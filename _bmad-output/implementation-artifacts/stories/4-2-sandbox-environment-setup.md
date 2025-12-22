@@ -10,7 +10,7 @@ So that untrusted code cannot harm the system.
 
 ## Acceptance Criteria
 
-1. **Given** code has been generated, **When** the sandbox is initialized, **Then** the Claude Agent SDK built-in sandbox is configured (AR16)
+1. **Given** code has been generated, **When** the sandbox is initialized, **Then** the Rube RUBE_REMOTE_WORKBENCH built-in sandbox is configured (AR16)
 
 2. **Given** the sandbox is running, **When** filesystem access is attempted, **Then** the sandbox has no filesystem access outside its container
 
@@ -59,7 +59,7 @@ So that untrusted code cannot harm the system.
 
 | Requirement | Source | Description |
 |-------------|--------|-------------|
-| AR16 | architecture.md | Claude Agent SDK built-in sandbox |
+| AR16 | architecture.md | Rube RUBE_REMOTE_WORKBENCH built-in sandbox |
 | NFR8 | prd.md | Network sandboxing |
 
 ### Sandbox Configuration

@@ -110,7 +110,7 @@ So that responses are grounded in real information, not assumptions.
 ### src/agent/loop.ts
 
 ```typescript
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query } from '@anthropic-ai/sdk';
 import { createSpan } from '../observability/tracing.js';
 import { logger } from '../utils/logger.js';
 import { OrionError, ErrorCode } from '../utils/errors.js';
@@ -602,7 +602,7 @@ user-message-handler (trace)
 
 ### Previous Story Intelligence
 
-From Story 2-1 (Claude Agent SDK):
+From Story 2-1 (Anthropic API):
 - `runOrionAgent()` exists but needs to integrate with loop
 - `loadAgentPrompt()` available for system prompts
 - Agent context structure defined

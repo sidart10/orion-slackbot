@@ -10,7 +10,7 @@ So that complex discussions can continue uninterrupted.
 
 ## Acceptance Criteria
 
-1. **Given** a conversation exceeds the context window, **When** the 200k token limit is approached (NFR24), **Then** Claude Agent SDK compaction is triggered (AR30)
+1. **Given** a conversation exceeds the context window, **When** the 200k token limit is approached (NFR24), **Then** Anthropic API compaction is triggered (AR30)
 
 2. **Given** compaction is triggered, **When** summarization runs, **Then** older context is summarized to free up space
 
@@ -63,7 +63,7 @@ So that complex discussions can continue uninterrupted.
 | Requirement | Source | Description |
 |-------------|--------|-------------|
 | NFR24 | prd.md | Support 200k token context window |
-| AR30 | architecture.md | Claude Agent SDK compaction for long threads |
+| AR30 | architecture.md | Anthropic API compaction for long threads |
 
 ### src/agent/compaction.ts
 

@@ -10,7 +10,7 @@ So that I can start building Orion with consistent tooling and patterns.
 
 ## Acceptance Criteria
 
-1. **Given** a new project directory, **When** I run `pnpm install`, **Then** all dependencies are installed including @anthropic-ai/claude-agent-sdk, @slack/bolt, @langfuse/client
+1. **Given** a new project directory, **When** I run `pnpm install`, **Then** all dependencies are installed including @anthropic-ai/sdk, @slack/bolt, @langfuse/client
 
 2. **Given** dependencies are installed, **When** I run `pnpm build`, **Then** TypeScript compiles without errors
 
@@ -82,7 +82,7 @@ So that I can start building Orion with consistent tooling and patterns.
 
 ```json
 {
-  "@anthropic-ai/claude-agent-sdk": "latest",
+  "@anthropic-ai/sdk": "latest",
   "@slack/bolt": "^3.x",
   "@langfuse/client": "^4.x",
   "@langfuse/tracing": "^4.x",

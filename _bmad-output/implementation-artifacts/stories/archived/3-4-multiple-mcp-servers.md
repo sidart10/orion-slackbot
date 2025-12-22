@@ -1,6 +1,8 @@
 # Story 3.4: Multiple MCP Servers
 
-Status: ready-for-dev
+Status: cancelled
+Cancellation Date: 2025-12-21
+Cancellation Reason: SDK handles multi-server natively; orion.ts already passes mcpServers to query()
 
 ## Story
 
@@ -15,7 +17,7 @@ So that complex tasks can be completed in one interaction.
 | 3.1 MCP Client Infrastructure | required | MCP server configuration and connection |
 | 3.2 Tool Discovery & Registration | required | Tool registry tracking which server provides each tool |
 | 3.3 Tool Execution with Timeout | required | `executeToolWithTimeout()` for individual tool calls |
-| 2.1 Anthropic API Integration | required | `query()` function with `mcpServers` configuration |
+| 2.1 Claude Agent SDK Integration | required | `query()` function with `mcpServers` configuration |
 | 1.2 Langfuse Instrumentation | ✅ done | Tracing for parallel execution |
 
 ## Acceptance Criteria
@@ -85,7 +87,7 @@ So that complex tasks can be completed in one interaction.
 
 ### Claude SDK Handles Multi-Server Natively
 
-The Anthropic API supports multiple MCP servers in the `mcpServers` configuration. When you pass multiple servers:
+The Claude Agent SDK supports multiple MCP servers in the `mcpServers` configuration. When you pass multiple servers:
 
 ```typescript
 const response = query({

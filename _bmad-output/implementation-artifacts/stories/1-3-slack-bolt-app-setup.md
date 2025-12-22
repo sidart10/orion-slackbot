@@ -148,7 +148,7 @@ export async function handleUserMessage({
       });
 
       // Simple acknowledgment for now
-      // Will be replaced with Claude Agent SDK in Story 2.1
+      // Will be replaced with Anthropic API in Story 2.1
       const response = 'Orion received your message. Full agent capabilities coming soon!';
 
       await say({

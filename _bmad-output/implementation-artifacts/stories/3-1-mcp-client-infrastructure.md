@@ -5,7 +5,7 @@ Status: ready-for-dev
 ## Story
 
 As a **developer**,
-I want a robust MCP integration layer that connects Claude Agent SDK to external tool servers,
+I want a robust MCP integration layer that connects Anthropic API to external tool servers,
 So that Orion can use external tools via the Model Context Protocol.
 
 ## Dependencies
@@ -14,12 +14,12 @@ So that Orion can use external tools via the Model Context Protocol.
 |-------|--------|-------------------------------|
 | 1.1 Project Scaffolding | ✅ done | Project structure, `.orion/config.yaml` exists |
 | 1.2 Langfuse Instrumentation | ✅ done | Tracing infrastructure for MCP operations |
-| 2.1 Claude Agent SDK Integration | required | `query()` function working, system prompt loading |
+| 2.1 Anthropic API Integration | required | `query()` function working, system prompt loading |
 | 2.2 Agent Loop Implementation | required | Agent loop in place to invoke MCP tools |
 
 ## Acceptance Criteria
 
-1. **Given** the Claude Agent SDK is integrated (Story 2.1), **When** the application initializes, **Then** MCP server configurations are loaded from `.orion/config.yaml` and passed to `query()` options
+1. **Given** the Anthropic API is integrated (Story 2.1), **When** the application initializes, **Then** MCP server configurations are loaded from `.orion/config.yaml` and passed to `query()` options
 
 2. **Given** MCP servers are configured, **When** a query is executed, **Then** the Claude SDK automatically discovers available tools from connected MCP servers
 
@@ -91,10 +91,10 @@ So that Orion can use external tools via the Model Context Protocol.
 
 ### Critical: Claude SDK Native MCP Support
 
-**DO NOT build a custom MCP client.** The Claude Agent SDK has **native MCP support** via the `mcpServers` option in `query()`.
+**DO NOT build a custom MCP client.** The Anthropic API has **native MCP support** via the `mcpServers` option in `query()`.
 
 ```typescript
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query } from '@anthropic-ai/sdk';
 
 const response = query({
   prompt: userMessage,
@@ -362,7 +362,7 @@ import { getMcpServersConfig } from '../tools/mcp/config.js';
 import type { ClaudeSdkMcpConfig } from '../tools/mcp/types.js';
 
 /**
- * Tool configuration for Claude Agent SDK
+ * Tool configuration for Anthropic API
  * 
  * MCP servers are loaded from .orion/config.yaml (lazy initialization per AR14)
  * Only enabled servers are included in the config
@@ -394,7 +394,7 @@ export function getToolConfig(): ToolConfig {
 
 ```typescript
 // In the query() call, add MCP configuration:
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query } from '@anthropic-ai/sdk';
 import { getToolConfig } from './tools.js';
 import { startActiveObservation } from '@langfuse/tracing';
 

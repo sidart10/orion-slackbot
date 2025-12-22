@@ -1,4 +1,4 @@
-# Story 2.1: Claude Agent SDK Integration
+# Story 2.1: Anthropic API Integration
 
 Status: ready-for-dev
 
@@ -10,7 +10,7 @@ So that I get helpful answers powered by Claude.
 
 ## Acceptance Criteria
 
-1. **Given** the Slack app is receiving messages, **When** a user sends a message to Orion, **Then** the message is passed to the Claude Agent SDK via `query()`
+1. **Given** the Slack app is receiving messages, **When** a user sends a message to Orion, **Then** the message is passed to Anthropic API via `messages.create()` with streaming
 
 2. **Given** a message is being processed, **When** the agent is initialized, **Then** a system prompt is constructed from `.orion/agents/orion.md`
 
@@ -24,10 +24,10 @@ So that I get helpful answers powered by Claude.
 
 - [ ] **Task 1: Create Agent Core Module** (AC: #1)
   - [ ] Create `src/agent/orion.ts` with `runOrionAgent()` function
-  - [ ] Import `query` from `@anthropic-ai/claude-agent-sdk`
-  - [ ] Configure `query()` with prompt and options
+  - [ ] Import `Anthropic` from `@anthropic-ai/sdk`
+  - [ ] Configure `messages.create()` with streaming
   - [ ] Return AsyncGenerator of agent messages
-  - [ ] Handle streaming responses
+  - [ ] Handle streaming responses with tool_use support
 
 - [ ] **Task 2: Create Agent Loader** (AC: #2)
   - [ ] Create `src/agent/loader.ts`
@@ -44,9 +44,9 @@ So that I get helpful answers powered by Claude.
 
 - [ ] **Task 4: Create Tool Configuration** (AC: #1)
   - [ ] Create `src/agent/tools.ts`
-  - [ ] Configure MCP servers (Rube/Composio placeholder)
-  - [ ] Configure allowed tools list
-  - [ ] Export `toolConfig` for use in `query()`
+  - [ ] Define MCP tool schemas for Anthropic tool format
+  - [ ] Configure Rube MCP server connection
+  - [ ] Export tool definitions for `messages.create()`
 
 - [ ] **Task 5: Integrate with User Message Handler** (AC: #1, #3)
   - [ ] Update `src/slack/handlers/user-message.ts`
@@ -76,19 +76,25 @@ So that I get helpful answers powered by Claude.
 | NFR1 | prd.md | Response time 1-3s for simple queries |
 | AR21-23 | architecture.md | Slack mrkdwn formatting, no blockquotes, no emojis |
 
-### Claude Agent SDK `query()` Function
+### Anthropic API `messages.create()` with Streaming
 
 ```typescript
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import Anthropic from '@anthropic-ai/sdk';
 
-const response = query({
-  prompt: string | AsyncIterable<SDKUserMessage>,
-  options?: Options
+const anthropic = new Anthropic();
+
+const stream = await anthropic.messages.stream({
+  model: 'claude-sonnet-4-20250514',
+  max_tokens: 8192,
+  system: systemPrompt,
+  messages: [...threadHistory, { role: 'user', content: userMessage }],
+  tools: mcpToolDefinitions,  // Optional: MCP tools as Claude tool format
 });
 
-// Returns AsyncGenerator<SDKMessage, void>
-for await (const message of response) {
-  // Handle streaming messages
+for await (const event of stream) {
+  if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+    yield event.delta.text;
+  }
 }
 ```
 
@@ -96,25 +102,27 @@ for await (const message of response) {
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `systemPrompt` | `string` | Custom system prompt for the agent |
-| `mcpServers` | `Record<string, McpServerConfig>` | MCP server configurations |
-| `allowedTools` | `string[]` | List of allowed tool names |
-| `settingSources` | `['user', 'project']` | Enable Skills from filesystem |
-| `cwd` | `string` | Working directory for file access |
-| `maxTurns` | `number` | Maximum conversation turns |
-| `maxBudgetUsd` | `number` | Maximum budget in USD |
+| `model` | `string` | Model ID (e.g., 'claude-sonnet-4-20250514') |
+| `system` | `string` | System prompt for the agent |
+| `messages` | `Message[]` | Conversation history including current message |
+| `tools` | `Tool[]` | Tool definitions for Claude to use |
+| `max_tokens` | `number` | Maximum tokens in response |
+| `stream` | `boolean` | Enable streaming (use `.stream()` helper) |
 
 ### src/agent/orion.ts
 
 ```typescript
-import { query, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import { loadAgentPrompt } from './loader.js';
-import { toolConfig } from './tools.js';
 import { getPrompt } from '../observability/langfuse.js';
 import { logger } from '../utils/logger.js';
+import { config } from '../config/environment.js';
+
+// Initialize Anthropic client (uses ANTHROPIC_API_KEY env var)
+const anthropic = new Anthropic();
 
 export interface AgentContext {
-  threadHistory: string[];
+  threadHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
   userId: string;
   channelId: string;
   traceId?: string;
@@ -142,9 +150,7 @@ export async function* runOrionAgent(
   let systemPrompt: string;
   try {
     const promptObj = await getPrompt('orion-system-prompt');
-    systemPrompt = promptObj.compile({
-      threadHistory: options.context.threadHistory.join('\n'),
-    });
+    systemPrompt = promptObj.compile({});
   } catch (error) {
     logger.warn({
       event: 'langfuse_prompt_fallback',
@@ -165,40 +171,48 @@ export async function* runOrionAgent(
     traceId: options.context.traceId,
   });
 
-  // Execute agent query
-  const response = query({
-    prompt: userMessage,
-    options: {
-      systemPrompt,
-      mcpServers: toolConfig.mcpServers,
-      settingSources: ['user', 'project'],  // Enable Skills
-      allowedTools: toolConfig.allowedTools,
-      cwd: process.cwd(),  // Enable file access for agentic search
-    }
+  // Build messages array from thread history + current message
+  const messages: Anthropic.MessageParam[] = [
+    ...options.context.threadHistory,
+    { role: 'user', content: userMessage },
+  ];
+
+  // Execute streaming API call
+  const stream = await anthropic.messages.stream({
+    model: config.anthropicModel || 'claude-sonnet-4-20250514',
+    max_tokens: 8192,
+    system: systemPrompt,
+    messages,
+    // tools: [], // MCP tools added in Story 3.1
   });
 
   // Stream responses
   let tokenCount = 0;
-  for await (const message of response) {
-    if (message.type === 'text') {
-      tokenCount += estimateTokens(message.content);
-      yield message.content;
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && 
+        event.delta.type === 'text_delta') {
+      tokenCount += estimateTokens(event.delta.text);
+      yield event.delta.text;
     }
   }
 
+  // Get final message for token usage
+  const finalMessage = await stream.finalMessage();
+  
   const duration = Date.now() - startTime;
   logger.info({
     event: 'agent_complete',
     userId: options.context.userId,
     duration,
-    tokenCount,
+    inputTokens: finalMessage.usage.input_tokens,
+    outputTokens: finalMessage.usage.output_tokens,
     traceId: options.context.traceId,
     nfr1Met: duration < 3000,  // NFR1: 1-3 seconds
   });
 }
 
 /**
- * Rough token estimate for logging
+ * Rough token estimate for logging during streaming
  */
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -315,53 +329,36 @@ export function clearAgentCache(): void {
 ### src/agent/tools.ts
 
 ```typescript
-import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 
-export interface ToolConfig {
-  mcpServers: Record<string, McpServerConfig>;
-  allowedTools: string[];
-}
+// Tool definitions for Claude's tool_use capability
+// MCP tools will be added dynamically in Story 3.1
+export type ToolDefinition = Anthropic.Tool;
 
 /**
- * Tool configuration for Orion agent
+ * Get tool definitions for the Orion agent
  * 
- * MCP servers are lazily initialized by the Claude SDK
- * Tools are discovered at runtime via MCP protocol
+ * Initially empty - MCP tools added in Story 3.1 via Rube
+ * The Rube MCP server provides 500+ app integrations including:
+ * - RUBE_SEARCH_TOOLS: Discover available tools
+ * - RUBE_MULTI_EXECUTE_TOOL: Execute tools in parallel  
+ * - RUBE_REMOTE_WORKBENCH: Python/bash code execution
+ * - RUBE_MANAGE_CONNECTIONS: Connect to apps (GitHub, Slack, etc.)
  */
-export const toolConfig: ToolConfig = {
-  mcpServers: {
-    // Rube (Composio) for 500+ app integrations
-    // TODO: Enable in Story 3.1 (MCP Client Infrastructure)
-    // rube: {
-    //   command: 'npx',
-    //   args: ['-y', '@composio/mcp', 'start']
-    // },
-  },
+export function getToolDefinitions(): ToolDefinition[] {
+  // TODO: Load MCP tools dynamically in Story 3.1
+  return [];
+}
 
-  // Allowed tools for agent
-  // Start minimal, expand as needed
-  allowedTools: [
-    'Read',      // Read files
-    'Write',     // Write files
-    'Bash',      // Execute commands
-    // 'mcp',    // MCP tools (enabled in Story 3.1)
-    // 'Skill',  // Skills (enabled in Story 7.1)
-  ],
+/**
+ * Rube MCP server configuration
+ * Used when spawning the MCP server process
+ */
+export const rubeMcpConfig = {
+  command: 'npx',
+  args: ['-y', '@composio/mcp', 'start'],
+  description: '500+ app integrations via Composio',
 };
-
-/**
- * Get MCP server configuration by name
- */
-export function getMcpServer(name: string): McpServerConfig | undefined {
-  return toolConfig.mcpServers[name];
-}
-
-/**
- * Check if a tool is allowed
- */
-export function isToolAllowed(toolName: string): boolean {
-  return toolConfig.allowedTools.includes(toolName);
-}
 ```
 
 ### .orion/agents/orion.md
@@ -572,9 +569,9 @@ export async function handleUserMessage({
 orion-slack-agent/
 ├── src/
 │   ├── agent/
-│   │   ├── orion.ts                # Claude Agent SDK integration
+│   │   ├── orion.ts                # Anthropic API integration
 │   │   ├── loader.ts               # BMAD-style agent loader
-│   │   └── tools.ts                # Tool/MCP configurations
+│   │   └── tools.ts                # Tool definitions for Claude
 │   ├── slack/
 │   │   └── handlers/
 │   │       └── user-message.ts     # Updated with agent integration
@@ -592,15 +589,14 @@ orion-slack-agent/
 |--------|--------|-------------|
 | Response time (simple) | 1-3 seconds (NFR1) | Total trace duration |
 | Time to first token | < 500ms (NFR4) | Stream start time |
-| Token estimation | Logged per request | `estimateTokens()` |
+| Token usage | Logged per request | `finalMessage.usage` |
 
 ### References
 
-- [Source: _bmad-output/epics.md#Story 2.1: Claude Agent SDK Integration] — Original story definition
+- [Source: _bmad-output/epics.md#Story 2.1: Anthropic API Integration] — Original story definition
 - [Source: _bmad-output/architecture.md#Agent Layer] — Agent architecture
-- [Source: technical-research#2.2 Core API: query() Function] — SDK API reference
-- [Source: technical-research#2.3 Key Configuration Options] — Configuration options
-- [External: Claude Agent SDK Documentation](https://code.claude.com/docs/en/sdk/sdk-typescript)
+- [External: Anthropic SDK TypeScript](https://github.com/anthropics/anthropic-sdk-typescript)
+- [External: Messages API Reference](https://docs.anthropic.com/en/api/messages)
 
 ### Previous Story Intelligence
 
@@ -622,11 +618,11 @@ From Story 1-5 (Response Streaming):
 
 ### Completion Notes List
 
-- The Claude Agent SDK may have slightly different API than documented — verify against latest SDK version
-- MCP servers are disabled initially — enabled in Story 3.1
-- Skills are disabled initially — enabled in Story 7.1
+- Uses direct Anthropic API (`messages.create()`) for low latency in serverless
+- No subprocess spawning — direct HTTP calls to Anthropic
+- MCP tools disabled initially — added in Story 3.1 via Rube
 - Langfuse prompt fetching has a fallback to local file
-- Token counting is rough estimate — actual counts come from API response
+- Actual token counts available from `finalMessage.usage`
 
 ### File List
 
