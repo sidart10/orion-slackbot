@@ -20,6 +20,7 @@
 export const ErrorCode = {
   AGENT_TIMEOUT: 'AGENT_TIMEOUT',
   TOOL_TIMEOUT: 'TOOL_TIMEOUT',
+  TOOL_FAILED: 'TOOL_FAILED',
   CONTEXT_LIMIT: 'CONTEXT_LIMIT',
   VERIFICATION_FAILED: 'VERIFICATION_FAILED',
   MCP_CONNECTION_ERROR: 'MCP_CONNECTION_ERROR',
@@ -82,6 +83,8 @@ const USER_MESSAGES: Record<ErrorCodeType, string> = {
     "I'm taking longer than expected. Please try again in a moment, or try a simpler question.",
   TOOL_TIMEOUT:
     "One of my tools is taking too long. I'll try a different approach. If this persists, try again shortly.",
+  TOOL_FAILED:
+    "One of my tools had trouble completing. I'll continue with other available tools.",
   CONTEXT_LIMIT:
     "This conversation has gotten quite long. Start a new thread to continue with fresh context.",
   VERIFICATION_FAILED:
@@ -122,6 +125,7 @@ const USER_MESSAGES: Record<ErrorCodeType, string> = {
  */
 const RECOVERABLE_CODES: ErrorCodeType[] = [
   'TOOL_TIMEOUT',
+  'TOOL_FAILED',
   'MCP_CONNECTION_ERROR',
   'SLACK_API_ERROR',
   'LLM_API_ERROR',
