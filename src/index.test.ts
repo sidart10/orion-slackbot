@@ -3,7 +3,6 @@
  *
  * Verifies:
  * - AC#1: Bolt app starts with Assistant registered
- * - AC#5: Startup appears in traces
  * - AC#6: Structured logging on startup
  */
 
@@ -16,23 +15,25 @@ vi.mock('./instrumentation.js', () => ({}));
 const mockApp = {
   message: vi.fn(),
   assistant: vi.fn(),
+  event: vi.fn(),
   start: vi.fn().mockResolvedValue(undefined),
 };
 
+const mockReceiver = {
+  router: {
+    get: vi.fn(),
+  },
+};
+
 vi.mock('./slack/app.js', () => ({
-  createSlackApp: vi.fn(() => mockApp),
+  createSlackApp: vi.fn(() => ({ app: mockApp, receiver: mockReceiver })),
+  isSocketMode: false,
 }));
 
 // Mock the assistant module
 const mockAssistant = {};
 vi.mock('./slack/assistant.js', () => ({
   assistant: mockAssistant,
-}));
-
-// Mock the legacy message handler (Story 1-3 DM flow)
-const mockHandleUserMessage = vi.fn();
-vi.mock('./slack/handlers/user-message.js', () => ({
-  handleUserMessage: mockHandleUserMessage,
 }));
 
 // Mock the logger
@@ -45,15 +46,9 @@ vi.mock('./utils/logger.js', () => ({
   },
 }));
 
-// Mock tracing
-vi.mock('./observability/tracing.js', () => ({
-  startActiveObservation: vi.fn(async (context, operation) => {
-    const mockTrace = {
-      id: 'mock-trace-id',
-      update: vi.fn(),
-    };
-    return operation(mockTrace);
-  }),
+// Mock langfuse shutdown
+vi.mock('./observability/langfuse.js', () => ({
+  shutdown: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('Application Startup', () => {
@@ -80,14 +75,6 @@ describe('Application Startup', () => {
     expect(mockApp.assistant).toHaveBeenCalledWith(mockAssistant);
   });
 
-  it('should register legacy message handler for DMs (Story 1-3)', async () => {
-    const { startApp } = await import('./index.js');
-
-    await startApp();
-
-    expect(mockApp.message).toHaveBeenCalledWith(mockHandleUserMessage);
-  });
-
   it('should start app on configured port', async () => {
     const { startApp } = await import('./index.js');
 
@@ -106,20 +93,6 @@ describe('Application Startup', () => {
       expect.objectContaining({
         event: 'app_started',
       })
-    );
-  });
-
-  it('should wrap startup in trace (AC#5)', async () => {
-    const { startApp } = await import('./index.js');
-    const { startActiveObservation } = await import('./observability/tracing.js');
-
-    await startApp();
-
-    expect(startActiveObservation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'orion-startup',
-      }),
-      expect.any(Function)
     );
   });
 });

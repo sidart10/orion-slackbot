@@ -3,9 +3,9 @@
 
 name: orion
 version: 0.1.0
-description: AI-powered Slack assistant built with Claude Agent SDK
+description: AI-powered Slack assistant built with the Anthropic Messages API (tool_use + streaming)
 
-# Model configuration (used by Claude Agent SDK)
+# Model configuration (used by Orion’s direct Anthropic client)
 model:
   provider: anthropic
   default: claude-sonnet-4-20250514

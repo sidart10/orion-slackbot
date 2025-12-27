@@ -9,12 +9,16 @@ vi.mock('langfuse', () => {
   });
   const mockFlushAsync = vi.fn().mockResolvedValue(undefined);
   const mockShutdownAsync = vi.fn().mockResolvedValue(undefined);
+  const mockScore = vi.fn();
+  const mockEvent = vi.fn();
 
   return {
     Langfuse: vi.fn().mockImplementation(() => ({
       trace: mockTrace,
       flushAsync: mockFlushAsync,
       shutdownAsync: mockShutdownAsync,
+      score: mockScore,
+      event: mockEvent,
     })),
   };
 });
@@ -72,6 +76,8 @@ describe('langfuse singleton', () => {
     vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test');
     vi.stubEnv('SLACK_SIGNING_SECRET', 'test-secret');
     vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
+    vi.stubEnv('ANTHROPIC_MODEL', 'claude-sonnet-4-20250514');
+    vi.stubEnv('GCS_MEMORIES_BUCKET', 'test-bucket');
 
     // The langfuse module imports config from environment.ts, which validates on import
     await expect(import('./langfuse.js')).rejects.toThrow(
@@ -130,5 +136,111 @@ describe('langfuse singleton', () => {
     const { getLangfuse, shutdown } = await import('./langfuse.js');
     getLangfuse();
     await shutdown();
+  });
+});
+
+describe('getPrompt', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', '');
+    vi.stubEnv('LANGFUSE_SECRET_KEY', '');
+  });
+
+  afterEach(async () => {
+    const { _resetForTesting } = await import('./langfuse.js');
+    _resetForTesting();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('should export getPrompt function', async () => {
+    const { getPrompt } = await import('./langfuse.js');
+    expect(getPrompt).toBeDefined();
+    expect(typeof getPrompt).toBe('function');
+  });
+
+  it('should throw error when Langfuse client not available for prompt fetching', async () => {
+    const { getPrompt, _resetForTesting } = await import('./langfuse.js');
+    _resetForTesting();
+
+    // With noop client (no getPrompt method), should throw
+    await expect(getPrompt('orion-system-prompt')).rejects.toThrow(
+      'Langfuse client not available for prompt fetching'
+    );
+  });
+});
+
+describe('logFeedbackScore', () => {
+  // These tests run without Langfuse credentials (noop mode) to test the function logic
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', '');
+    vi.stubEnv('LANGFUSE_SECRET_KEY', '');
+  });
+
+  afterEach(async () => {
+    const { _resetForTesting } = await import('./langfuse.js');
+    _resetForTesting();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('should export logFeedbackScore function', async () => {
+    const { logFeedbackScore } = await import('./langfuse.js');
+    expect(logFeedbackScore).toBeDefined();
+    expect(typeof logFeedbackScore).toBe('function');
+  });
+
+  it('should return scored:true when traceId is provided (noop client)', async () => {
+    const { logFeedbackScore, _resetForTesting } = await import('./langfuse.js');
+    _resetForTesting();
+
+    const result = await logFeedbackScore({
+      isPositive: true,
+      traceId: 'trace-123',
+      userId: 'U123',
+      channelId: 'C456',
+      messageTs: '1234.5678',
+    });
+
+    // With noop client, score method exists and is called, returning scored:true
+    expect(result.scored).toBe(true);
+    expect(result.orphan).toBe(false);
+  });
+
+  it('should return orphan:true when traceId is null', async () => {
+    const { logFeedbackScore, _resetForTesting } = await import('./langfuse.js');
+    _resetForTesting();
+
+    const result = await logFeedbackScore({
+      isPositive: true,
+      traceId: null,
+      userId: 'U123',
+      channelId: 'C456',
+      messageTs: '1234.5678',
+    });
+
+    expect(result.scored).toBe(false);
+    expect(result.orphan).toBe(true);
+  });
+
+  it('should include metadata in the result', async () => {
+    const { logFeedbackScore, _resetForTesting } = await import('./langfuse.js');
+    _resetForTesting();
+
+    const result = await logFeedbackScore({
+      isPositive: false,
+      traceId: 'trace-456',
+      userId: 'U999',
+      channelId: 'C888',
+      messageTs: '9999.1111',
+      teamId: 'T777',
+    });
+
+    expect(result.metadata).toBeDefined();
+    expect(result.metadata.userId).toBe('U999');
+    expect(result.metadata.channelId).toBe('C888');
   });
 });

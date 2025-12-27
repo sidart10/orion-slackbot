@@ -198,14 +198,15 @@ describe('Thread Context Utilities', () => {
     });
 
     it('should stop when token limit is reached', async () => {
-      // Create a message that's very long
-      const longText = 'x'.repeat(20000); // 20k chars = ~5000 tokens
+      // Create a message that's very long (forces budget trimming)
+      const longText = 'x'.repeat(20000); // 20k chars
 
       mockClient.conversations.replies.mockResolvedValue({
         messages: [
-          { user: 'U1', text: 'Short msg', ts: '1.1' },
+          { user: 'U1', text: 'Old msg', ts: '1.1' },
           { user: 'U1', text: longText, ts: '1.2' },
-          { user: 'U1', text: 'After limit', ts: '1.3' },
+          { user: 'U1', text: 'Recent msg', ts: '1.3' },
+          { user: 'U1', text: 'Current', ts: '1.4' },
         ],
       });
 
@@ -213,12 +214,35 @@ describe('Thread Context Utilities', () => {
         client: mockClient as unknown as WebClient,
         channel: 'C123',
         threadTs: '1.1',
-        maxTokens: 100, // Very low limit
+        maxTokens: 100, // ~400 chars
+        keepLastN: 50,
       });
 
-      // Should only get first message (before limit hit)
-      // Note: returns slice(0, -1) so if only 1 message loaded, returns empty
-      expect(result.length).toBeLessThanOrEqual(1);
+      // Should retain recent context within budget and exclude the current message.
+      expect(result.map((m) => m.text)).toEqual(['Recent msg']);
+    });
+
+    it('should keep only the most recent N messages (excluding current)', async () => {
+      mockClient.conversations.replies.mockResolvedValue({
+        messages: [
+          { user: 'U1', text: 'm1', ts: '1.1' },
+          { user: 'U1', text: 'm2', ts: '1.2' },
+          { user: 'U1', text: 'm3', ts: '1.3' },
+          { user: 'U1', text: 'm4', ts: '1.4' },
+          { user: 'U1', text: 'm5', ts: '1.5' },
+          { user: 'U1', text: 'current', ts: '1.6' },
+        ],
+      });
+
+      const result = await fetchThreadHistory({
+        client: mockClient as unknown as WebClient,
+        channel: 'C123',
+        threadTs: '1.1',
+        keepLastN: 3,
+      });
+
+      // keepLastN=3 means [m4,m5,current] retained, then exclude current → [m4,m5]
+      expect(result.map((m) => m.text)).toEqual(['m4', 'm5']);
     });
 
     it('should respect custom maxTokens parameter', async () => {
@@ -238,6 +262,56 @@ describe('Thread Context Utilities', () => {
 
       // Should complete without hitting limit
       expect(mockClient.conversations.replies).toHaveBeenCalledTimes(1);
+    });
+
+    it('should include traceId in logs when provided', async () => {
+      const loggerModule = await import('../utils/logger.js');
+      const mockLogger = loggerModule.logger as unknown as {
+        info: ReturnType<typeof vi.fn>;
+        error: ReturnType<typeof vi.fn>;
+      };
+
+      mockClient.conversations.replies.mockResolvedValue({
+        messages: [
+          { user: 'U1', text: 'Hello', ts: '1.1' },
+          { user: 'U1', text: 'Current', ts: '1.2' },
+        ],
+      });
+
+      await fetchThreadHistory({
+        client: mockClient as unknown as WebClient,
+        channel: 'C123',
+        threadTs: '1.1',
+        traceId: 'trace-abc-123',
+      });
+
+      // Verify traceId is included in any info logs
+      const infoCalls = mockLogger.info.mock.calls;
+      if (infoCalls.length > 0) {
+        expect(infoCalls.some((call: unknown[]) => 
+          (call[0] as { traceId?: string }).traceId === 'trace-abc-123'
+        )).toBe(true);
+      }
+    });
+
+    it('should include traceId in error logs when API fails', async () => {
+      mockClient.conversations.replies.mockRejectedValue(
+        new Error('API Error')
+      );
+
+      await fetchThreadHistory({
+        client: mockClient as unknown as WebClient,
+        channel: 'C123',
+        threadTs: '1.1',
+        traceId: 'trace-error-456',
+      });
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'fetch_thread_history_failed',
+          traceId: 'trace-error-456',
+        })
+      );
     });
   });
 

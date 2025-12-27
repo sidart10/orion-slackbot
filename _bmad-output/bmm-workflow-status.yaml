@@ -22,7 +22,7 @@ workflow_status:
 
   # Phase 1: Planning
   prd: "_bmad-output/prd.md"
-  create-ux-design: conditional
+  create-ux-design: "_bmad-output/ux-design-specification.md"
 
   # Phase 2: Solutioning
   create-architecture: "_bmad-output/architecture.md"

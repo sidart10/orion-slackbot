@@ -10,6 +10,7 @@
 
 import { Langfuse } from 'langfuse';
 import { config } from '../config/environment.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Langfuse-like interface for tracing operations.
@@ -36,6 +37,9 @@ export interface LangfuseLike {
   }) => LangfuseTrace;
   flushAsync: () => Promise<void>;
   shutdownAsync: () => Promise<void>;
+  // Feedback scoring methods - optional since noop client doesn't implement them
+  score?: (data: Record<string, unknown>) => void;
+  event?: (data: Record<string, unknown>) => void;
 }
 
 // Singleton instance
@@ -56,25 +60,21 @@ function createNoopLangfuse(): LangfuseLike {
     trace: (): LangfuseTrace => noopTrace,
     flushAsync: async (): Promise<void> => {},
     shutdownAsync: async (): Promise<void> => {},
+    score: (): void => {},
+    event: (): void => {},
   };
 }
 
-// Structured logging helper per AR12
 function logStructured(
   level: 'debug' | 'info' | 'warn' | 'error',
   event: string,
   data?: Record<string, unknown>
 ): void {
-  const fn = level === 'warn' ? console.warn : console.log;
-  fn(
-    JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level,
-      event,
-      service: 'orion-slack-agent',
-      ...data,
-    })
-  );
+  logger[level]({
+    event,
+    service: 'orion-slack-agent',
+    ...data,
+  });
 }
 
 /**
@@ -119,6 +119,55 @@ export function getLangfuse(): LangfuseLike | null {
   });
 
   return langfuseInstance;
+}
+
+/**
+ * Prompt object returned from Langfuse.
+ */
+export interface LangfusePrompt {
+  /** Compile the prompt with variables */
+  compile: (variables: Record<string, string>) => string;
+  /** Raw prompt content */
+  prompt: string;
+  /** Prompt name */
+  name: string;
+  /** Prompt version */
+  version?: number;
+}
+
+/**
+ * Get a prompt from Langfuse by name.
+ *
+ * Fetches the prompt from Langfuse prompt management.
+ * Falls back to throwing an error if not found (caller should handle fallback).
+ *
+ * @param name - Prompt name in Langfuse
+ * @returns Prompt object with compile() method
+ * @throws Error if prompt not found or Langfuse not configured
+ *
+ * @see Story 2.1 - AC#4 - System prompt can be fetched from Langfuse
+ */
+export async function getPrompt(name: string): Promise<LangfusePrompt> {
+  const client = getLangfuse();
+
+  if (!client || !('getPrompt' in client)) {
+    throw new Error('Langfuse client not available for prompt fetching');
+  }
+
+  try {
+    // Type assertion for Langfuse client with getPrompt
+    const langfuseClient = client as unknown as {
+      getPrompt: (name: string) => Promise<LangfusePrompt>;
+    };
+    const prompt = await langfuseClient.getPrompt(name);
+    return prompt;
+  } catch (error) {
+    logStructured('warn', 'langfuse_prompt_fetch_failed', {
+      promptName: name,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 /**
@@ -177,4 +226,87 @@ export async function shutdown(): Promise<void> {
  */
 export function _resetForTesting(): void {
   langfuseInstance = null;
+}
+
+// --- Feedback Score Logging ---
+// @see Story 1.8 - Feedback Button Infrastructure
+
+export interface FeedbackScoreInput {
+  isPositive: boolean;
+  traceId: string | null;
+  userId: string;
+  channelId: string;
+  messageTs: string;
+  teamId?: string;
+}
+
+export interface FeedbackScoreResult {
+  scored: boolean;
+  orphan: boolean;
+  metadata: {
+    userId: string;
+    channelId: string;
+    messageTs: string;
+    teamId?: string;
+    isPositive: boolean;
+  };
+}
+
+/**
+ * Log user feedback to Langfuse as a score.
+ *
+ * If traceId is provided, logs a score on that trace.
+ * If traceId is null (orphan feedback), logs an event instead.
+ * Always calls flushAsync() to ensure persistence.
+ *
+ * @see AC#2 - Feedback correlated with original trace
+ * @see AC#5 - Feedback appears on Langfuse dashboard
+ * @see AC#6 - flushAsync() called after scoring
+ * @see AC#7 - Orphan feedback logged as event
+ * @see AC#8 - Metadata includes userId, channelId, messageTs
+ */
+export async function logFeedbackScore(
+  input: FeedbackScoreInput
+): Promise<FeedbackScoreResult> {
+  const { isPositive, traceId, userId, channelId, messageTs, teamId } = input;
+
+  const metadata = {
+    userId,
+    channelId,
+    messageTs,
+    teamId,
+    isPositive,
+  };
+
+  const client = getLangfuse();
+
+  if (traceId && client && client.score) {
+    // Standard feedback with trace correlation
+    client.score({
+      name: 'user_feedback',
+      value: isPositive ? 1 : 0,
+      traceId,
+      comment: isPositive ? 'positive' : 'negative',
+      metadata,
+    });
+
+    await client.flushAsync();
+
+    return { scored: true, orphan: false, metadata };
+  }
+
+  // Orphan feedback - log as event instead of score
+  if (client && client.event) {
+    client.event({
+      name: 'orphan_feedback',
+      metadata: {
+        ...metadata,
+        reason: 'trace_not_found',
+      },
+    });
+
+    await client.flushAsync();
+  }
+
+  return { scored: false, orphan: true, metadata };
 }

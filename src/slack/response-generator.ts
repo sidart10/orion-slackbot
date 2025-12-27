@@ -2,7 +2,7 @@
  * Response Generator for Streaming
  *
  * Provides async generator patterns for streaming responses.
- * This placeholder will be replaced by Claude Agent SDK in Story 2.1.
+ * This placeholder will be replaced by Direct Anthropic API in Story 2.1.
  *
  * @see Story 1.5 - Response Streaming
  * @see AC#1 - Response streams to Slack
@@ -12,7 +12,7 @@
  * Placeholder response generator
  * Simulates streaming by yielding chunks with delays
  *
- * Will be replaced by Claude Agent SDK in Story 2.1
+ * Will be replaced by Direct Anthropic API in Story 2.1
  *
  * @param contextCount - Number of context messages available
  * @yields String chunks simulating a streaming response
@@ -51,7 +51,7 @@ export async function* generatePlaceholderResponse(
 
 /**
  * Generator for streaming chunks from an async iterable source
- * This pattern will be used with Claude Agent SDK streaming
+ * This pattern will be used with Anthropic API streaming
  *
  * @param source - Async iterable source of chunks
  * @yields Chunks from the source

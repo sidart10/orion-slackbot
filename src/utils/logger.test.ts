@@ -112,5 +112,62 @@ describe('Structured Logger', () => {
     const parsed = JSON.parse(capturedOutput[0]);
     expect(parsed.duration).toBe(150);
   });
+
+  describe('orionError', () => {
+    it('should log OrionError with all structured fields (Story 2.4 AC#3)', () => {
+      const cause = new Error('Original error');
+      cause.stack = 'Error: Original error\n    at test.ts:1:1';
+
+      const orionError = {
+        code: 'TOOL_TIMEOUT' as const,
+        message: 'Tool timed out after 30s',
+        userMessage: 'User friendly message',
+        recoverable: true,
+        retryCount: 2,
+        cause,
+        metadata: { toolName: 'web_search' },
+      };
+
+      logger.orionError(orionError, {
+        event: 'tool.execution.failed',
+        traceId: 'trace-456',
+        userId: 'U789',
+      });
+
+      expect(capturedOutput.length).toBe(1);
+      const parsed = JSON.parse(capturedOutput[0]);
+
+      // Standard log fields
+      expect(parsed.level).toBe('error');
+      expect(parsed.event).toBe('tool.execution.failed');
+      expect(parsed.traceId).toBe('trace-456');
+      expect(parsed.userId).toBe('U789');
+
+      // OrionError-specific fields
+      expect(parsed.errorCode).toBe('TOOL_TIMEOUT');
+      expect(parsed.errorMessage).toBe('Tool timed out after 30s');
+      expect(parsed.recoverable).toBe(true);
+      expect(parsed.retryCount).toBe(2);
+      expect(parsed.stack).toContain('Original error');
+      expect(parsed.metadata).toEqual({ toolName: 'web_search' });
+    });
+
+    it('should handle OrionError without optional fields', () => {
+      const orionError = {
+        code: 'AGENT_TIMEOUT' as const,
+        message: 'Agent timed out',
+        userMessage: 'User message',
+        recoverable: false,
+      };
+
+      logger.orionError(orionError, { event: 'agent.timeout' });
+
+      const parsed = JSON.parse(capturedOutput[0]);
+      expect(parsed.errorCode).toBe('AGENT_TIMEOUT');
+      expect(parsed.recoverable).toBe(false);
+      expect(parsed.retryCount).toBeUndefined();
+      expect(parsed.stack).toBeUndefined();
+    });
+  });
 });
 

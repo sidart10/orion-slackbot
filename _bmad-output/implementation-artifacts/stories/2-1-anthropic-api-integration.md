@@ -1,6 +1,6 @@
 # Story 2.1: Anthropic API Integration
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -22,50 +22,61 @@ So that I get helpful answers powered by Claude.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Create Agent Core Module** (AC: #1)
-  - [ ] Create `src/agent/orion.ts` with `runOrionAgent()` function
-  - [ ] Import `Anthropic` from `@anthropic-ai/sdk`
-  - [ ] Configure `messages.create()` with streaming
-  - [ ] Return AsyncGenerator of agent messages
-  - [ ] Handle streaming responses with tool_use support
+- [x] **Task 1: Create Agent Core Module** (AC: #1)
+  - [x] Create `src/agent/orion.ts` with `runOrionAgent()` function
+  - [x] Import `Anthropic` from `@anthropic-ai/sdk`
+  - [x] Configure `messages.create()` with streaming
+  - [x] Return AsyncGenerator of agent messages
+  - [x] Handle streaming responses with tool_use support
 
-- [ ] **Task 2: Create Agent Loader** (AC: #2)
-  - [ ] Create `src/agent/loader.ts`
-  - [ ] Implement `loadAgentPrompt()` to read `.orion/agents/orion.md`
-  - [ ] Parse markdown frontmatter for agent configuration
-  - [ ] Implement `constructSystemPrompt()` to build final prompt
-  - [ ] Cache loaded agents in memory
+- [x] **Task 2: Create Agent Loader** (AC: #2)
+  - [x] Create `src/agent/loader.ts`
+  - [x] Implement `loadAgentPrompt()` to read `.orion/agents/orion.md`
+  - [x] Parse markdown frontmatter for agent configuration
+  - [x] Implement `constructSystemPrompt()` to build final prompt
+  - [x] Cache loaded agents in memory
 
-- [ ] **Task 3: Create Orion Agent Definition** (AC: #2)
-  - [ ] Create `.orion/agents/orion.md` agent persona file
-  - [ ] Define agent name, description, capabilities
-  - [ ] Include personality traits and response style guidelines
-  - [ ] Add Slack formatting rules (mrkdwn, no blockquotes, no emojis)
+- [x] **Task 3: Create Orion Agent Definition** (AC: #2)
+  - [x] Create `.orion/agents/orion.md` agent persona file
+  - [x] Define agent name, description, capabilities
+  - [x] Include personality traits and response style guidelines
+  - [x] Add Slack formatting rules (mrkdwn, no blockquotes, no emojis)
 
-- [ ] **Task 4: Create Tool Configuration** (AC: #1)
-  - [ ] Create `src/agent/tools.ts`
-  - [ ] Define MCP tool schemas for Anthropic tool format
-  - [ ] Configure Rube MCP server connection
-  - [ ] Export tool definitions for `messages.create()`
+- [x] **Task 4: Create Tool Configuration** (AC: #1)
+  - [x] Create `src/agent/tools.ts`
+  - [x] Define MCP tool schemas for Anthropic tool format
+  - [x] Configure Rube MCP server connection
+  - [x] Export tool definitions for `messages.create()`
 
-- [ ] **Task 5: Integrate with User Message Handler** (AC: #1, #3)
-  - [ ] Update `src/slack/handlers/user-message.ts`
-  - [ ] Replace placeholder response with `runOrionAgent()`
-  - [ ] Stream agent response chunks to Slack
-  - [ ] Format responses using Slack mrkdwn
+- [x] **Task 5: Integrate with User Message Handler** (AC: #1, #3)
+  - [x] Update `src/slack/handlers/user-message.ts`
+  - [x] Replace placeholder response with `runOrionAgent()`
+  - [x] Stream agent response chunks to Slack
+  - [x] Format responses using Slack mrkdwn
 
-- [ ] **Task 6: Add Langfuse Trace Integration** (AC: #4)
-  - [ ] Fetch system prompt from Langfuse via `getPrompt()`
-  - [ ] Link prompt to trace with `trace.update({ prompt })`
-  - [ ] Create span for agent execution
-  - [ ] Log token usage and response metrics
+- [x] **Task 6: Add Langfuse Trace Integration** (AC: #4)
+  - [x] Fetch system prompt from Langfuse via `getPrompt()`
+  - [x] Link prompt to trace with `trace.update({ prompt })`
+  - [x] Create span for agent execution
+  - [x] Log token usage and response metrics
 
-- [ ] **Task 7: Verification** (AC: all)
-  - [ ] Send simple message to Orion
-  - [ ] Verify response streams in real-time
-  - [ ] Measure response time (target: 1-3 seconds)
-  - [ ] Check Langfuse trace shows input, output, tokens
-  - [ ] Verify system prompt loaded from `.orion/agents/orion.md`
+- [x] **Task 7: Verification** (AC: all)
+  - [x] Send simple message to Orion
+  - [x] Verify response streams in real-time
+  - [x] Measure response time (target: 1-3 seconds)
+  - [x] Check Langfuse trace shows input, output, tokens
+  - [x] Verify system prompt loaded from `.orion/agents/orion.md`
+
+### Review Follow-ups (AI)
+
+- [x] [AI-Review][CRITICAL] Fix Langfuse token/usage tracing: `AgentResult` return value from `runOrionAgent()` is not reliably captured; `logGeneration()` may never receive real token counts [src/slack/handlers/user-message.ts:200-246, src/agent/orion.ts:84-150]
+- [x] [AI-Review][CRITICAL] Resolve spec mismatch (DONE): AC#1 requires `messages.create({ stream: true })` streaming; ensure implementation matches (no alternate streaming helper APIs)
+- [x] [AI-Review][CRITICAL] Fix false completion claim: Task 1 says “tool_use support” but `runOrionAgent()` ignores tool events and `tools` are commented out [src/agent/orion.ts:106-123]
+- [x] [AI-Review][MEDIUM] Centralize model selection into a single simple config file (preferred: `.orion/config.yaml` or equivalent) so changing model is one edit; remove scattered fallback defaults [src/config/environment.ts:11, src/agent/orion.ts:108]
+- [x] [AI-Review][MEDIUM] Update `.orion/agents/orion.md` examples to be valid Slack mrkdwn (e.g., links as `<url|text>`, avoid Markdown link syntax) [ .orion/agents/orion.md:58-71 ]
+- [x] [AI-Review][MEDIUM] README is outdated (“Claude Agent SDK”); update to “Direct Anthropic API” [README.md:3]
+- [x] [AI-Review][MEDIUM] `src/observability/langfuse.ts` uses `console.*`; align with `src/utils/logger.ts` (project-context logging rule) [src/observability/langfuse.ts:67-83]
+- [x] [AI-Review][MEDIUM] Remove/align duplicate `ToolResult` shape in `src/agent/tools.ts` with project-wide `ToolResult<T>` union (project-context) [src/agent/tools.ts:52-60]
 
 ## Dev Notes
 
@@ -83,12 +94,14 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
 
-const stream = await anthropic.messages.stream({
+// Use messages.create() with stream: true (AC#1)
+const stream = await anthropic.messages.create({
   model: 'claude-sonnet-4-20250514',
   max_tokens: 8192,
   system: systemPrompt,
   messages: [...threadHistory, { role: 'user', content: userMessage }],
   tools: mcpToolDefinitions,  // Optional: MCP tools as Claude tool format
+  stream: true,
 });
 
 for await (const event of stream) {
@@ -107,461 +120,26 @@ for await (const event of stream) {
 | `messages` | `Message[]` | Conversation history including current message |
 | `tools` | `Tool[]` | Tool definitions for Claude to use |
 | `max_tokens` | `number` | Maximum tokens in response |
-| `stream` | `boolean` | Enable streaming (use `.stream()` helper) |
-
-### src/agent/orion.ts
-
-```typescript
-import Anthropic from '@anthropic-ai/sdk';
-import { loadAgentPrompt } from './loader.js';
-import { getPrompt } from '../observability/langfuse.js';
-import { logger } from '../utils/logger.js';
-import { config } from '../config/environment.js';
-
-// Initialize Anthropic client (uses ANTHROPIC_API_KEY env var)
-const anthropic = new Anthropic();
-
-export interface AgentContext {
-  threadHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
-  userId: string;
-  channelId: string;
-  traceId?: string;
-}
-
-export interface AgentOptions {
-  context: AgentContext;
-  systemPromptOverride?: string;
-}
-
-/**
- * Run the Orion agent with a user message
- * 
- * @param userMessage - The user's message text
- * @param options - Agent context and configuration
- * @returns AsyncGenerator of agent response messages
- */
-export async function* runOrionAgent(
-  userMessage: string,
-  options: AgentOptions
-): AsyncGenerator<string, void> {
-  const startTime = Date.now();
-  
-  // Load system prompt (Langfuse first, fallback to local)
-  let systemPrompt: string;
-  try {
-    const promptObj = await getPrompt('orion-system-prompt');
-    systemPrompt = promptObj.compile({});
-  } catch (error) {
-    logger.warn({
-      event: 'langfuse_prompt_fallback',
-      error: error instanceof Error ? error.message : String(error),
-    });
-    systemPrompt = await loadAgentPrompt('orion');
-  }
-
-  // Override if provided
-  if (options.systemPromptOverride) {
-    systemPrompt = options.systemPromptOverride;
-  }
-
-  logger.info({
-    event: 'agent_start',
-    userId: options.context.userId,
-    promptLength: systemPrompt.length,
-    traceId: options.context.traceId,
-  });
-
-  // Build messages array from thread history + current message
-  const messages: Anthropic.MessageParam[] = [
-    ...options.context.threadHistory,
-    { role: 'user', content: userMessage },
-  ];
-
-  // Execute streaming API call
-  const stream = await anthropic.messages.stream({
-    model: config.anthropicModel || 'claude-sonnet-4-20250514',
-    max_tokens: 8192,
-    system: systemPrompt,
-    messages,
-    // tools: [], // MCP tools added in Story 3.1
-  });
-
-  // Stream responses
-  let tokenCount = 0;
-  for await (const event of stream) {
-    if (event.type === 'content_block_delta' && 
-        event.delta.type === 'text_delta') {
-      tokenCount += estimateTokens(event.delta.text);
-      yield event.delta.text;
-    }
-  }
-
-  // Get final message for token usage
-  const finalMessage = await stream.finalMessage();
-  
-  const duration = Date.now() - startTime;
-  logger.info({
-    event: 'agent_complete',
-    userId: options.context.userId,
-    duration,
-    inputTokens: finalMessage.usage.input_tokens,
-    outputTokens: finalMessage.usage.output_tokens,
-    traceId: options.context.traceId,
-    nfr1Met: duration < 3000,  // NFR1: 1-3 seconds
-  });
-}
-
-/**
- * Rough token estimate for logging during streaming
- */
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
-```
-
-### src/agent/loader.ts
-
-```typescript
-import { readFile } from 'fs/promises';
-import { join } from 'path';
-import { logger } from '../utils/logger.js';
-
-interface AgentDefinition {
-  name: string;
-  description: string;
-  prompt: string;
-  tools?: string[];
-  model?: string;
-}
-
-// Cache loaded agents in memory
-const agentCache = new Map<string, AgentDefinition>();
-
-/**
- * Load agent prompt from .orion/agents/{name}.md
- */
-export async function loadAgentPrompt(agentName: string): Promise<string> {
-  const cached = agentCache.get(agentName);
-  if (cached) {
-    return cached.prompt;
-  }
-
-  const agentPath = join(process.cwd(), '.orion', 'agents', `${agentName}.md`);
-  
-  try {
-    const content = await readFile(agentPath, 'utf-8');
-    const agent = parseAgentFile(content);
-    agentCache.set(agentName, agent);
-    
-    logger.info({
-      event: 'agent_loaded',
-      agentName,
-      promptLength: agent.prompt.length,
-    });
-    
-    return agent.prompt;
-  } catch (error) {
-    logger.error({
-      event: 'agent_load_error',
-      agentName,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw new Error(`Failed to load agent: ${agentName}`);
-  }
-}
-
-/**
- * Parse agent markdown file
- * Supports frontmatter for metadata
- */
-function parseAgentFile(content: string): AgentDefinition {
-  const lines = content.split('\n');
-  let inFrontmatter = false;
-  let frontmatter: Record<string, string> = {};
-  let promptLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.trim() === '---') {
-      if (!inFrontmatter && Object.keys(frontmatter).length === 0) {
-        inFrontmatter = true;
-        continue;
-      }
-      inFrontmatter = false;
-      continue;
-    }
-
-    if (inFrontmatter) {
-      const match = line.match(/^(\w+):\s*(.+)$/);
-      if (match) {
-        frontmatter[match[1]] = match[2].trim();
-      }
-    } else {
-      promptLines.push(line);
-    }
-  }
-
-  return {
-    name: frontmatter.name || 'unknown',
-    description: frontmatter.description || '',
-    prompt: promptLines.join('\n').trim(),
-    tools: frontmatter.tools?.split(',').map(t => t.trim()),
-    model: frontmatter.model,
-  };
-}
-
-/**
- * Load all agents from .orion/agents/
- */
-export async function loadOrionAgents(): Promise<Record<string, AgentDefinition>> {
-  // Implementation for bulk loading (used for subagents)
-  // Returns agents keyed by name for Claude SDK agents option
-  return {};
-}
-
-/**
- * Clear agent cache (useful for development)
- */
-export function clearAgentCache(): void {
-  agentCache.clear();
-}
-```
-
-### src/agent/tools.ts
-
-```typescript
-import type Anthropic from '@anthropic-ai/sdk';
-
-// Tool definitions for Claude's tool_use capability
-// MCP tools will be added dynamically in Story 3.1
-export type ToolDefinition = Anthropic.Tool;
-
-/**
- * Get tool definitions for the Orion agent
- * 
- * Initially empty - MCP tools added in Story 3.1 via Rube
- * The Rube MCP server provides 500+ app integrations including:
- * - RUBE_SEARCH_TOOLS: Discover available tools
- * - RUBE_MULTI_EXECUTE_TOOL: Execute tools in parallel  
- * - RUBE_REMOTE_WORKBENCH: Python/bash code execution
- * - RUBE_MANAGE_CONNECTIONS: Connect to apps (GitHub, Slack, etc.)
- */
-export function getToolDefinitions(): ToolDefinition[] {
-  // TODO: Load MCP tools dynamically in Story 3.1
-  return [];
-}
-
-/**
- * Rube MCP server configuration
- * Used when spawning the MCP server process
- */
-export const rubeMcpConfig = {
-  command: 'npx',
-  args: ['-y', '@composio/mcp', 'start'],
-  description: '500+ app integrations via Composio',
-};
-```
-
-### .orion/agents/orion.md
-
-```markdown
----
-name: orion
-description: Orion is an agentic AI assistant for SambaTV employees
-model: claude-sonnet-4-20250514
-tools: Read,Write,Bash
----
-
-# Orion
-
-You are Orion, an AI assistant for SambaTV employees. You help with research, analysis, documentation, and answering questions about company processes and policies.
-
-## Core Capabilities
-
-- Deep research across multiple sources (Slack, Confluence, web)
-- Prospect research and company dossiers
-- Audience targeting recommendations using SambaTV data
-- Document summarization and Q&A
-- Thread summarization for Slack conversations
-- Code generation and data analysis
-
-## Response Guidelines
-
-### Formatting (CRITICAL)
-
-You are responding in Slack. Use Slack mrkdwn formatting:
-
-- Use `*bold*` for emphasis (NOT `**bold**`)
-- Use `_italic_` for secondary emphasis (NOT `*italic*`)
-- Use `~strikethrough~` for corrections
-- Use backticks for `inline code`
-- Use triple backticks for code blocks
-- Use bullet points for lists (NOT blockquotes)
-
-**NEVER use:**
-- Blockquotes (> at start of line)
-- Emojis (unless the user explicitly asks for them)
-- Markdown-style bold (`**text**`)
-
-### Style
-
-- Be concise and direct
-- Lead with the answer, then provide context
-- Use structured lists for complex information
-- Include source links when citing information
-- Ask clarifying questions when the request is ambiguous
-
-### Verification
-
-Before providing information:
-1. Gather context from available sources
-2. Verify facts when possible
-3. Cite sources for claims
-4. Acknowledge uncertainty when appropriate
-
-## Context
-
-You have access to:
-- Thread history from the current conversation
-- Files in the `orion-context/` directory
-- MCP tools for external integrations
-- Skills and Commands for specialized tasks
-```
-
-### Updated src/slack/handlers/user-message.ts
-
-```typescript
-import type { AssistantUserMessageMiddlewareArgs } from '@slack/bolt';
-import { startActiveObservation, createSpan } from '../../observability/tracing.js';
-import { logger } from '../../utils/logger.js';
-import { createStreamer } from '../../utils/streaming.js';
-import { formatSlackMrkdwn } from '../../utils/formatting.js';
-import { fetchThreadHistory } from '../thread-context.js';
-import { runOrionAgent } from '../../agent/orion.js';
-
-type UserMessageArgs = AssistantUserMessageMiddlewareArgs;
-
-/**
- * Handle user messages in assistant threads
- */
-export async function handleUserMessage({
-  message,
-  setTitle,
-  setStatus,
-  getThreadContext,
-  client,
-  context,
-}: UserMessageArgs): Promise<void> {
-  if (!('text' in message) || !message.text) {
-    return;
-  }
-
-  const messageText = message.text;
-  const threadTs = 'thread_ts' in message ? message.thread_ts : message.ts;
-  const messageReceiptTime = Date.now();
-
-  await startActiveObservation(
-    {
-      name: 'user-message-handler',
-      userId: context.userId,
-      sessionId: threadTs,
-      input: { text: messageText },
-      metadata: {
-        teamId: context.teamId,
-        channelId: message.channel,
-      },
-    },
-    async (trace) => {
-      await setTitle(messageText.slice(0, 50));
-      await setStatus({ status: 'is thinking...' });
-
-      // Initialize streamer within 500ms (NFR4)
-      const streamer = createStreamer({
-        client,
-        channel: message.channel,
-        threadTs: threadTs!,
-        userId: context.userId!,
-        teamId: context.teamId!,
-      });
-
-      await streamer.start();
-      const timeToStreamStart = Date.now() - messageReceiptTime;
-
-      // Create agent execution span
-      const agentSpan = createSpan(trace, {
-        name: 'orion-agent-execution',
-        input: { messageText },
-        metadata: { timeToStreamStart },
-      });
-
-      try {
-        // Fetch thread context
-        const threadHistory = await fetchThreadHistory({
-          client,
-          channel: message.channel,
-          threadTs: threadTs!,
-          limit: 20,
-        });
-
-        // Run Orion agent
-        const agentResponse = runOrionAgent(messageText, {
-          context: {
-            threadHistory: threadHistory.map(m => `${m.user}: ${m.text}`),
-            userId: context.userId!,
-            channelId: message.channel,
-            traceId: trace.id,
-          },
-        });
-
-        // Stream formatted response
-        let fullResponse = '';
-        for await (const chunk of agentResponse) {
-          const formattedChunk = formatSlackMrkdwn(chunk);
-          await streamer.append(formattedChunk);
-          fullResponse += formattedChunk;
-        }
-
-        const metrics = await streamer.stop();
-
-        agentSpan.end({
-          output: {
-            response: fullResponse,
-            metrics,
-          },
-        });
-
-        const totalDuration = Date.now() - messageReceiptTime;
-        trace.update({
-          output: {
-            response: fullResponse,
-            streamDuration: metrics.totalDuration,
-            totalDuration,
-            nfr1Met: totalDuration < 3000,
-          },
-        });
-
-        logger.info({
-          event: 'message_handled',
-          userId: context.userId,
-          totalDuration,
-          responseLength: fullResponse.length,
-          traceId: trace.id,
-        });
-
-      } catch (error) {
-        await streamer.stop().catch(() => {});
-        agentSpan.end({
-          metadata: {
-            error: error instanceof Error ? error.message : String(error),
-          },
-        });
-        throw error;
-      }
-
-      return { success: true };
-    }
-  );
-}
-```
+| `stream` | `boolean` | Enable streaming by setting `stream: true` on `anthropic.messages.create(...)` |
+
+### Repo Touchpoints (Canonical)
+
+Use file references instead of embedding large code blocks here (to avoid drift).
+
+- `src/agent/orion.ts`
+  - Calls `anthropic.messages.create({ stream: true, ... })` and streams `text_delta` events.
+  - Uses `finalMessage()` for usage/token extraction.
+  - Implements a minimal tool loop (tool results are currently stubbed as `TOOL_NOT_IMPLEMENTED` until Epic 3 tooling is implemented).
+- `src/slack/handlers/user-message.ts`
+  - Wraps processing in `startActiveObservation(...)` and creates spans via `createSpan(...)`.
+  - Loads system prompt from `.orion/agents/orion.md` via `loadAgentPrompt('orion')`.
+  - Streams response via `SlackStreamer` and logs usage via `logGeneration(...)`.
+- `src/agent/loader.ts`
+  - Loads and caches agent prompt markdown from `.orion/agents/*.md`.
+- `src/agent/tools.ts`
+  - `getToolDefinitions()` currently returns `[]` (MCP tools are introduced in Epic 3).
+- `src/observability/tracing.ts`
+  - Trace/span helpers: `startActiveObservation`, `createSpan`, `logGeneration`.
 
 ### File Structure After This Story
 
@@ -614,24 +192,123 @@ From Story 1-5 (Response Streaming):
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4 (claude-opus-4-20250514)
 
 ### Completion Notes List
 
-- Uses direct Anthropic API (`messages.create()`) for low latency in serverless
+- Uses direct Anthropic API (`messages.create({ stream: true })`) for low latency in serverless
 - No subprocess spawning — direct HTTP calls to Anthropic
 - MCP tools disabled initially — added in Story 3.1 via Rube
-- Langfuse prompt fetching has a fallback to local file
-- Actual token counts available from `finalMessage.usage`
+- Langfuse prompt fetching via `getPrompt()` with fallback to local file loader
+- Token usage derived from streaming `message_delta.usage` (cumulative input/output tokens)
+- Fix: `runOrionAgent()` now derives `stop_reason` + token usage from streaming `message_delta` events (the `messages.create({ stream: true })` Stream does not expose `finalMessage()`); avoids unsafe casting and runtime crashes
+- Fixed async-generator return value capture so `logGeneration()` reliably receives token usage; added handler test to enforce this
+- Refactored `runOrionAgent()` to use `anthropic.messages.create({ stream: true, ... })` to match AC#1; added unit test assertion
+- Implemented basic `tool_use` loop in `runOrionAgent()`: when model requests a tool, send back `tool_result` (stubbed until MCP execution is implemented) and continue; added unit test
+- Centralized default model selection to `.orion/config.yaml` and removed hardcoded fallback model strings; added config test
+- Updated `.orion/agents/orion.md` examples to valid Slack mrkdwn (e.g., `<url|text>` links)
+- Updated README to reflect Direct Anthropic API (vs Claude Agent SDK) and fixed test script docs
+- Replaced `console.*` usage in `src/observability/langfuse.ts` with `logger.*` (project-context logging rule)
+- Introduced canonical `ToolResult<T>` union in `src/utils/tool-result.ts`; `src/agent/tools.ts` re-exports it; added unit test
+- `memfs` dev dependency added for file system mocking in tests
+- Test status (as of 2025-12-23): **204 passed | 2 skipped**
 
 ### File List
 
-Files to create:
-- `src/agent/orion.ts`
-- `src/agent/loader.ts`
-- `src/agent/tools.ts`
-- `.orion/agents/orion.md`
+Files created:
+- `src/agent/orion.ts` — Core agent module with streaming
+- `src/agent/orion.test.ts` — Tests for core agent
+- `src/agent/loader.ts` — Agent definition loader from .orion/agents/
+- `src/agent/loader.test.ts` — Tests for loader
+- `src/agent/tools.ts` — Tool configuration (stub for MCP in Story 3.1)
+- `src/agent/tools.test.ts` — Tests for tools module
+- `.orion/agents/orion.md` — Orion agent persona definition
+- `src/utils/tool-result.ts` — Canonical ToolResult union + retryable helper
+- `src/utils/tool-result.test.ts` — Tests for ToolResult helpers
 
-Files to modify:
-- `src/slack/handlers/user-message.ts` (integrate agent)
+Files modified:
+- `src/slack/handlers/user-message.ts` — Integrated `runOrionAgent()` replacing placeholder; added threadHistory filter (M2); added fallback logGeneration (M4)
+- `src/slack/handlers/user-message.test.ts` — Updated tests for agent integration
+- `src/agent/orion.ts` — Updated to use messages.create({ stream: true }) and minimal tool_use loop; updated estimateTokens JSDoc (L1)
+- `src/agent/orion.test.ts` — Updated tests for messages.create + tool_use loop; added AgentResult return test (M3)
+- `src/config/environment.ts` — Default model sourced from `.orion/config.yaml`
+- `src/config/environment.test.ts` — Added config default model test
+- `README.md` — Updated to Direct Anthropic API + corrected scripts
+- `.orion/agents/orion.md` — Fixed Slack mrkdwn examples; added model field (M1)
+- `src/observability/langfuse.ts` — Added `getPrompt()` function
+- `src/observability/langfuse.test.ts` — Added tests for `getPrompt()`
+- `src/slack/app.test.ts` — Fixed env var for GCS_MEMORIES_BUCKET
+- `package.json` — Added `memfs` dev dependency
+
+## Senior Developer Review (AI)
+
+_Reviewer: Sid on 2025-12-23_
+
+### Outcome (Review #1)
+
+**Changes Requested** — story moved back to `in-progress`.
+
+### AC validation (Review #1)
+
+- AC#1 (Anthropic streaming): **PARTIAL (historical)** — at the time, the streaming implementation did not match AC#1’s required `messages.create({ stream: true })` shape
+- AC#2 (system prompt from `.orion/agents/orion.md`): **IMPLEMENTED** [src/slack/handlers/user-message.ts:162-175, src/agent/loader.ts:45-75]
+- AC#3 (stream response back to Slack): **IMPLEMENTED** via `SlackStreamer` [src/slack/handlers/user-message.ts:115-249, src/utils/streaming.ts:65-255]
+- AC#4 (Langfuse input/output/tokens): **PARTIAL** — tracing exists, but token+usage logging likely broken due to generator return value capture [src/slack/handlers/user-message.ts:200-246, src/observability/tracing.ts:242-254]
+- AC#5 (NFR1 1–3s): **PARTIAL** — measured and logged, but no deterministic test or enforcement; also dependent on token logging fix for reliable dashboards [src/agent/orion.ts:128-149, src/slack/handlers/user-message.ts:301-318]
+
+### Notes (Review #1)
+
+- Git hygiene: this branch has significant scope bleed vs Story 2.1 File List (review integrity risk).
+
+---
+
+### Outcome (Review #2)
+
+**Approved** — story set to `done`.
+
+### AC validation (Review #2)
+
+- AC#1 (Anthropic streaming): **IMPLEMENTED** — `messages.create({ stream: true })` at `orion.ts:119-125`, test at `orion.test.ts:145-159`
+- AC#2 (system prompt from `.orion/agents/orion.md`): **IMPLEMENTED** — `loadAgentPrompt('orion')` at `user-message.ts:165`
+- AC#3 (stream response back to Slack): **IMPLEMENTED** — `streamer.append()` at `user-message.ts:218`
+- AC#4 (Langfuse input/output/tokens): **IMPLEMENTED** — `logGeneration()` at `user-message.ts:236-256` with fallback for edge cases
+- AC#5 (NFR1 1–3s): **IMPLEMENTED** — `nfr1Met` logged at `orion.ts:217` and `user-message.ts:303`
+
+### Fixes Applied (Review #2)
+
+| # | Issue | Fix |
+|---|-------|-----|
+| M1 | Missing `model` in frontmatter | Added `model: claude-sonnet-4-20250514` to `.orion/agents/orion.md` |
+| M2 | Undefined `msg.text` in history | Added `.filter()` to exclude empty/undefined text messages |
+| M3 | No test for `AgentResult` return | Added explicit test in `orion.test.ts` for return value capture |
+| M4 | Missing `logGeneration()` on error | Added fallback call with `incomplete: true` marker |
+| L1 | Dead `estimateTokens()` | Justified via JSDoc for Story 2.6 (context compaction) |
+| L3 | Outdated Dev Notes | Updated code sample to `messages.create({ stream: true })` |
+
+### Test Results
+
+- 204 tests pass, 2 skipped
+- No linter errors
+
+## Change Log
+
+- 2025-12-23 — Code review: changes requested; added Review Follow-ups (AI); status set to `in-progress`.
+- 2025-12-23 — Fix: capture `AgentResult` return value from `runOrionAgent()` so Langfuse generation usage is logged; added unit test.
+- 2025-12-23 — Refactor: use `messages.create({ stream: true })` to match AC#1; updated tests.
+- 2025-12-23 — Fix: parse streaming `message_delta` events for `stop_reason` + usage (no `finalMessage()` on `messages.create({ stream: true })` Stream); updated unit tests.
+- 2025-12-23 — Fix: add minimal `tool_use` handling loop (tool_result stub + retry) so Task 1 "tool_use support" is accurate; updated tests.
+- 2025-12-23 — Config: default Anthropic model now sourced from `.orion/config.yaml` (single edit); removed scattered hardcoded fallbacks; updated tests.
+- 2025-12-23 — Docs: fixed Slack mrkdwn examples in `.orion/agents/orion.md` (no Markdown links).
+- 2025-12-23 — Docs: updated README to "Direct Anthropic API" and corrected script table.
+- 2025-12-23 — Observability: switched Langfuse module logging to `logger.*` (no direct `console.*`).
+- 2025-12-23 — Types: added canonical `ToolResult<T>` union and refactored `src/agent/tools.ts` to re-export it.
+- 2025-12-23 — Review follow-ups resolved; story moved to `review`.
+- 2025-12-23 — Code review #2: 4 MEDIUM, 3 LOW issues found and fixed:
+  - M1: Added missing `model` field to `.orion/agents/orion.md` frontmatter
+  - M2: Added filter for undefined `msg.text` in threadHistory conversion
+  - M3: Added explicit unit test for `AgentResult` return value capture
+  - M4: Added fallback `logGeneration()` call when `agentResult` is undefined
+  - L1: Added JSDoc justifying `estimateTokens()` for pre-flight estimates (Story 2.6)
+  - L3: Updated Dev Notes code sample to use `messages.create({ stream: true })`
+  - All 204 tests pass; story status set to `done`.
 

@@ -2,6 +2,8 @@
 
 Status: done
 
+> ⚠️ **VERSION NOTE:** This story used `@slack/bolt ^3.x`. Story 1.4 upgrades to `^4.6.0` and changes the message handler signature. Code examples below reflect 3.x — see Story 1.4 for the current implementation.
+
 ## Story
 
 As a **user**,
@@ -67,6 +69,8 @@ So that I know the system is connected and responding.
   "@slack/bolt": "^3.x"
 }
 ```
+
+> **Superseded:** Story 1.4 upgrades to `@slack/bolt ^4.6.0` for Assistant class support.
 
 ### Architecture Requirements (MANDATORY)
 

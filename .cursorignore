@@ -1,0 +1,17 @@
+# BMAD reference files (loaded on-demand via @rules, not needed for indexing)
+_bmad/
+_bmad-output/
+
+# Build artifacts
+dist/
+coverage/
+
+# Dependencies
+node_modules/
+
+# Large generated files
+pnpm-lock.yaml
+
+# Git
+.git/
+

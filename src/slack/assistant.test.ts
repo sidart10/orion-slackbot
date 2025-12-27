@@ -7,7 +7,22 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { Assistant } from '@slack/bolt';
+
+// Create a mock Assistant class
+class MockAssistant {
+  config: Record<string, unknown>;
+  constructor(config: Record<string, unknown>) {
+    this.config = config;
+  }
+}
+
+// Mock @slack/bolt with both named and default exports
+vi.mock('@slack/bolt', () => ({
+  Assistant: MockAssistant,
+  default: {
+    Assistant: MockAssistant,
+  },
+}));
 
 // Mock the handlers before importing assistant
 vi.mock('./handlers/thread-started.js', () => ({
@@ -27,7 +42,7 @@ describe('Slack Assistant', () => {
     it('should export an Assistant instance', async () => {
       const { assistant } = await import('./assistant.js');
       expect(assistant).toBeDefined();
-      expect(assistant).toBeInstanceOf(Assistant);
+      expect(assistant).toBeInstanceOf(MockAssistant);
     });
 
     it('should be configured with threadStarted handler', async () => {
@@ -51,8 +66,8 @@ describe('Slack Assistant', () => {
   describe('createAssistant factory function', () => {
     it('should create a new Assistant instance', async () => {
       const { createAssistant } = await import('./assistant.js');
-      const assistant = createAssistant();
-      expect(assistant).toBeInstanceOf(Assistant);
+      const newAssistant = createAssistant();
+      expect(newAssistant).toBeInstanceOf(MockAssistant);
     });
   });
 });

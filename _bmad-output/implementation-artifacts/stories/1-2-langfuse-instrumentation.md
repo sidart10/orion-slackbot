@@ -25,11 +25,10 @@ So that I have full observability into system behavior.
 ## Tasks / Subtasks
 
 - [x] **Task 1: Install Langfuse Dependencies** (AC: #2)
-  - [x] Add `@langfuse/client` ^4.x to dependencies
-  - [x] Add `@langfuse/tracing` ^4.x to dependencies (verily available)
-  - [x] Add `@opentelemetry/sdk-node` ^1.x to dependencies
-  - [x] Add `@opentelemetry/api` to dependencies
+  - [x] Add `langfuse` ^3.x (tracing SDK with `.trace()` method)
+  - [x] Add `@opentelemetry/api` ^1.x to dependencies
   - [x] Run `pnpm install` to lock versions
+  - ⚠️ **Note:** Originally listed `@langfuse/client` ^4.x — this is the REST client without `.trace()`. Use `langfuse` package instead.
 
 - [x] **Task 2: Implement instrumentation.ts** (AC: #1, #2)
   - [x] Create `src/instrumentation.ts` as the first import in index.ts

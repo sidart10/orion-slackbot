@@ -3,26 +3,31 @@ stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 inputDocuments:
   - "_bmad-output/analysis/product-brief-2025-12-orion-slack-agent-2025-12-17.md"
   - "_bmad-output/analysis/research/technical-orion-slack-agent-research-2024-12-17.md"
+  - "_bmad-output/analysis/brainstorming-session-2025-12-22.md"
 documentCounts:
   briefs: 1
   research: 1
-  brainstorming: 0
+  brainstorming: 1
   projectDocs: 0
 workflowType: 'prd'
 lastStep: 11
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-17'
+last_updated: '2025-12-22'
+course_correction: 'Claude Agent SDK → Direct Anthropic API migration'
+prd_version: '1.2'
 ---
 
 # Product Requirements Document - 2025-12 orion-slack-agent
 
 **Author:** Sid
 **Date:** 2025-12-17
+**Last Updated:** 2025-12-22 (v1.2: Slack AI App features - FR47-50 for feedback buttons, dynamic status, feedback logging)
 
 ## Executive Summary
 
-Orion is an enterprise agentic AI system that transforms Slack into an intelligent execution layer for the organization. Built on a **pluggable LLM provider layer** (initially Anthropic's Claude Agent SDK), Orion implements the core agent loop—*gather context, take action, verify work*—with composable tool connectivity, parallel subagent execution, and first-class observability.
+Orion is an enterprise agentic AI system that transforms Slack into an intelligent execution layer for the organization. Built on a **pluggable LLM provider layer** (Anthropic API with tool_use, orchestrated via MCP tools), Orion implements the core agent loop—*gather context, take action, verify work*—with composable tool connectivity, parallel subagent execution, and first-class observability.
 
 Unlike conversational AI assistants that answer questions, Orion *executes work*: conducting deep research with automatic synthesis, generating and running code in sandboxed environments, managing workflows across enterprise systems, and maintaining context across long-running conversations through intelligent compaction.
 
@@ -32,11 +37,11 @@ The architecture is designed for **composability at every layer**—tools, skill
 
 The differentiator is not any single feature, but how four architectural principles compose together:
 
-1. **Agent Loop Execution Model** — Every interaction follows Gather → Act → Verify. Responses are grounded in real data and validated before delivery—not hallucinated or assumed. If verification fails, the loop refines until it passes.
+1. **Agent Loop Execution Model** — Every interaction follows Gather → Act → Verify via a `while (stop_reason === 'tool_use')` loop around `messages.create()`. Responses are grounded in real data and validated before delivery—not hallucinated or assumed. If verification fails, the loop refines until it passes.
 
 2. **Code Generation Fills the Gaps** — When an MCP server or pre-built integration doesn't exist, Orion generates precise, executable code on-the-fly. There is no integration ceiling—the agent writes its way through.
 
-3. **Subagents with Context Isolation** — Complex tasks spawn specialized subagents (research, search, summarize) that run in parallel with isolated context windows. Only relevant results bubble up to the orchestrator—no context dumps, no pollution.
+3. **Subagents with Context Isolation** — Complex tasks spawn specialized subagents (research, search, summarize) as parallel `messages.create()` calls with isolated context windows. Executed via `Promise.all()`, only relevant results bubble up to the orchestrator—no context dumps, no pollution.
 
 4. **File-Based Agent Definitions** — Inspired by BMAD methodology, all agent personas, workflows, and prompts live in version-controlled `.orion/` files. This separates concerns, enables composability, and makes the system maintainable as it grows.
 
@@ -50,7 +55,7 @@ These principles reinforce each other: the agent loop needs subagents for parall
 **Project Context:** Greenfield — new system from scratch
 **Primary Platform:** Slack (AI Agent integration via Bolt + Assistant API)
 **Deployment Target:** Google Cloud Run (HTTP mode, serverless)
-**Agent Framework (initial):** Claude Agent SDK (TypeScript)
+**Agent Framework:** Direct Anthropic API (messages.create with tool_use) + Generic MCP Client (HTTP streamable transport, runtime-configurable)
 **Model selection:** Config-driven (provider + model ID); no model names hardcoded in application code
 **Observability:** Langfuse (tracing, prompt management, evaluations)
 
@@ -78,7 +83,7 @@ Orion's responses must be accurate, grounded, and verified before delivery.
 | Metric | Target | Why It Matters |
 |--------|--------|----------------|
 | **Verification Pass Rate** | >95% | Agent loop catches issues |
-| **User Feedback Score** | >4:1 positive | Users rate responses positively |
+| **User Feedback Score** | >4:1 positive | Users rate responses via feedback buttons (FR48), tracked in Langfuse (FR49) |
 | **Source Citation Rate** | >90% | Factual claims are grounded |
 | **Follow-up Question Rate** | <15% | Clarity on first response |
 | **Hallucination Rate** | <2% | Trust requires accuracy |
@@ -122,10 +127,10 @@ Orion's responses must be accurate, grounded, and verified before delivery.
 | Component | Description |
 |-----------|-------------|
 | **Slack Integration** | Bolt with Assistant class, streaming, thread management, suggested prompts |
-| **LLM Runtime (pluggable)** | Initial implementation uses Claude Agent SDK `query()` with system prompts + tool connectivity; model/provider selected via config |
+| **LLM Runtime (pluggable)** | Anthropic API `messages.create()` with tool_use for agent loop; model/provider selected via config |
 | **Agent Loop** | Complete Gather → Act → Verify cycle with iterative refinement |
 | **Subagents** | Parallel execution with isolated context (research, search, summarize) |
-| **Unified Tool Layer** | MCP servers, code generation—all invoked as tool calls |
+| **Unified Tool Layer** | Generic MCP client (HTTP streamable), code generation—all tools invoked via Claude tool_use |
 | **Code Generation** | On-the-fly integrations, data processing, API calls |
 | **Skills Framework** | Infrastructure for `.claude/skills/` packages |
 | **Commands Framework** | Infrastructure for `/command` workflows |
@@ -146,6 +151,28 @@ Orion's responses must be accurate, grounded, and verified before delivery.
 - 10+ active users within first 2 weeks
 - Successfully add 1 new Skill or Command post-launch (proves extensibility)
 
+**MVP Implementation Estimate (Post-Architecture Decision):**
+
+| Component | Effort | Priority |
+|-----------|--------|----------|
+| Agent Loop (`src/agent/loop.ts`) | 1 day | P0 |
+| Generic MCP Client (`src/tools/mcp/client.ts`) | 1 day | P0 |
+| Tool Registry (`src/tools/registry.ts`) | 0.5 day | P0 |
+| Subagent Spawner (`src/agent/subagents.ts`) | 0.5 day | P0 |
+| Response Generator (replace placeholder) | 0.5 day | P0 |
+| Dockerfile + Cloud Run config | 0.5 day | P0 |
+| CI/CD Pipeline | 0.5 day | P1 |
+
+*Total new work: ~4.5 days (validated in 2025-12-22 brainstorming session)*
+
+**Already Complete:**
+- ✅ Slack Bolt + Assistant integration
+- ✅ Streaming to Slack
+- ✅ Thread context management
+- ✅ Langfuse tracing
+- ✅ Environment configuration
+- ✅ Logging infrastructure
+
 ### Growth Features (Post-MVP)
 
 *Added as tools and integrations mature:*
@@ -158,6 +185,19 @@ Orion's responses must be accurate, grounded, and verified before delivery.
 | Programmatic Consultant Tools | Internal ad platform MCP servers |
 | Domain-Specific Skills | Built incrementally per department |
 | Advanced Commands | Custom user-defined automation |
+
+### Explicitly Out of Scope (MVP)
+
+The following are **not** included in MVP:
+
+- **Sandbox code execution** — Deferred to Phase 2; MVP uses MCP-based integrations only
+- **Multi-tenant deployment** — Single-tenant internal tool for SambaTV only
+- **Custom LLM fine-tuning** — Uses off-the-shelf Claude models
+- **Voice/audio input** — Text-only Slack interface
+- **Mobile app** — Slack-native only
+- **Role-based access controls** — All authenticated Slack users have equal access
+- **Advanced rate limiting per user** — Basic system-level protection only
+- **Semantic memory search (Mem0)** — Deferred to post-MVP; uses agentic file-based memory
 
 ### Vision (Future)
 
@@ -362,21 +402,22 @@ Orion connects to enterprise systems through a unified tool layer:
 | Integration Type | Examples | Protocol |
 |------------------|----------|----------|
 | **Slack** | Primary interface | Bolt + Assistant API |
-| **MCP Servers** | Composio/Rube (500+ apps), GitHub, Atlassian, custom servers | Model Context Protocol |
+| **MCP Servers** | Any HTTP streamable MCP server (Rube/Composio, GitHub, Atlassian, custom) | Generic MCP Client (HTTP streamable transport) |
 | **Knowledge Sources** | Confluence, Google Drive, Slack history | Via MCP or agentic search |
 | **Observability** | Langfuse | OpenTelemetry + Langfuse SDK |
-| **Infrastructure** | Google Cloud Run | HTTP webhooks |
-| **Code Execution** | Sandboxed environments | Sandboxed runtime (Claude Agent SDK built-in initially; pluggable over time) |
+| **Infrastructure** | Google Cloud Run (300s timeout, min 1 instance) | HTTP webhooks |
+| **Code Execution** | MCP-based sandboxes (e.g., Rube workbench) or deferred to post-MVP | Via MCP tools |
 
 **Integration Priorities for MVP:**
 
 | Priority | Integration | Reason |
 |----------|-------------|--------|
 | **P0 (Must Have)** | Slack (Bolt + Assistant) | Primary interface |
-| **P0 (Must Have)** | LLM provider (initially Claude Agent SDK) | Core agent execution |
+| **P0 (Must Have)** | Direct Anthropic API (messages.create) | Core agent execution with tool_use loop |
+| **P0 (Must Have)** | Generic MCP Client (HTTP streamable) | Connect to any MCP server at runtime |
 | **P0 (Must Have)** | Langfuse | Observability from day one |
-| **P0 (Must Have)** | Cloud Run | Deployment target |
-| **P1 (Should Have)** | Rube/Composio MCP | 500+ app integrations |
+| **P0 (Must Have)** | Cloud Run (300s timeout) | Deployment target for long-running agent loops |
+| **P1 (Should Have)** | Rube/Composio MCP server | 500+ app integrations (one of many MCP options) |
 | **P1 (Should Have)** | Web search | Research capability |
 | **P2 (Nice to Have)** | Confluence MCP | Knowledge base access |
 | **P2 (Nice to Have)** | Custom internal MCP servers | Domain-specific data |
@@ -422,35 +463,35 @@ Orion connects to enterprise systems through a unified tool layer:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                          SLACK                               │
-│  (Split Pane AI View, Streaming, Suggested Prompts)         │
+│              (Events API → HTTP Webhooks)                    │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ HTTP Events
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
+                           │
+┌──────────────────────────▼──────────────────────────────────┐
 │                    GOOGLE CLOUD RUN                          │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │  ORION APPLICATION                                      │ │
-│  │  • Slack Bolt (TypeScript) - Event handling, streaming │ │
-│  │  • LLM Runtime (pluggable) - Reasoning, tool execution │ │
-│  │  • Agent Loop - Gather → Act → Verify                  │ │
+│  │  ORION CONTAINER                                        │ │
+│  │  ├── Slack Bolt (HTTP mode)                             │ │
+│  │  ├── Agent Loop (Anthropic messages.create + tool_use) │ │
+│  │  ├── Subagent Spawner (parallel API calls)              │ │
+│  │  ├── Generic MCP Client (HTTP streamable transport)     │ │
+│  │  └── Langfuse SDK (tracing)                             │ │
 │  └────────────────────────────────────────────────────────┘ │
+│  Config: timeout=300s, minInstances=1, memory=2GB           │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ Tool Calls
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      TOOL LAYER                              │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-│  │ MCP      │ │ Agentic  │ │ Code Gen │ │ Skills/  │       │
-│  │ Servers  │ │ Search   │ │ (APIs)   │ │ Commands │       │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ Traces
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│                       LANGFUSE                               │
-│              (Observability & Prompt Management)             │
-└─────────────────────────────────────────────────────────────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │ Anthropic│ │ MCP      │ │ Langfuse │
+        │ API      │ │ Servers  │ │          │
+        └──────────┘ └──────────┘ └──────────┘
 ```
+
+**Key Architecture Decisions (from 2025-12-22 session):**
+- Direct Anthropic API replaces Agent SDK (eliminates sandbox spin-up latency)
+- Cloud Run deployment replaces Vercel (supports 300s+ timeouts for agent loops)
+- Generic MCP client connects to any HTTP streamable MCP server at runtime
+- Subagents are parallel `messages.create()` calls with isolated context
 
 ## Functional Requirements
 
@@ -458,6 +499,7 @@ Orion connects to enterprise systems through a unified tool layer:
 
 - FR1: System executes the agent loop (Gather Context → Take Action → Verify Work) for every user interaction
 - FR2: System verifies responses before delivery and iterates until verification passes
+  - *Verification approach:* Verification prompts in system prompt instruct Claude to check tool results for errors, validate factual claims against sources, and confirm task completion before responding. Implementation details in tech spec.
 - FR3: System spawns subagents for parallel task execution with isolated context windows
 - FR4: System aggregates only relevant results from subagents into the orchestrator response
 - FR5: System manages conversation context across long-running threads via compaction
@@ -475,26 +517,35 @@ Orion connects to enterprise systems through a unified tool layer:
 ### Communication & Interaction
 
 - FR13: Users can interact with Orion via Slack DMs and channels
-- FR14: System streams responses in real-time to show progress
+- FR14: System streams responses in real-time to show progress via Slack's `chatStream` API
 - FR15: System maintains conversation context within Slack threads
-- FR16: System provides suggested prompts to help users discover capabilities
+- FR16: System provides suggested prompts to help users discover capabilities via `setSuggestedPrompts`
 - FR17: System responds to @mentions and direct messages
 - FR18: System can summarize Slack threads on request
 
-### Code Generation & Execution
+### Slack AI App Integration
 
-- FR19: System generates executable code when pre-built integrations don't exist
-- FR20: System executes generated code in sandboxed environments
-- FR21: System can call external APIs via generated code
-- FR22: System processes and transforms data via generated code
-- FR23: System validates generated code output before returning results
+- FR47: System displays dynamic status messages during processing via `setStatus` with `loading_messages` array (e.g., "Searching Confluence...", "Calling Jira API...")
+- FR48: System collects user feedback via Slack's native `feedback_buttons` element (thumbs up/down) attached to responses
+- FR49: System logs user feedback (positive/negative) to Langfuse for quality tracking and improvement
+- FR50: System provides contextual error messages to users when processing fails, with suggested next steps
+
+### Code Generation & Execution (Phase 2)
+
+*Note: Code execution capabilities deferred to Phase 2 per 2025-12-22 architecture decision. MVP focuses on MCP-based integrations.*
+
+- FR19: System generates executable code when pre-built integrations don't exist *(Phase 2)*
+- FR20: System executes generated code in sandboxed environments *(Phase 2)*
+- FR21: System can call external APIs via generated code *(Phase 2)*
+- FR22: System processes and transforms data via generated code *(Phase 2)*
+- FR23: System validates generated code output before returning results *(Phase 2)*
 
 ### Composable Extensions
 
-- FR24: Developers can add new Skills via file-based definitions in `.claude/skills/`
-- FR25: Developers can add new Commands via file-based definitions in `.claude/commands/`
-- FR26: System can connect to MCP servers for external tool access
-- FR27: System can invoke multiple MCP servers within a single response
+- FR24: Developers can add new Skills via Agent Skills open standard ([agentskills.io](https://agentskills.io)) — `SKILL.md` files in `.skills/` directory
+- FR25: Developers can add new Commands via file-based workflow definitions in `.orion/commands/`
+- FR26: System connects to MCP servers via generic HTTP streamable client (runtime-configurable)
+- FR27: System can invoke multiple MCP servers within a single response (tools merged into unified registry)
 - FR28: System selects appropriate tools from available options for each task
 - FR29: Platform admin can enable or disable MCP servers
 
@@ -520,6 +571,12 @@ Orion connects to enterprise systems through a unified tool layer:
 - FR41: System supports Deep Research workflow (multi-step, parallelized, synthesized)
 - FR42: System supports Summarization workflow (threads, documents, conversations)
 - FR43: System supports Q&A workflow (grounded, verified, cited)
+
+### Persistent Memory
+
+- FR44: System maintains persistent memory across sessions via Memory Tool pattern (view, create, update, delete operations) with Google Cloud Storage backend
+- FR45: System organizes memory in three scopes: global (shared learnings), user-level (per Slack user preferences), and session-level (per thread context)
+- FR46: Claude automatically checks `/memories` directory at conversation start to restore relevant context
 
 ## Non-Functional Requirements
 
@@ -558,7 +615,9 @@ Orion connects to enterprise systems through a unified tool layer:
 
 | Requirement | Specification |
 |-------------|---------------|
-| **MCP server compatibility** | Support MCP 1.0 protocol |
+| **MCP transport** | HTTP streamable transport (generic client connects to any MCP server) |
+| **MCP protocol** | Support MCP 1.0 protocol (tools/list, tools/call) |
+| **Tool discovery** | Runtime discovery via tools/list, convert to Claude tool format |
 | **Concurrent tool calls** | Support multiple MCP servers in single response |
 | **Tool timeout** | 30 second timeout per tool call with graceful handling |
 | **Streaming compatibility** | All responses stream to Slack regardless of tool usage |
@@ -581,4 +640,22 @@ Orion connects to enterprise systems through a unified tool layer:
 | **Cost per query (average)** | <$0.10 | Tracked via Langfuse |
 | **Monthly budget** | Configurable alerts | Budget limits enforced |
 | **Token tracking** | Per-interaction | All token usage logged |
+
+### Error Handling
+
+| Requirement | Specification |
+|-------------|---------------|
+| **User-facing errors** | Clear, non-technical messages explaining what went wrong and suggested next steps |
+| **Tool failures** | Inform user which tool failed; offer to retry or use alternative approach |
+| **Agent loop failures** | Graceful exit with partial results if available; log full trace for debugging |
+| **Rate limit handling** | Queue requests when approaching limits; inform user of delay if significant |
+
+### Rate Limiting & Abuse Protection
+
+| Requirement | Target | Notes |
+|-------------|--------|-------|
+| **Anthropic API limits** | Respect provider rate limits | Exponential backoff on 429 errors |
+| **Per-user throttling** | 10 requests/minute soft limit | Prevent accidental loops or abuse |
+| **System-wide protection** | Circuit breaker on repeated failures | Prevent cascade failures |
+| **Monitoring** | Alert on unusual patterns | Langfuse + logging for detection |
 

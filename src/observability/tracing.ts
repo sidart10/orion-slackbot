@@ -1,7 +1,9 @@
 /**
  * Tracing Utilities for Langfuse
  *
- * Provides high-level wrappers for creating traces and spans.
+ * Provides high-level wrappers for creating traces and spans using the new
+ * @langfuse/tracing SDK with OpenTelemetry integration.
+ *
  * Use startActiveObservation for all top-level handlers.
  *
  * @see AR11 - All handlers must be wrapped in Langfuse traces
@@ -9,8 +11,87 @@
  * @see AC#6 - Traces include userId, input, output, duration, metadata
  */
 
-import { trace, SpanStatusCode } from '@opentelemetry/api';
-import { getLangfuse, type LangfuseTrace, type LangfuseSpan } from './langfuse.js';
+import {
+  startActiveObservation as lfStartActiveObservation,
+  startObservation as lfStartObservation,
+  updateActiveObservation,
+  type LangfuseSpan as NewLangfuseSpan,
+  type LangfuseSpanAttributes,
+  type LangfuseGenerationAttributes,
+} from '@langfuse/tracing';
+// Note: langfuse.ts is still used for feedback scoring (logFeedbackScore)
+// which requires the old SDK's score()/event() methods not available in @langfuse/tracing
+
+// Re-export new SDK functions for direct use
+export {
+  updateActiveObservation,
+  type NewLangfuseSpan,
+  type LangfuseSpanAttributes,
+  type LangfuseGenerationAttributes,
+};
+
+// --- Trace ID Cache for Feedback Correlation ---
+// Maps message timestamps to trace IDs for correlating feedback with original responses
+// @see Story 1.8 - Feedback Button Infrastructure, AC#2
+
+interface TraceIdCacheEntry {
+  traceId: string;
+  timestamp: number;
+}
+
+const traceIdCache = new Map<string, TraceIdCacheEntry>();
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Cleanup expired entries hourly
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of traceIdCache.entries()) {
+    if (now - entry.timestamp > DAY_MS) {
+      traceIdCache.delete(key);
+    }
+  }
+}, 60 * 60 * 1000);
+
+/**
+ * Store a trace ID associated with a message timestamp.
+ * Used to correlate feedback button clicks with the original response trace.
+ *
+ * @param messageTs - Slack message timestamp (e.g., "1234567890.123456")
+ * @param traceId - Langfuse trace ID to associate
+ * @see Story 1.8 - AC#2 Feedback correlated with original trace
+ */
+export function setTraceIdForMessage(messageTs: string, traceId: string): void {
+  traceIdCache.set(messageTs, { traceId, timestamp: Date.now() });
+}
+
+/**
+ * Retrieve a trace ID for a message timestamp.
+ * Returns null if not found or expired (>24 hours old).
+ *
+ * @param messageTs - Slack message timestamp
+ * @returns Trace ID or null if not found/expired
+ * @see Story 1.8 - AC#2 Feedback correlated with original trace
+ */
+export function getTraceIdFromMessageTs(messageTs: string): string | null {
+  const entry = traceIdCache.get(messageTs);
+  if (!entry) return null;
+
+  // Check for expiration
+  if (Date.now() - entry.timestamp > DAY_MS) {
+    traceIdCache.delete(messageTs);
+    return null;
+  }
+
+  return entry.traceId;
+}
+
+/**
+ * Expose cache for testing purposes only.
+ * @internal
+ */
+export function _getTraceIdCacheForTesting(): Map<string, TraceIdCacheEntry> {
+  return traceIdCache;
+}
 
 // Type definitions for trace and span contexts
 export interface TraceContext {
@@ -41,67 +122,81 @@ export interface GenerationParams {
 }
 
 /**
- * Wrap an async operation in a Langfuse trace.
+ * Trace wrapper interface that provides access to trace ID and span methods.
+ * Compatible with both the new SDK and legacy patterns.
+ */
+export interface TraceWrapper {
+  /** The trace ID (may be undefined if tracing is disabled) */
+  id: string | undefined;
+  /** Update the trace with additional data */
+  update: (data: LangfuseSpanAttributes) => void;
+  /** Create a nested span using the new SDK */
+  startSpan: (name: string, attributes?: LangfuseSpanAttributes) => NewLangfuseSpan;
+  /** Create a nested generation using the new SDK */
+  startGeneration: (name: string, attributes?: LangfuseGenerationAttributes) => { end: () => void };
+  /** The underlying new SDK span for direct access */
+  _span: NewLangfuseSpan;
+}
+
+/**
+ * Wrap an async operation in a Langfuse trace using the new @langfuse/tracing SDK.
  * Use this for all top-level handlers (Slack events, API endpoints).
  *
  * @example
- * await startActiveObservation('user-message-handler', async (trace) => {
- *   trace.update({ input: message.text, userId: user.id });
- *   const result = await processMessage(message);
- *   trace.update({ output: result });
- *   return result;
- * });
- *
- * @example
  * await startActiveObservation({
- *   name: 'slack-message',
+ *   name: 'app-mention-handler',
  *   userId: 'U123',
  *   sessionId: 'thread_ts',
  *   input: { text: 'Hello' },
  * }, async (trace) => {
- *   // Process message
+ *   // Create nested spans
+ *   const span = trace.startSpan('processing', { input: data });
+ *   // ... work ...
+ *   span.update({ output: result }).end();
+ *   
+ *   trace.update({ output: response });
  *   return response;
  * });
  */
 export async function startActiveObservation<T>(
   context: TraceContext | string,
-  operation: (_trace: LangfuseTrace) => Promise<T>
+  operation: (trace: TraceWrapper) => Promise<T>
 ): Promise<T> {
-  const langfuse = getLangfuse();
-  const tracer = trace.getTracer('orion-slack-agent');
   const ctx = typeof context === 'string' ? { name: context } : context;
-
-  // Create Langfuse trace (langfuse always returns a client, possibly no-op)
-  const langfuseTrace: LangfuseTrace = langfuse
-    ? langfuse.trace({
-        name: ctx.name,
-        userId: ctx.userId,
-        sessionId: ctx.sessionId,
-        input: ctx.input,
-        metadata: ctx.metadata,
-      })
-    : {
-        id: 'noop-trace-id',
-        update: (): void => {},
-        span: (): LangfuseSpan => ({ end: (): void => {} }),
-        generation: (): void => {},
-      };
-
   const startTime = Date.now();
 
-  return tracer.startActiveSpan(ctx.name, async (span) => {
-    span.setAttributes({
-      'orion.user_id': ctx.userId ?? 'unknown',
-      'orion.session_id': ctx.sessionId ?? 'unknown',
-      'orion.trace.input_present': ctx.input !== undefined,
+  // Use the new SDK's startActiveObservation
+  return lfStartActiveObservation(ctx.name, async (span) => {
+    // Set initial attributes via update
+    span.update({
+      input: ctx.input,
+      metadata: {
+        ...ctx.metadata,
+        userId: ctx.userId,
+        sessionId: ctx.sessionId,
+      },
     });
 
-    try {
-      const result = await operation(langfuseTrace);
+    // Create a wrapper that provides a clean interface
+    const traceWrapper: TraceWrapper = {
+      id: span.traceId,
+      update: (data: LangfuseSpanAttributes) => {
+        span.update(data);
+      },
+      startSpan: (name: string, attributes?: LangfuseSpanAttributes) => {
+        return span.startObservation(name, attributes);
+      },
+      startGeneration: (name: string, attributes: LangfuseGenerationAttributes = {}) => {
+        return span.startObservation(name, attributes, { asType: 'generation' });
+      },
+      _span: span,
+    };
 
+    try {
+      const result = await operation(traceWrapper);
       const durationMs = Date.now() - startTime;
 
-      langfuseTrace.update({
+      span.update({
         output: result,
         metadata: {
           ...ctx.metadata,
@@ -110,17 +205,11 @@ export async function startActiveObservation<T>(
         },
       });
 
-      span.setAttributes({
-        'orion.trace.status': 'success',
-        'orion.trace.duration_ms': durationMs,
-      });
-      span.setStatus({ code: SpanStatusCode.OK });
-      span.end();
       return result;
     } catch (error) {
       const durationMs = Date.now() - startTime;
 
-      langfuseTrace.update({
+      span.update({
         metadata: {
           ...ctx.metadata,
           durationMs,
@@ -129,63 +218,41 @@ export async function startActiveObservation<T>(
         },
       });
 
-      span.setAttributes({
-        'orion.trace.status': 'error',
-        'orion.trace.duration_ms': durationMs,
-      });
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      span.end();
       throw error;
     }
   });
 }
 
+// Legacy createSpan and logGeneration removed — use trace.startSpan() and trace.startGeneration() instead
+
 /**
- * Create a span within an existing trace.
- * Use this for sub-operations within a handler.
+ * Start a manual span that must be explicitly ended.
+ * Use this when you need control over the observation lifecycle.
  *
  * @example
- * const gatherSpan = createSpan(trace, { name: 'gather-context' });
- * const context = await gatherContext();
- * gatherSpan.end({ output: context });
+ * const span = startSpan('processing', { input: data });
+ * const result = await process(data);
+ * span.update({ output: result }).end();
  */
-export function createSpan(
-  trace: LangfuseTrace,
-  context: SpanContext
-): LangfuseSpan {
-  return trace.span({
-    name: context.name,
-    input: context.input,
-    metadata: context.metadata,
-  });
+export function startSpan(
+  name: string,
+  attributes?: LangfuseSpanAttributes
+): NewLangfuseSpan {
+  return lfStartObservation(name, attributes);
 }
 
 /**
- * Log a generation (LLM call) within a trace.
- * Use this for Claude API calls.
+ * Start a manual generation observation that must be explicitly ended.
+ * Use this for LLM calls when you need control over the observation lifecycle.
  *
  * @example
- * logGeneration(trace, {
- *   name: 'claude-response',
- *   model: 'claude-sonnet-4-20250514',
- *   input: prompt,
- *   output: response,
- *   usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
- * });
+ * const gen = startGeneration('llm-call', { model: 'claude-3' });
+ * const result = await callLLM(prompt);
+ * gen.update({ output: result, usageDetails: { input: 100, output: 50 } }).end();
  */
-export function logGeneration(
-  trace: LangfuseTrace,
-  params: GenerationParams
-): void {
-  trace.generation({
-    name: params.name,
-    model: params.model,
-    input: params.input,
-    output: params.output,
-    usage: params.usage,
-    metadata: params.metadata,
-  });
+export function startGeneration(
+  name: string,
+  attributes: LangfuseGenerationAttributes = {}
+): NewLangfuseSpan {
+  return lfStartObservation(name, attributes, { asType: 'generation' });
 }

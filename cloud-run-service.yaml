@@ -1,0 +1,94 @@
+# Cloud Run Service Configuration
+# Apply with: gcloud run services replace cloud-run-service.yaml --region us-central1
+#
+# @see Story 1.6 - Docker & Cloud Run Deployment
+# @see AR20 - 4 minute hard timeout (below Cloud Run default)
+# @see AR33 - Docker deployment to Google Cloud Run (HTTP mode)
+# @see NFR13 - min-instances = 1 for cold start mitigation
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: orion-slack-agent
+  labels:
+    cloud.googleapis.com/location: us-central1
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Cold start mitigation (NFR13)
+        autoscaling.knative.dev/minScale: '1'
+        # Auto-scaling limit
+        autoscaling.knative.dev/maxScale: '10'
+        # Startup CPU boost for faster cold starts
+        run.googleapis.com/startup-cpu-boost: 'true'
+    spec:
+      containerConcurrency: 80
+      # Request timeout (AR20 - 4 minutes)
+      timeoutSeconds: 240
+      serviceAccountName: 201626763325-compute@developer.gserviceaccount.com
+      containers:
+        - image: us-central1-docker.pkg.dev/ai-workflows-459123/orion/orion-slack-agent:latest
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: USE_E2B_SANDBOX
+              value: 'true'
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: slack-bot-token
+            - name: SLACK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: slack-signing-secret
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: anthropic-api-key
+            - name: ANTHROPIC_MODEL
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: anthropic-model
+            - name: GCS_MEMORIES_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: gcs-memories-bucket
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: langfuse-public-key
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: langfuse-secret-key
+            - name: E2B_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: e2b-api-key
+          resources:
+            limits:
+              cpu: '1'
+              memory: 512Mi
+          startupProbe:
+            timeoutSeconds: 240
+            periodSeconds: 240
+            failureThreshold: 1
+            tcpSocket:
+              port: 8080
+  traffic:
+    - percent: 100
+      latestRevision: true

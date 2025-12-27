@@ -15,8 +15,11 @@
  * @see https://docs.slack.dev/tools/bolt-js/concepts/ai-apps/
  */
 
-import { Assistant } from '@slack/bolt';
+import bolt from '@slack/bolt';
+import type { Assistant as AssistantType } from '@slack/bolt';
 import { handleThreadStarted } from './handlers/thread-started.js';
+
+const { Assistant } = bolt;
 import { handleThreadContextChanged } from './handlers/thread-context-changed.js';
 import { handleAssistantUserMessage } from './handlers/user-message.js';
 
@@ -25,7 +28,7 @@ import { handleAssistantUserMessage } from './handlers/user-message.js';
  *
  * @returns Configured Assistant instance
  */
-export function createAssistant(): Assistant {
+export function createAssistant(): AssistantType {
   return new Assistant({
     threadStarted: handleThreadStarted,
     threadContextChanged: handleThreadContextChanged,

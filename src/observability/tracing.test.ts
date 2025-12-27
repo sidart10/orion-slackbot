@@ -1,50 +1,46 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Create mock functions that persist across tests
-const mockTraceUpdate = vi.fn();
+const mockSpanUpdate = vi.fn().mockReturnThis();
 const mockSpanEnd = vi.fn();
-const mockGeneration = vi.fn();
-const mockSpan = vi.fn(() => ({
+
+interface MockSpan {
+  update: typeof mockSpanUpdate;
+  end: typeof mockSpanEnd;
+  traceId: string;
+  id: string;
+  startObservation: () => MockSpan;
+}
+
+const mockStartObservation = vi.fn((): MockSpan => ({
+  update: mockSpanUpdate,
   end: mockSpanEnd,
-  setStatus: vi.fn(),
-  setAttributes: vi.fn(),
+  traceId: 'test-trace-id',
+  id: 'test-span-id',
+  startObservation: mockStartObservation,
 }));
 
-// Track whether langfuse should be available
-let langfuseEnabled = true;
-
-// Mock getLangfuse
-vi.mock('./langfuse.js', () => ({
-  getLangfuse: vi.fn(() => {
-    if (!langfuseEnabled) return null;
-    return {
-      trace: vi.fn(() => ({
-        id: 'test-trace-id',
-        update: mockTraceUpdate,
-        span: mockSpan,
-        generation: mockGeneration,
-      })),
-    };
-  }),
+// Mock @langfuse/tracing
+vi.mock('@langfuse/tracing', () => ({
+  startActiveObservation: vi.fn(
+    async (_name: string, fn: (span: unknown) => Promise<unknown>) => {
+      const mockSpan = {
+        update: mockSpanUpdate,
+        end: mockSpanEnd,
+        traceId: 'test-trace-id',
+        id: 'test-span-id',
+        startObservation: mockStartObservation,
+      };
+      return fn(mockSpan);
+    }
+  ),
+  startObservation: mockStartObservation,
+  updateActiveObservation: vi.fn(),
 }));
-
-// Mock OpenTelemetry tracer to avoid creating real spans
-vi.mock('@opentelemetry/api', () => {
-  return {
-    SpanStatusCode: { OK: 1, ERROR: 2 },
-    trace: {
-      getTracer: (): { startActiveSpan: (_name: string, fn: (span: unknown) => unknown) => unknown } => ({
-        startActiveSpan: (_name: string, fn: (span: unknown) => unknown): unknown =>
-          fn(mockSpan()),
-      }),
-    },
-  };
-});
 
 describe('tracing utilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    langfuseEnabled = true;
   });
 
   afterEach(() => {
@@ -58,16 +54,28 @@ describe('tracing utilities', () => {
       expect(typeof startActiveObservation).toBe('function');
     });
 
-    it('should export createSpan function', async () => {
-      const { createSpan } = await import('./tracing.js');
-      expect(createSpan).toBeDefined();
-      expect(typeof createSpan).toBe('function');
+    it('should export startSpan function', async () => {
+      const { startSpan } = await import('./tracing.js');
+      expect(startSpan).toBeDefined();
+      expect(typeof startSpan).toBe('function');
     });
 
-    it('should export logGeneration function', async () => {
-      const { logGeneration } = await import('./tracing.js');
-      expect(logGeneration).toBeDefined();
-      expect(typeof logGeneration).toBe('function');
+    it('should export startGeneration function', async () => {
+      const { startGeneration } = await import('./tracing.js');
+      expect(startGeneration).toBeDefined();
+      expect(typeof startGeneration).toBe('function');
+    });
+
+    it('should export setTraceIdForMessage function', async () => {
+      const { setTraceIdForMessage } = await import('./tracing.js');
+      expect(setTraceIdForMessage).toBeDefined();
+      expect(typeof setTraceIdForMessage).toBe('function');
+    });
+
+    it('should export getTraceIdFromMessageTs function', async () => {
+      const { getTraceIdFromMessageTs } = await import('./tracing.js');
+      expect(getTraceIdFromMessageTs).toBeDefined();
+      expect(typeof getTraceIdFromMessageTs).toBe('function');
     });
   });
 
@@ -100,23 +108,33 @@ describe('tracing utilities', () => {
       expect(result).toBe('done');
     });
 
-    it('should update trace with output on success', async () => {
+    it('should provide trace wrapper with id', async () => {
       const { startActiveObservation } = await import('./tracing.js');
 
-      await startActiveObservation('test', async () => ({ data: 'result' }));
+      let capturedTraceId: string | undefined;
+      await startActiveObservation('test', async (trace) => {
+        capturedTraceId = trace.id;
+        return 'done';
+      });
 
-      expect(mockTraceUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          output: { data: 'result' },
-          metadata: expect.objectContaining({
-            status: 'success',
-            durationMs: expect.any(Number),
-          }),
-        })
-      );
+      expect(capturedTraceId).toBe('test-trace-id');
     });
 
-    it('should update trace with error details on failure', async () => {
+    it('should provide trace wrapper with startSpan method', async () => {
+      const { startActiveObservation } = await import('./tracing.js');
+
+      await startActiveObservation('test', async (trace) => {
+        const span = trace.startSpan('child-span', { input: 'test' });
+        expect(span).toBeDefined();
+        expect(span.update).toBeDefined();
+        expect(span.end).toBeDefined();
+        return 'done';
+      });
+
+      expect(mockStartObservation).toHaveBeenCalledWith('child-span', { input: 'test' });
+    });
+
+    it('should rethrow errors from operation', async () => {
       const { startActiveObservation } = await import('./tracing.js');
 
       await expect(
@@ -124,129 +142,63 @@ describe('tracing utilities', () => {
           throw new Error('test error');
         })
       ).rejects.toThrow('test error');
-
-      expect(mockTraceUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          metadata: expect.objectContaining({
-            status: 'error',
-            error: 'test error',
-            durationMs: expect.any(Number),
-          }),
-        })
-      );
-    });
-
-    it('should track duration automatically', async () => {
-      const { startActiveObservation } = await import('./tracing.js');
-
-      await startActiveObservation('test', async () => {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        return 'done';
-      });
-
-      const updateCall = mockTraceUpdate.mock.calls[0][0];
-      expect(updateCall.metadata.durationMs).toBeGreaterThanOrEqual(50);
-    });
-
-    it('should work without Langfuse client (no-op mode)', async () => {
-      langfuseEnabled = false;
-
-      // Need to reset module to pick up new langfuseEnabled value
-      vi.resetModules();
-      const { startActiveObservation } = await import('./tracing.js');
-
-      const result = await startActiveObservation('test', async () => 'result');
-
-      expect(result).toBe('result');
-      // mockTraceUpdate should not be called when langfuse is disabled
     });
   });
 
-  describe('createSpan', () => {
-    it('should create a span on the trace', async () => {
-      const { createSpan } = await import('./tracing.js');
+  describe('trace ID cache for feedback correlation', () => {
+    it('should store and retrieve trace ID by message timestamp', async () => {
+      const { setTraceIdForMessage, getTraceIdFromMessageTs } =
+        await import('./tracing.js');
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mockParentTrace = { span: mockSpan } as any;
+      const messageTs = '1234567890.123456';
+      const traceId = 'trace-abc123';
 
-      createSpan(mockParentTrace, {
-        name: 'child-span',
-        input: { data: 'input' },
-        metadata: { phase: 'gather' },
-      });
+      setTraceIdForMessage(messageTs, traceId);
+      const retrieved = getTraceIdFromMessageTs(messageTs);
 
-      expect(mockSpan).toHaveBeenCalledWith({
-        name: 'child-span',
-        input: { data: 'input' },
-        metadata: { phase: 'gather' },
-      });
+      expect(retrieved).toBe(traceId);
     });
 
-    it('should return the span for later ending', async () => {
-      const { createSpan } = await import('./tracing.js');
+    it('should return null for unknown message timestamp', async () => {
+      const { getTraceIdFromMessageTs } = await import('./tracing.js');
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mockParentTrace = { span: mockSpan } as any;
-      const span = createSpan(mockParentTrace, { name: 'test' });
+      const result = getTraceIdFromMessageTs('unknown.timestamp');
 
-      expect(span).toBeDefined();
-      expect(span.end).toBeDefined();
-    });
-  });
-
-  describe('logGeneration', () => {
-    it('should log a generation on the trace', async () => {
-      const { logGeneration } = await import('./tracing.js');
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mockParentTrace = { generation: mockGeneration } as any;
-
-      logGeneration(mockParentTrace, {
-        name: 'claude-call',
-        model: 'claude-sonnet-4-20250514',
-        input: 'prompt',
-        output: 'response',
-        usage: {
-          promptTokens: 100,
-          completionTokens: 50,
-          totalTokens: 150,
-        },
-        metadata: { temperature: 0.7 },
-      });
-
-      expect(mockGeneration).toHaveBeenCalledWith({
-        name: 'claude-call',
-        model: 'claude-sonnet-4-20250514',
-        input: 'prompt',
-        output: 'response',
-        usage: {
-          promptTokens: 100,
-          completionTokens: 50,
-          totalTokens: 150,
-        },
-        metadata: { temperature: 0.7 },
-      });
+      expect(result).toBeNull();
     });
 
-    it('should work without usage info', async () => {
-      const { logGeneration } = await import('./tracing.js');
+    it('should overwrite existing trace ID for same message timestamp', async () => {
+      const { setTraceIdForMessage, getTraceIdFromMessageTs } =
+        await import('./tracing.js');
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mockParentTrace = { generation: mockGeneration } as any;
+      const messageTs = '1234567890.999999';
+      setTraceIdForMessage(messageTs, 'old-trace');
+      setTraceIdForMessage(messageTs, 'new-trace');
 
-      logGeneration(mockParentTrace, {
-        name: 'simple-call',
-        model: 'claude-sonnet-4-20250514',
-        input: 'prompt',
-        output: 'response',
-      });
+      expect(getTraceIdFromMessageTs(messageTs)).toBe('new-trace');
+    });
 
-      expect(mockGeneration).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: 'simple-call',
-          usage: undefined,
-        })
-      );
+    it('should return null for expired entries (older than 24 hours)', async () => {
+      const {
+        setTraceIdForMessage,
+        getTraceIdFromMessageTs,
+        _getTraceIdCacheForTesting,
+      } = await import('./tracing.js');
+
+      const messageTs = '1234567890.expired';
+      const traceId = 'trace-expired';
+
+      setTraceIdForMessage(messageTs, traceId);
+
+      // Manually expire the entry by manipulating timestamp
+      const cache = _getTraceIdCacheForTesting();
+      const entry = cache.get(messageTs);
+      if (entry) {
+        entry.timestamp = Date.now() - 25 * 60 * 60 * 1000; // 25 hours ago
+      }
+
+      const result = getTraceIdFromMessageTs(messageTs);
+      expect(result).toBeNull();
     });
   });
 });

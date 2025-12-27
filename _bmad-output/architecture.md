@@ -2,15 +2,18 @@
 stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8]
 inputDocuments:
   - "_bmad-output/prd.md"
+  - "_bmad-output/analysis/brainstorming-session-2025-12-22.md"
+  - "_bmad-output/sprint-change-proposal-api-alignment-2025-12-22.md"
   - "_bmad-output/analysis/research/technical-orion-slack-agent-research-2024-12-17.md"
   - "_bmad-output/analysis/product-brief-2025-12-orion-slack-agent-2025-12-17.md"
 workflowType: 'architecture'
 lastStep: 8
 status: 'complete'
-completedAt: '2025-12-17'
+completedAt: '2025-12-22'
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
-date: '2025-12-17'
+date: '2025-12-22'
+course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22)'
 hasProjectContext: false
 ---
 
@@ -31,10 +34,12 @@ Orion's 43 functional requirements span 7 architectural domains:
 | Agent Core | FR1-6 | Agent loop execution, verification, subagents, context management |
 | Research | FR7-12 | Multi-source search, synthesis, parallel information gathering |
 | Communication | FR13-18 | Slack integration, streaming, thread context, suggested prompts |
-| Code Execution | FR19-23 | On-the-fly code generation, sandboxed execution, API calls |
+| Code Execution | FR19-23 | On-the-fly code generation, sandboxed execution, API calls *(Phase 2)* |
 | Extensions | FR24-29 | Skills, Commands, MCP servers — composable tool layer |
 | Knowledge | FR30-34 | Q&A, troubleshooting, domain-specific recommendations |
 | Observability | FR35-40 | Langfuse tracing, prompt versioning, cost tracking |
+| Persistent Memory | FR44-46 | Cross-session memory via GCS, user/session scopes |
+| Slack AI App | FR47-50 | Feedback buttons, dynamic status, error messaging |
 
 **Non-Functional Requirements:**
 
@@ -43,29 +48,30 @@ Orion's 43 functional requirements span 7 architectural domains:
 | Response time (simple) | 1-3 seconds | Async streaming, no blocking |
 | Response time (tools) | 3-10 seconds | Parallel tool execution |
 | Deep research | <5 minutes | Subagent parallelization |
-| Uptime | >99.5% | Min 1 instance, health checks |
-| Tool success rate | >98% | Retry logic, fallbacks |
-| Cost per query | <$0.10 | Token optimization, caching |
-| Concurrent users | 50 | Vercel serverless auto-scaling |
+| Request timeout | 300 seconds | Cloud Run long-running support |
+| Uptime | >99.5% | min instances = 1, health checks |
+| Tool success rate | >98% | Retry logic, graceful degradation |
+| Cost per query | <$0.10 | Token optimization, prompt caching |
+| Concurrent users | 50 | Cloud Run auto-scaling |
 
 **Scale & Complexity:**
 
 - Primary domain: Backend platform with Slack integration
 - Complexity level: Medium-High
 - Estimated architectural components: 8-10 major subsystems
-- Deployment: Vercel Serverless Functions
+- Deployment: Google Cloud Run (HTTP mode, containerized)
 
 ### Technical Constraints & Dependencies
 
 | Constraint | Impact |
 |------------|--------|
-| **Anthropic API (messages.create with tools)** | Direct API calls with tool_use for MCP integration; no subprocess requirements |
-| **LLM provider + model selection** | Must be runtime-configurable (provider + model ID) to avoid hardcoding and enable switching/routing |
+| **Direct Anthropic API** | `messages.create()` with `tool_use` for agent loop; no Agent SDK |
+| **Model selection** | Config-driven (provider + model ID) — no hardcoded model names |
 | **Slack Bolt + Assistant API** | HTTP webhooks, streaming, thread management |
-| **MCP 1.0 Protocol** | Standard interface for all external tools (Rube/Composio as primary provider) |
-| **Vercel Serverless** | Stateless, auto-scaling; 60s timeout on Pro plan |
+| **MCP 1.0 Protocol** | Generic HTTP streamable client for any MCP server at runtime |
+| **Google Cloud Run** | 300s timeout, min 1 instance, 2GB memory |
 | **Langfuse** | OpenTelemetry integration, prompt management |
-| **Large model context (model-dependent)** | Requires compaction for long threads |
+| **Large model context** | Model-dependent; compaction manages long threads |
 
 ### Cross-Cutting Concerns Identified
 
@@ -80,70 +86,113 @@ Orion's 43 functional requirements span 7 architectural domains:
 
 ### Primary Technology Domain
 
-**Agentic Slack Platform** — A specialized agent system, not a typical web application. Standard web starters (Next.js, T3, etc.) are not appropriate for this architecture.
+**Agentic Slack Platform** using Direct Anthropic API with Agent Skills support.
 
-### Starter Options Considered
-
-| Option | Description | Verdict |
-|--------|-------------|---------|
-| **Custom Structure** | Build from scratch following research patterns | ✅ Selected |
-| **Minimal TS Starter** | Generic Node.js TypeScript template | ❌ Would need significant restructuring |
-| **Web App Starters** | Next.js, T3, etc. | ❌ Wrong paradigm for agentic system |
-
-### Selected Approach: Custom Project Structure
+### Selected Approach: Custom Structure (Direct API + Agent Skills)
 
 **Rationale:**
-- Research document already defines optimal structure for agentic Slack bots
-- BMAD-inspired file-based agent definitions require specific organization
-- No existing starter matches Anthropic API + Slack Bolt + Langfuse pattern
-- Avoids fighting against starter assumptions designed for web apps
 
-**Project Structure:**
+- Claude Agent SDK failed on Vercel (sandbox latency issues)
+- Direct Anthropic API provides full agent loop capability via `messages.create()` + `tool_use`
+- Google Cloud Run provides 300s timeout (vs Vercel's 60s)
+- Agent Skills is an open file format ([agentskills.io](https://agentskills.io)) — can be implemented on any agent framework
+- MCP via generic HTTP streamable client (not SDK-managed)
+
+### What Claude Agent SDK Provides (We're Replacing)
+
+| SDK Feature | Our Implementation |
+|-------------|-------------------|
+| `query()` function | Custom agent loop: `while (stop_reason === 'tool_use')` |
+| MCP server config | Generic MCP client (HTTP streamable transport) |
+| Subagent orchestration | Parallel `messages.create()` calls + `Promise.all()` |
+| Skill loading | Custom skill loader reading `SKILL.md` files |
+| Context compaction | Sliding window on messages array |
+
+### Agent Skills Implementation (Direct API)
+
+Agent Skills is an open standard from [agentskills.io](https://agentskills.io/home) — folders of instructions, scripts, and resources that agents can discover and use. Implementation pattern:
+
+```typescript
+// Load skills from .skills/ directory
+async function loadSkills(): Promise<Skill[]> {
+  const skillDirs = await glob('.skills/*/SKILL.md');
+  return Promise.all(skillDirs.map(parseSkillMd));
+}
+
+// Include in system prompt or as tool definitions
+function buildSystemPrompt(skills: Skill[]): string {
+  const skillInstructions = skills.map(s => 
+    `## Skill: ${s.name}\n${s.description}\n${s.instructions}`
+  ).join('\n\n');
+  
+  return `${BASE_SYSTEM_PROMPT}\n\n# Available Skills\n${skillInstructions}`;
+}
+```
+
+### Project Structure
 
 ```
 orion-slack-agent/
 ├── src/
-│   ├── index.ts                    # Entry point (imports instrumentation first)
-│   ├── instrumentation.ts          # OpenTelemetry + Langfuse setup
+│   ├── index.ts                    # Entry point
+│   ├── instrumentation.ts          # OpenTelemetry + Langfuse
 │   ├── config/
-│   │   └── environment.ts          # Environment variables
-│   ├── observability/
-│   │   ├── langfuse.ts             # Langfuse client singleton
-│   │   └── tracing.ts              # Tracing utilities
-│   ├── slack/
-│   │   ├── app.ts                  # Slack Bolt app setup
-│   │   ├── assistant.ts            # Assistant class configuration
+│   │   └── environment.ts
+│   ├── slack/                      # ✅ Already implemented
+│   │   ├── app.ts
+│   │   ├── assistant.ts
 │   │   └── handlers/
-│   │       ├── threadStarted.ts
-│   │       ├── threadContextChanged.ts
-│   │       └── userMessage.ts
-│   ├── agent/
-│   │   ├── orion.ts                # Anthropic API integration (messages.create with tools)
-│   │   ├── loader.ts               # BMAD-style agent loader
-│   │   └── tools.ts                # MCP tool definitions for Claude
-│   └── utils/
-│       └── streaming.ts            # Streaming utilities
-├── .orion/                         # Agent definitions (BMAD-inspired)
-│   ├── agents/                     # Agent personas
-│   ├── workflows/                  # Multi-step workflows
-│   ├── tasks/                      # Reusable tasks
-│   └── config.yaml
-├── .claude/                        # Agent skill and command definitions
-│   ├── skills/                     # Auto-discovered Skills
-│   └── commands/                   # Slash Commands
-├── orion-context/                  # Agentic search context directory
-│   ├── conversations/
-│   ├── user-preferences/
-│   └── knowledge/
-├── Dockerfile
-├── docker-compose.yml              # Local development
+│   ├── agent/                      # 🆕 To build
+│   │   ├── loop.ts                 # while (stop_reason === 'tool_use')
+│   │   ├── orion.ts                # Anthropic messages.create wrapper
+│   │   ├── subagents.ts            # Parallel spawner
+│   │   └── prompts/
+│   │       └── system.ts
+│   ├── skills/                     # 🆕 Agent Skills loader
+│   │   ├── loader.ts               # Parse SKILL.md files
+│   │   └── types.ts
+│   ├── tools/                      # 🆕 Tool layer
+│   │   ├── registry.ts             # Unified tool interface
+│   │   ├── memory/
+│   │   │   └── handler.ts          # Anthropic Memory Tool → GCS
+│   │   └── mcp/
+│   │       ├── client.ts           # Generic MCP client
+│   │       └── discovery.ts
+│   ├── observability/              # ✅ Already implemented
+│   └── utils/                      # ✅ Already implemented
+├── .skills/                        # Agent Skills (SKILL.md files)
+│   ├── slack-research/
+│   │   └── SKILL.md
+│   ├── code-review/
+│   │   └── SKILL.md
+│   └── deep-research/
+│       └── SKILL.md
+├── docker/
+│   └── Dockerfile
 ├── package.json
-├── tsconfig.json
-├── .env.example
-└── README.md
+└── ...
 ```
 
-**Architectural Decisions Established:**
+### Core Dependencies
+
+```json
+{
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.x",
+    "@slack/bolt": "^4.x",
+    "@google-cloud/storage": "^7.x",
+    "langfuse": "^3.x",
+    "@opentelemetry/sdk-node": "^1.x",
+    "dotenv": "^16.x",
+    "yaml": "^2.x",
+    "glob": "^10.x"
+  }
+}
+```
+
+**Note:** Use `@anthropic-ai/sdk` (base SDK), NOT `@anthropic-ai/claude-agent-sdk`.
+
+### Architectural Decisions Established by Starter
 
 | Category | Decision | Rationale |
 |----------|----------|-----------|
@@ -153,824 +202,909 @@ orion-slack-agent/
 | **Linting** | ESLint + Prettier | Standard, well-supported |
 | **Testing** | Vitest | Fast, ESM-native |
 | **Build** | tsc (TypeScript compiler) | Simple, reliable |
+| **Deployment** | Google Cloud Run | 300s timeout, Docker support |
+| **Agent Framework** | Direct Anthropic API | Full control, no SDK latency |
+| **Skills** | Agent Skills (SKILL.md) | Open standard, file-based |
 
-**Core Dependencies:**
+## Memory Architecture (Step 4)
+
+### Research Validation
+
+Architecture validated against production patterns:
+
+| Source | Pattern | Fit for Orion |
+|--------|---------|---------------|
+| **Anthropic Memory Tool** | Client-side tool, `/memories` directory, beta API | ✅ Primary |
+| **Mem0** (26k+ ⭐) | Vector DB + LLM semantic memory | Future enhancement |
+| **LangGraph Checkpointers** | PostgreSQL/SQLite state persistence | Not fit (Python-native) |
+
+### Selected Approach: Anthropic Memory Tool + Google Cloud Storage
+
+**Rationale:**
+- Official Anthropic pattern — designed for production agents
+- Client-side control — YOU implement the storage backend
+- Enables cross-conversation learning and project context
+- Compatible with Direct API approach (no Agent SDK required)
+- GCS provides durable, scalable file storage for Cloud Run
+
+### How Anthropic Memory Tool Works
+
+1. Enable with beta header: `context-management-2025-06-27`
+2. Claude auto-checks `/memories` directory before tasks
+3. Claude makes tool calls: `view`, `create`, `update`, `delete`
+4. Your handler executes operations against your storage
+
+```typescript
+// Example memory tool call from Claude
+{
+  "type": "tool_use",
+  "name": "memory",
+  "input": {
+    "command": "view",
+    "path": "/memories"
+  }
+}
+
+// Your handler responds with file listing
+{
+  "type": "tool_result",
+  "content": "/memories/project-context.md\n/memories/user-prefs/sid.json"
+}
+```
+
+### Memory Storage Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    CLOUD RUN CONTAINER                       │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │  Agent Loop (messages.create + tool_use)                │ │
+│  │  └── Memory Tool Handler                                 │ │
+│  │      └── memoryToolHandler.ts                           │ │
+│  │          ├── view(path)   → GCS list/read               │ │
+│  │          ├── create(path) → GCS write                    │ │
+│  │          ├── update(path) → GCS overwrite                │ │
+│  │          └── delete(path) → GCS delete                   │ │
+│  └─────────────────────────────────────────────────────────┘ │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                               ▼
+              ┌─────────────────────────────────┐
+              │     Google Cloud Storage        │
+              │  gs://orion-memories/           │
+              │  ├── /memories/                 │
+              │  │   ├── project-context.md     │
+              │  │   ├── user-prefs/            │
+              │  │   └── session-state/         │
+              │  └── (versioning enabled)       │
+              └─────────────────────────────────┘
+```
+
+### Implementation
+
+**Memory Tool Handler:**
+
+```typescript
+// src/tools/memory/handler.ts
+import { Storage } from '@google-cloud/storage';
+
+const storage = new Storage();
+const bucket = storage.bucket(process.env.GCS_MEMORIES_BUCKET!);
+
+export async function handleMemoryTool(input: { command: string; path: string; content?: string }) {
+  const { command, path, content } = input;
+  const gcsPath = path.replace('/memories/', '');
+
+  switch (command) {
+    case 'view':
+      if (path === '/memories' || path.endsWith('/')) {
+        // List directory
+        const [files] = await bucket.getFiles({ prefix: gcsPath });
+        return files.map(f => `/memories/${f.name}`).join('\n') || 'Empty directory';
+      }
+      // Read file
+      const file = bucket.file(gcsPath);
+      const [fileContent] = await file.download();
+      return fileContent.toString('utf-8');
+
+    case 'create':
+    case 'update':
+      await bucket.file(gcsPath).save(content!, { contentType: 'text/plain' });
+      return `${command === 'create' ? 'Created' : 'Updated'} ${path}`;
+
+    case 'delete':
+      await bucket.file(gcsPath).delete();
+      return `Deleted ${path}`;
+
+    default:
+      throw new Error(`Unknown memory command: ${command}`);
+  }
+}
+```
+
+**Agent Loop Integration:**
+
+```typescript
+// src/agent/loop.ts
+import Anthropic from '@anthropic-ai/sdk';
+import { handleMemoryTool } from '../tools/memory/handler';
+
+const anthropic = new Anthropic();
+
+async function runAgentLoop(userMessage: string) {
+  const messages: Anthropic.MessageParam[] = [
+    { role: 'user', content: userMessage }
+  ];
+
+  while (true) {
+    const response = await anthropic.messages.create({
+      model: process.env.ANTHROPIC_MODEL!,
+      max_tokens: 4096,
+      tools: [{ type: 'memory' }],  // Enable memory tool
+      messages,
+      betas: ['context-management-2025-06-27']  // Required for memory
+    });
+
+    // Handle tool calls
+    for (const block of response.content) {
+      if (block.type === 'tool_use' && block.name === 'memory') {
+        const result = await handleMemoryTool(block.input as any);
+        messages.push({
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: block.id, content: result }]
+        });
+      }
+    }
+
+    if (response.stop_reason !== 'tool_use') {
+      return response;
+    }
+  }
+}
+```
+
+### Memory Structure
+
+```
+/memories/
+├── global/                      # Shared across all users
+│   ├── project-context.md       # Orion's understanding of itself
+│   └── learned-patterns.md      # Cross-conversation insights
+├── users/                       # Per-user memories
+│   └── {slack_user_id}/
+│       ├── preferences.json     # User-specific settings
+│       └── history.md           # Summarized past interactions
+└── sessions/                    # Per-conversation context
+    └── {thread_ts}/
+        └── context.md           # Thread-specific state
+```
+
+### GCS Configuration
+
+**Environment Variables:**
+
+```bash
+GCS_MEMORIES_BUCKET=orion-memories-prod
+```
+
+**GCS Bucket Settings:**
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| Location | us-central1 | Same region as Cloud Run |
+| Versioning | Enabled | Recover from accidental deletes |
+| Lifecycle | Keep last 10 versions | Limit storage costs |
+| IAM | Cloud Run service account only | Principle of least privilege |
+
+### Dependencies Added
 
 ```json
 {
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.x",
-    "@slack/bolt": "^3.x",
-    "@langfuse/client": "^4.x",
-    "@langfuse/tracing": "^4.x",
-    "@langfuse/otel": "^4.x",
-    "@opentelemetry/sdk-node": "^1.x",
-    "dotenv": "^16.x",
-    "yaml": "^2.x"
-  },
-  "devDependencies": {
-    "@types/node": "^20.x",
-    "typescript": "^5.x",
-    "eslint": "^8.x",
-    "prettier": "^3.x",
-    "vitest": "^1.x"
+    "@google-cloud/storage": "^7.x"
   }
 }
 ```
 
-**Development Workflow:**
+### Security Considerations
 
-| Command | Purpose |
-|---------|---------|
-| `pnpm dev` | Local development with hot reload |
-| `pnpm build` | TypeScript compilation |
-| `pnpm test` | Run Vitest tests |
-| `pnpm lint` | ESLint + Prettier check |
-| `pnpm docker:build` | Build Docker image |
+| Concern | Mitigation |
+|---------|------------|
+| Path traversal | Validate all paths start with `/memories/` |
+| Data isolation | Prefix with user/session IDs |
+| Sensitive data | Don't store secrets; use for context only |
+| Access control | GCS IAM + Cloud Run service account |
 
-**Note:** Project initialization using this structure should be the first implementation story.
+### Future Enhancement: Mem0 Semantic Search
 
-## Core Architectural Decisions
-
-### Decision Priority Analysis
-
-**Critical Decisions (Block Implementation):**
-- Agent execution model (pluggable LLM layer; Anthropic API initially)
-- Context management strategy
-- Tool layer architecture
-- Deployment infrastructure
-
-**Important Decisions (Shape Architecture):**
-- Verification patterns
-- Error handling strategy
-- Memory persistence approach
-
-**Deferred Decisions (Post-MVP):**
-- Vector database for semantic memory
-- Complex session management
-- Cross-user memory patterns
-
-### Agent State & Context Management
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| **Thread Context** | Slack API fetch + LLM provider in-context | Stateless Vercel serverless, leverage Slack as source of truth |
-| **Long Thread Handling** | Manual sliding window compaction | Truncate oldest messages when context fills |
-| **Persistent Memory** | File-based (`orion-context/`) | Simple, searchable via agentic search, no extra infra |
-| **Prompt Caching** | In-memory cache for Langfuse prompt fetches (TTL configurable) | Reduce prompt-fetch latency and limit API calls |
-| **Model selection** | Config-driven (provider + model ID) | Switch models/providers without code changes; route larger-context tasks to larger-context models |
-
-**Memory Architecture:**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     MEMORY LAYERS                                │
-├─────────────────────────────────────────────────────────────────┤
-│  REQUEST CONTEXT     │ Slack thread history (API fetch)         │
-│  ────────────────────┼───────────────────────────────────────── │
-│  SESSION CONTEXT     │ Claude model context window (model-dependent) │
-│                      │ + automatic compaction for long threads  │
-│  ────────────────────┼───────────────────────────────────────── │
-│  PERSISTENT MEMORY   │ File system (orion-context/)             │
-│                      │ + Langfuse prompt versions               │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Upgrade Path (Post-MVP):**
-- Add Redis for hot session data if file I/O becomes bottleneck
-- Add vector store (Chroma) if semantic memory search needed
-- Add database if cross-user memory patterns required
-
-### Agent Execution Patterns
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| **Agent Execution** | Direct Anthropic API with tool_use | Simple `messages.create()` with streaming, tools exposed as Claude tool definitions |
-| **Subagent Execution** | Sequential or parallel API calls | Parallelism via Promise.all on multiple messages.create calls |
-| **Verification Strategy** | LLM-as-Judge via Langfuse Evals | Langfuse provides eval infrastructure, track quality over time |
-| **Verification Loop** | Rules-based + Langfuse async evals | Fast rules for blocking, LLM evals for quality monitoring |
-
-### Tool Layer Architecture
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| **MCP Management** | Rube (Composio) as primary MCP server | 500+ app integrations, includes code execution via RUBE_REMOTE_WORKBENCH |
-| **Tool Exposure** | MCP tools as Claude tool definitions | Convert MCP tool schemas to Anthropic tool format for messages.create() |
-| **Code Execution** | Via Rube RUBE_REMOTE_WORKBENCH | No custom sandbox needed; Rube provides Python/bash execution |
-| **Tool Discovery** | RUBE_SEARCH_TOOLS for dynamic discovery | Agent discovers what it needs at runtime |
-
-**Tool Selection Pattern:**
-
-```
-User Request
-    │
-    ▼
-┌─────────────────────────────────────┐
-│  1. Can MCP tool handle this?       │──Yes──▶ Use MCP tool
-└─────────────────────────────────────┘
-    │ No
-    ▼
-┌─────────────────────────────────────┐
-│  2. Can agentic search find it?     │──Yes──▶ Search files/context
-└─────────────────────────────────────┘
-    │ No
-    ▼
-┌─────────────────────────────────────┐
-│  3. Generate code in sandbox        │──────▶ Write & execute code
-└─────────────────────────────────────┘
-```
-
-### Error Handling & Resilience
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| **Tool Failures** | Graceful degradation | Continue with available tools, inform user |
-| **Retry Strategy** | Exponential backoff (2-3 retries) | Transient failures recovered |
-| **Long Operations** | Progress callbacks + periodic updates | Keep user informed via Slack status |
-| **Timeout** | 60 seconds | Vercel Pro plan function timeout |
-
-### Infrastructure & Deployment
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| **Platform** | Vercel Pro | Fast serverless, 60s function timeout, simple deploys |
-| **CI/CD** | GitHub Actions + Vercel | Actions for tests, Vercel for automatic deploys |
-| **Environments** | Vercel preview/production | Automatic preview deploys on PR |
-| **Secrets** | Vercel Environment Variables | Dashboard-managed, no secrets in code |
-
-### Decision Impact Analysis
-
-**Implementation Sequence:**
-1. Project scaffolding (structure, dependencies)
-2. Slack Bolt + event handlers setup
-3. Anthropic API integration (messages.create with streaming)
-4. Langfuse observability
-5. MCP tool layer (Rube as primary server)
-6. Agent loop (gather → act → verify)
-7. File-based memory
-8. Vercel deployment
-
-**Cross-Component Dependencies:**
-- Langfuse must be initialized before Anthropic calls (instrumentation first)
-- MCP servers initialize lazily when first tool call needed
-- Memory layer depends on file structure being in place
-- Verification depends on Langfuse eval infrastructure
-
-## Implementation Patterns & Consistency Rules
-
-### Pattern Categories Defined
-
-**Critical Conflict Points Identified:** 12 areas where AI agents could make different choices
-
-These patterns ensure all AI agents working on Orion produce compatible, consistent code.
-
-### Naming Patterns
-
-**File Naming:**
-
-| Element | Convention | Example |
-|---------|------------|---------|
-| TypeScript files | `kebab-case.ts` | `user-message.ts` |
-| Test files | `*.test.ts` co-located | `user-message.test.ts` |
-| Type definition files | `*.types.ts` | `slack.types.ts` |
-| Config files | `kebab-case` | `environment.ts` |
-
-**Code Naming (TypeScript Standard):**
-
-| Element | Convention | Example |
-|---------|------------|---------|
-| Classes/Interfaces/Types | PascalCase | `UserMessageHandler`, `AgentContext` |
-| Functions/Methods | camelCase | `handleUserMessage`, `gatherContext` |
-| Variables | camelCase | `userId`, `threadContext` |
-| Constants | SCREAMING_SNAKE_CASE | `MAX_RETRIES`, `TOOL_TIMEOUT_MS` |
-| Enums | PascalCase (values SCREAMING_SNAKE) | `enum Status { IN_PROGRESS }` |
-
-**Agent Definition Naming (.orion/):**
-
-| Element | Convention | Example |
-|---------|------------|---------|
-| Agent files | `kebab-case.md` | `research-agent.md` |
-| Workflow folders | `kebab-case/` | `deep-research/` |
-| Task files | `kebab-case.md` | `verify-response.md` |
-| Config files | `kebab-case.yaml` | `config.yaml` |
-
-**MCP/Tool Naming:**
-
-| Element | Convention | Example |
-|---------|------------|---------|
-| Tool names | snake_case | `search_slack`, `get_user_info` |
-| Tool descriptions | Action-oriented sentence | "Search Slack channels for messages" |
-| Argument names | snake_case | `channel_id`, `search_query` |
-
-### Structure Patterns
-
-**Directory Organization:**
-
-```
-src/
-├── index.ts              # Entry point only - imports and starts app
-├── instrumentation.ts    # MUST be imported first in index.ts
-├── config/               # Environment and configuration
-├── observability/        # Langfuse, tracing utilities
-├── slack/                # Slack-specific code
-│   ├── app.ts           # Bolt app setup
-│   ├── assistant.ts     # Assistant class
-│   └── handlers/        # Event handlers (one file per handler)
-├── agent/                # Anthropic API integration
-│   ├── orion.ts         # Main agent orchestration
-│   ├── loop.ts          # Agent loop implementation
-│   ├── subagents/       # Subagent definitions
-│   └── tools.ts         # Tool configurations
-├── tools/                # Tool implementations
-│   ├── mcp/             # MCP client utilities
-│   └── sandbox/         # Code execution utilities
-└── utils/                # Shared utilities
-    ├── errors.ts        # Error types and handling
-    ├── streaming.ts     # Streaming utilities
-    └── validation.ts    # Validation helpers
-```
-
-**Test Organization:**
-
-- Tests co-located with source: `user-message.test.ts` next to `user-message.ts`
-- Integration tests in `tests/integration/`
-- E2E tests in `tests/e2e/`
-
-### Format Patterns
-
-**Slack Response Formatting:**
+For semantic memory search across conversations (post-MVP):
 
 ```typescript
-// REQUIRED: Use Slack mrkdwn syntax
-const slackFormatRules = {
-  bold: "*text*",           // NOT **text**
-  italic: "_text_",         // NOT *text*
-  code: "`code`",
-  codeBlock: "```code```",
-  listItem: "• ",           // Bullet points, not numbered
-  noBlockquotes: true,      // User preference
-  noEmojis: true,           // Unless explicitly requested
-};
+import { MemoryClient } from 'mem0ai';
+
+const mem0 = new MemoryClient({ apiKey: process.env.MEM0_API_KEY });
+
+// Add to memory after conversations
+await mem0.add(messages, { user_id: slackUserId });
+
+// Search relevant memories at conversation start
+const relevant = await mem0.search(query, { user_id: slackUserId, limit: 5 });
 ```
 
-**Error Response Format:**
+## Implementation Patterns & Consistency Rules (Step 5)
 
+### Pattern Philosophy
+
+> **If it's important enough to document, it's important enough to enforce with types.**
+
+Patterns are organized by enforcement mechanism:
+
+| Tier | Enforcement | Scope |
+|------|-------------|-------|
+| **1. Enforced** | TypeScript compiler prevents violations | System correctness |
+| **2. Documented** | Standards for humans to follow | Debugging/maintainability |
+| **3. Automated** | ESLint + Prettier apply automatically | Code style |
+
+### Tier 1: Enforced Patterns (TypeScript)
+
+**Tool Name Registry:**
 ```typescript
-interface OrionError {
-  code: string;              // Machine-readable: 'TOOL_FAILED', 'CONTEXT_LIMIT'
-  message: string;           // Developer-readable for logs
-  userMessage: string;       // Safe to display in Slack
-  context?: Record<string, unknown>;  // Additional debug info
-  recoverable: boolean;      // Can the agent retry?
-}
+// src/tools/registry.ts
+// Single source of truth — compiler error if you use unlisted tool
+export const TOOL_NAMES = [
+  'memory',
+  'search_slack_messages',
+  'execute_code',
+  'web_search',
+  'mcp_call',
+] as const;
 
-// Error code constants
-const ErrorCodes = {
-  TOOL_FAILED: 'TOOL_FAILED',
-  TOOL_TIMEOUT: 'TOOL_TIMEOUT',
-  CONTEXT_LIMIT: 'CONTEXT_LIMIT',
-  VERIFICATION_FAILED: 'VERIFICATION_FAILED',
-  MCP_CONNECTION_ERROR: 'MCP_CONNECTION_ERROR',
+export type ToolName = typeof TOOL_NAMES[number];
+
+// Handler registry uses ToolName keys — can't register unknown tool
+export const toolHandlers: Record<ToolName, ToolHandler> = { ... };
+```
+
+**Memory Path Builders:**
+```typescript
+// src/tools/memory/paths.ts
+// Can't use raw strings — must use builders
+export type MemoryPath = { __brand: 'MemoryPath'; path: string };
+
+export const Memory = {
+  global: (file: string): MemoryPath => 
+    ({ __brand: 'MemoryPath', path: `/memories/global/${file}` }),
+  user: (userId: string, file: string): MemoryPath => 
+    ({ __brand: 'MemoryPath', path: `/memories/users/${userId}/${file}` }),
+  session: (threadTs: string, file: string): MemoryPath => 
+    ({ __brand: 'MemoryPath', path: `/memories/sessions/${threadTs}/${file}` }),
 } as const;
 ```
 
-**Logging Format:**
-
+**Environment Config:**
 ```typescript
-// REQUIRED: Structured JSON logging
-interface LogEntry {
-  timestamp: string;        // ISO 8601
-  level: 'debug' | 'info' | 'warn' | 'error';
-  event: string;            // snake_case event name
-  traceId?: string;         // Langfuse trace ID
-  userId?: string;          // Slack user ID
-  duration?: number;        // Milliseconds
-  [key: string]: unknown;   // Additional context
+// src/config/environment.ts
+// App crashes on startup if required vars missing
+export const config = {
+  anthropic: {
+    apiKey: requiredEnv('ANTHROPIC_API_KEY'),
+    model: requiredEnv('ANTHROPIC_MODEL'),
+  },
+  slack: {
+    botToken: requiredEnv('SLACK_BOT_TOKEN'),
+    signingSecret: requiredEnv('SLACK_SIGNING_SECRET'),
+  },
+  gcs: {
+    bucket: requiredEnv('GCS_MEMORIES_BUCKET'),
+  },
+  langfuse: {
+    publicKey: requiredEnv('LANGFUSE_PUBLIC_KEY'),
+    secretKey: requiredEnv('LANGFUSE_SECRET_KEY'),
+  },
+} as const;
+
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required env: ${name}`);
+  return value;
 }
 ```
 
-### Communication Patterns
-
-**Agent Loop Pattern (MANDATORY):**
-
+**Error Codes & Tool Result:**
 ```typescript
-// ALL agent implementations MUST follow this pattern
-async function executeAgentLoop(
-  input: string,
-  context: AgentContext
-): Promise<AgentResponse> {
-  const MAX_ATTEMPTS = 3;
-  
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    // PHASE 1: GATHER CONTEXT
-    const gatheredContext = await gatherContext(input, context);
-    
-    // PHASE 2: TAKE ACTION
-    const response = await generateResponse(input, gatheredContext);
-    
-    // PHASE 3: VERIFY WORK
-    const verification = await verifyResponse(response, input);
-    
-    if (verification.passed) {
-      return response;
-    }
-    
-    context.verificationFeedback = verification.feedback;
-    context.attemptNumber = attempt + 1;
-  }
-  
-  return createGracefulFailureResponse(input, context);
+// src/types/errors.ts
+export const ERROR_CODES = [
+  'TOOL_NOT_FOUND',
+  'TOOL_EXECUTION_FAILED',
+  'MEMORY_NOT_FOUND',
+  'MEMORY_WRITE_FAILED',
+  'RATE_LIMITED',
+  'CONTEXT_TOO_LONG',
+  'SUBAGENT_FAILED',
+  'MCP_CONNECTION_FAILED',
+] as const;
+
+export type ErrorCode = typeof ERROR_CODES[number];
+
+export interface ToolError {
+  code: ErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+// src/types/tools.ts
+export type ToolResult<T = unknown> = 
+  | { success: true; data: T }
+  | { success: false; error: ToolError };
+```
+
+### Tier 2: Documented Standards
+
+**Langfuse Span Naming:**
+```
+Pattern: {component}.{operation}
+
+Components: agent | tool | slack | memory | mcp | subagent
+Operations: lowercase, dot-separated for sub-ops
+
+Examples:
+  agent.loop
+  agent.completion
+  tool.memory.view
+  tool.memory.create
+  slack.message.send
+  mcp.rube.search
+  subagent.research
+```
+
+**Logging Context:**
+```typescript
+// Every log entry should include:
+interface LogContext {
+  traceId: string;        // Langfuse trace
+  spanName: string;       // Current operation
+  slackThreadTs?: string; // If in Slack context
+}
+
+// Levels:
+// ERROR → User-impacting, needs action
+// WARN  → Degraded, needs monitoring
+// INFO  → Key events (tool calls, completions)
+// DEBUG → Dev only
+```
+
+**Layered Error Architecture:**
+```typescript
+// Internal (logged) → ToolError (to Claude) → UserError (to Slack)
+
+interface InternalError {
+  code: ErrorCode;
+  message: string;
+  details?: unknown;
+  stack?: string;
+  retryable: boolean;
+  timestamp: string;
+  traceId: string;
+}
+
+// To Slack user — human-friendly, no jargon
+interface UserError {
+  message: string;
 }
 ```
 
-**Subagent Communication:**
-
+**Slack Response Format:**
 ```typescript
-// Subagent spawn pattern
-const subagentResult = await spawnSubagent({
-  name: 'research-agent',
-  input: researchQuery,
-  returnFormat: 'summary',  // 'summary' | 'detailed' | 'raw'
-});
-
-// Parallel subagent execution
-const results = await Promise.all([
-  spawnSubagent({ name: 'search-agent', input: query1 }),
-  spawnSubagent({ name: 'search-agent', input: query2 }),
-]);
-```
-
-### Process Patterns
-
-**Observability (MANDATORY):**
-
-```typescript
-// ALL handlers MUST be wrapped in trace
-import { startActiveObservation } from '@langfuse/tracing';
-
-async function handleUserMessage(context: SlackContext) {
-  await startActiveObservation('user-message-handler', async (trace) => {
-    trace.update({
-      input: context.message.text,
-      userId: context.userId,
-      sessionId: context.threadTs,
-      metadata: { channel: context.channel, teamId: context.teamId }
+// Hybrid: Claude markdown + Block Kit structure
+function formatResponse(content: string, suggestedPrompts?: string[]): SlackBlocks {
+  const blocks: Block[] = [
+    { type: 'section', text: { type: 'mrkdwn', text: content } },
+  ];
+  
+  if (suggestedPrompts?.length) {
+    blocks.push({
+      type: 'actions',
+      elements: suggestedPrompts.slice(0, 5).map((prompt, i) => ({
+        type: 'button',
+        text: { type: 'plain_text', text: truncate(prompt, 75) },
+        action_id: `suggested_${i}`,
+        value: prompt,
+      })),
     });
-    
-    const response = await processMessage(context);
-    trace.update({ output: response });
-  });
-}
-```
-
-**Tool Execution Pattern:**
-
-```typescript
-const TOOL_TIMEOUT_MS = 30_000;  // 30 seconds
-
-async function executeTool(
-  toolName: string,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  try {
-    const result = await withTimeout(
-      mcpClient.callTool(toolName, args),
-      TOOL_TIMEOUT_MS
-    );
-    return { success: true, data: result };
-  } catch (error) {
-    // Graceful degradation - don't throw, return error result
-    return {
-      success: false,
-      error: createOrionError('TOOL_FAILED', {
-        tool: toolName,
-        message: error.message,
-        userMessage: `Unable to access ${toolName}. Continuing with available tools.`,
-        recoverable: true
-      })
-    };
   }
+  
+  return { blocks };
 }
 ```
 
-**Streaming Pattern:**
-
+**Subagent Context:**
 ```typescript
-async function streamToSlack(
-  client: WebClient,
-  channel: string,
-  threadTs: string,
-  userId: string,
-  teamId: string,
-  responseGenerator: AsyncIterable<AgentMessage>
-): Promise<void> {
-  // NOTE: Slack supports streaming via:
-  // - chat.startStream → chat.appendStream → chat.stopStream
-  // The exact request fields depend on your Slack SDK / Bolt versions.
-  // Treat this as pseudocode and follow Slack's current reference docs when implementing.
-
-  for await (const message of responseGenerator) {
-    if (message.type === 'text') {
-      // await client.chat.appendStream({ ... });
-    }
-  }
-  // await client.chat.stopStream({ ... });
+// Parent explicitly defines what subagent receives
+interface SubagentContext {
+  task: string;              // What to accomplish
+  relevantHistory?: string;  // Parent-curated context
+  constraints?: string[];    // Boundaries
+  outputFormat?: string;     // Expected structure
 }
 ```
 
-### Enforcement Guidelines
+### Tier 3: Automated (Tooling)
 
-**All AI Agents MUST:**
+ESLint + Prettier handle these automatically:
 
-1. ✅ Follow the canonical agent loop pattern (gather → act → verify)
-2. ✅ Wrap all handlers in Langfuse traces via `startActiveObservation`
-3. ✅ Use structured JSON logging for all log statements
-4. ✅ Implement graceful degradation for tool failures
-5. ✅ Use Slack mrkdwn syntax (not markdown) for responses
-6. ✅ Follow file naming conventions (`kebab-case.ts`)
-7. ✅ Follow code naming conventions (TypeScript standard)
-8. ✅ Use the `OrionError` interface for all errors
+| Concern | Tool | Config |
+|---------|------|--------|
+| Formatting | Prettier | `.prettierrc` |
+| Linting | ESLint | `eslint.config.js` |
+| Import order | eslint-plugin-import | Automatic |
+| Type checking | TypeScript strict | `tsconfig.json` |
 
-**Pattern Enforcement:**
+### Test Organization
 
-- ESLint rules enforce naming conventions
-- TypeScript strict mode catches type errors
-- Code review checks for pattern compliance
-- Langfuse traces provide visibility into pattern adherence
+**Co-located Unit Tests:**
+```
+src/
+├── agent/
+│   ├── loop.ts
+│   ├── loop.test.ts          ← Unit tests here
+├── tools/
+│   ├── memory/
+│   │   ├── handler.ts
+│   │   └── handler.test.ts
+tests/
+└── integration/              ← Integration tests only
+    └── agent-flow.test.ts
+```
 
-## Project Structure & Boundaries
+### Pattern Enforcement Summary
 
-### Requirements to Structure Mapping
+| Problem | Pattern | Enforcement |
+|---------|---------|-------------|
+| Unknown tool error | `TOOL_NAMES` registry | TypeScript const |
+| Memory path typo | `Memory.*` builders | Branded type |
+| Missing env var | `config` module | Runtime crash |
+| Invalid error code | `ErrorCode` type | TypeScript union |
+| Untrackable logs | `traceId` in context | Code review |
+| Style inconsistency | Prettier/ESLint | Pre-commit hook |
 
-| FR Domain | Primary Location | Supporting Files |
-|-----------|------------------|------------------|
-| **Agent Core (FR1-6)** | `src/agent/` | `orion.ts`, `loop.ts`, `subagents/` |
-| **Research (FR7-12)** | `src/agent/subagents/` | `research-agent.ts`, `.orion/agents/research.md` |
-| **Communication (FR13-18)** | `src/slack/` | `handlers/`, `assistant.ts` |
-| **Code Execution (FR19-23)** | `src/tools/sandbox/` | `executor.ts`, `validator.ts` |
-| **Extensions (FR24-29)** | `src/tools/mcp/`, `.claude/` | `client.ts`, `skills/`, `commands/` |
-| **Knowledge (FR30-34)** | `orion-context/knowledge/` | `.orion/workflows/` |
-| **Observability (FR35-40)** | `src/observability/` | `langfuse.ts`, `tracing.ts` |
+## Project Structure & Boundaries (Step 6)
+
+### Epic to Directory Mapping
+
+| Epic | Description | Primary Directory | Phase |
+|------|-------------|-------------------|-------|
+| **Epic 1** | Slack Integration | `src/slack/` | MVP |
+| **Epic 2** | Agent Loop | `src/agent/` | MVP |
+| **Epic 3** | MCP Integration | `src/tools/mcp/` | MVP |
+| **Epic 4** | Subagents & Research | `src/agent/subagents/` | MVP |
+| **Epic 5** | Skills & Extensions | `.orion/` + `src/skills/` | MVP |
+| **Epic 6** | UX & Polish | `src/slack/` (suggested prompts) | MVP |
+| **Epic 7** | Knowledge & Q&A | `src/tools/` (search tools) | MVP |
+| **Epic 8** | Observability | `src/observability/` | MVP |
+| **Epic 9** | Sandbox/Code Execution | `src/tools/sandbox/` | Phase 2 |
 
 ### Complete Project Directory Structure
 
 ```
 orion-slack-agent/
-├── .github/
-│   └── workflows/
-│       ├── ci.yml                         # Test + lint on PR
-│       └── deploy.yml                     # Cloud Build trigger
-├── .orion/                                # Agent definitions (BMAD-inspired)
-│   ├── config.yaml                        # Agent configuration
-│   ├── agents/
-│   │   ├── orion.md                       # Primary agent persona
-│   │   ├── research-agent.md              # Deep research subagent
-│   │   └── verification-agent.md          # Verification subagent
-│   ├── workflows/
-│   │   └── deep-research/
-│   │       ├── workflow.md                # Multi-step research workflow
-│   │       └── steps/
-│   │           ├── gather-sources.md
-│   │           └── synthesize.md
-│   └── tasks/
-│       ├── verify-response.md             # Verification task
-│       └── format-slack.md                # Slack formatting task
-├── .claude/                               # Agent skill and command definitions
-│   ├── skills/
-│   │   └── search-workspace.md            # Auto-discovered Skills
-│   └── commands/
-│       └── help.md                        # Slash Commands
-├── orion-context/                         # Agentic search context
-│   ├── conversations/                     # Thread summaries
-│   │   └── .gitkeep
-│   ├── user-preferences/                  # Per-user preferences
-│   │   └── .gitkeep
-│   └── knowledge/                         # Domain knowledge files
-│       └── .gitkeep
-├── src/
-│   ├── index.ts                           # Entry point
-│   ├── instrumentation.ts                 # OpenTelemetry + Langfuse (import first!)
-│   ├── config/
-│   │   └── environment.ts                 # Environment variables
-│   ├── observability/
-│   │   ├── langfuse.ts                    # Langfuse client singleton
-│   │   └── tracing.ts                     # Tracing utilities
-│   ├── slack/
-│   │   ├── app.ts                         # Slack Bolt app setup
-│   │   ├── assistant.ts                   # Assistant class configuration
-│   │   ├── types.ts                       # Slack-specific types
-│   │   └── handlers/
-│   │       ├── thread-started.ts          # Thread initialization
-│   │       ├── thread-context-changed.ts  # Context switch handler
-│   │       └── user-message.ts            # Main message handler
-│   ├── agent/
-│   │   ├── orion.ts                       # Anthropic API integration
-│   │   ├── loop.ts                        # Agent loop (gather → act → verify)
-│   │   ├── loader.ts                      # BMAD-style agent loader
-│   │   ├── types.ts                       # Agent types
-│   │   ├── subagents/
-│   │   │   ├── research.ts                # Research subagent
-│   │   │   └── verification.ts            # Verification subagent
-│   │   └── prompts/
-│   │       ├── system.ts                  # System prompt construction
-│   │       └── templates.ts               # Reusable prompt templates
-│   ├── tools/
-│   │   ├── index.ts                       # Tool registry
-│   │   ├── types.ts                       # Tool types
-│   │   ├── mcp/
-│   │   │   ├── client.ts                  # MCP client utilities
-│   │   │   ├── discovery.ts               # Tool discovery
-│   │   │   └── servers.ts                 # Server configurations
-│   │   └── sandbox/
-│   │       ├── executor.ts                # Code execution
-│   │       └── validator.ts               # Code validation
-│   ├── memory/
-│   │   ├── context.ts                     # Context management
-│   │   ├── file-store.ts                  # File-based persistence
-│   │   └── compaction.ts                  # Thread compaction utilities
-│   └── utils/
-│       ├── errors.ts                      # OrionError types
-│       ├── streaming.ts                   # Streaming utilities
-│       ├── formatting.ts                  # Slack mrkdwn formatting
-│       └── validation.ts                  # Input validation
-├── tests/
-│   ├── integration/
-│   │   ├── slack.test.ts                  # Slack integration tests
-│   │   └── mcp.test.ts                    # MCP integration tests
-│   └── e2e/
-│       └── conversation.test.ts           # End-to-end conversation tests
-├── api/                                   # Vercel serverless functions
-│   ├── slack.ts                           # Slack webhook handler
-│   └── health.ts                          # Health check endpoint
-├── vercel.json                            # Vercel configuration
+├── README.md
 ├── package.json
 ├── pnpm-lock.yaml
 ├── tsconfig.json
+├── vitest.config.ts
 ├── eslint.config.js
 ├── prettier.config.js
-├── vitest.config.ts
+├── docker-compose.yml
 ├── .env.example
 ├── .gitignore
-└── README.md
+│
+├── docker/
+│   ├── Dockerfile
+│   └── cloudbuild.yaml                    # Cloud Build trigger
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yaml                        # Test + lint on PR
+│
+├── .orion/                                # Agent definitions (BMAD-inspired)
+│   ├── agent.yaml                         # Main agent config
+│   ├── skills/                            # Skill definitions
+│   │   └── example-skill/
+│   │       └── SKILL.md                   # Agent Skills format
+│   ├── commands/                          # Custom slash commands
+│   │   └── deep-research.yaml
+│   └── prompts/                           # System prompts
+│       ├── system.md                      # Core system prompt
+│       └── verification.md                # Verification prompt
+│
+├── orion-context/                         # Agentic search context
+│   ├── conversations/                     # Thread context cache
+│   ├── knowledge/                         # Project knowledge
+│   └── user-preferences/                  # User prefs per Slack ID
+│
+├── src/
+│   ├── index.ts                           # Entry point
+│   ├── instrumentation.ts                 # OTel init (must be first)
+│   │
+│   ├── config/
+│   │   ├── environment.ts                 # Env config + validation
+│   │   └── environment.test.ts
+│   │
+│   ├── types/                             # Shared type definitions
+│   │   ├── index.ts                       # Re-exports
+│   │   ├── tools.ts                       # ToolResult, ToolName
+│   │   ├── errors.ts                      # ErrorCode, OrionError
+│   │   ├── agent.ts                       # AgentContext, AgentMessage
+│   │   └── slack.ts                       # SlackThread, SlackUser
+│   │
+│   ├── agent/                             # Epic 2: Agent Loop
+│   │   ├── loop.ts                        # Main agent loop
+│   │   ├── loop.test.ts
+│   │   ├── context.ts                     # Context builder
+│   │   ├── context.test.ts
+│   │   ├── verification.ts                # Response verification
+│   │   ├── verification.test.ts
+│   │   ├── compaction.ts                  # Sliding window compaction
+│   │   ├── compaction.test.ts
+│   │   └── subagents/                     # Epic 4: Parallel subagents
+│   │       ├── spawner.ts                 # spawnSubagent()
+│   │       ├── spawner.test.ts
+│   │       ├── aggregator.ts              # Result aggregation
+│   │       └── aggregator.test.ts
+│   │
+│   ├── tools/                             # Epic 3, 4, 8: Tool layer
+│   │   ├── registry.ts                    # TOOL_NAMES, handlers
+│   │   ├── registry.test.ts
+│   │   │
+│   │   ├── memory/                        # Anthropic Memory Tool
+│   │   │   ├── handler.ts                 # Memory → GCS
+│   │   │   ├── handler.test.ts
+│   │   │   └── paths.ts                   # Type-safe path builders
+│   │   │
+│   │   ├── mcp/                           # Epic 3: MCP Client
+│   │   │   ├── client.ts                  # Generic MCP client
+│   │   │   ├── client.test.ts
+│   │   │   ├── discovery.ts               # Tool discovery
+│   │   │   └── rube.ts                    # Rube-specific config
+│   │   │
+│   │   ├── sandbox/                       # Epic 9: Code execution (Phase 2)
+│   │   │   ├── executor.ts                # Rube workbench wrapper
+│   │   │   └── executor.test.ts
+│   │   │
+│   │   └── search/                        # Epic 7: Knowledge search
+│   │       ├── slack.ts                   # Slack search
+│   │       ├── web.ts                     # Web search via MCP
+│   │       └── confluence.ts              # Confluence via MCP
+│   │
+│   ├── skills/                            # Epic 5: Skills runtime
+│   │   ├── loader.ts                      # SKILL.md parser
+│   │   ├── loader.test.ts
+│   │   └── executor.ts                    # Skill execution
+│   │
+│   ├── slack/                             # Epic 1: Slack layer
+│   │   ├── app.ts                         # Bolt app
+│   │   ├── app.test.ts
+│   │   ├── assistant.ts                   # Assistant API
+│   │   ├── assistant.test.ts
+│   │   ├── response-generator.ts          # Streaming response
+│   │   ├── response-generator.test.ts
+│   │   ├── thread-context.ts              # Thread fetching
+│   │   ├── thread-context.test.ts
+│   │   ├── types.ts                       # Slack types
+│   │   ├── suggested-prompts.ts           # Epic 6: Prompt suggestions
+│   │   └── handlers/
+│   │       ├── user-message.ts
+│   │       ├── user-message.test.ts
+│   │       ├── thread-started.ts
+│   │       ├── thread-started.test.ts
+│   │       ├── thread-context-changed.ts
+│   │       └── thread-context-changed.test.ts
+│   │
+│   ├── observability/                     # Epic 8: Tracing
+│   │   ├── langfuse.ts                    # Langfuse client
+│   │   ├── langfuse.test.ts
+│   │   ├── tracing.ts                     # OTel + spans
+│   │   ├── tracing.test.ts
+│   │   ├── test-trace.ts
+│   │   └── cost-tracking.ts               # Token/cost tracking
+│   │
+│   └── utils/
+│       ├── logger.ts                      # Structured JSON logging
+│       ├── logger.test.ts
+│       ├── formatting.ts                  # Slack mrkdwn formatting
+│       ├── formatting.test.ts
+│       ├── streaming.ts                   # Stream utilities
+│       └── streaming.test.ts
+│
+├── tests/
+│   └── integration/                       # Integration tests
+│       ├── agent-flow.test.ts             # Full agent loop
+│       └── mcp-connection.test.ts         # MCP connectivity
+│
+├── docs/
+│
+└── _bmad-output/                          # BMAD outputs
+    ├── architecture.md                    # This document
+    ├── prd.md
+    ├── epics.md
+    └── implementation-artifacts/
 ```
 
 ### Architectural Boundaries
 
 **API Boundaries:**
+```
+External:
+  Slack Events API → src/slack/ → Agent Loop
+  Anthropic API ← src/agent/loop.ts
+  MCP Servers ← src/tools/mcp/client.ts
+  GCS ← src/tools/memory/handler.ts
 
-| Boundary | Location | Protocol |
-|----------|----------|----------|
-| Slack → Orion | `src/slack/handlers/` | HTTP webhooks, Slack Events API |
-| Orion → LLM Provider | `src/agent/orion.ts` | Anthropic SDK (messages.create with tools); other providers via adapters |
-| Orion → MCP Servers | `src/tools/mcp/client.ts` | MCP 1.0 Protocol (stdio/HTTP) |
-| Orion → Langfuse | `src/observability/` | OpenTelemetry (HTTP) |
+Internal:
+  Agent → Tools: via ToolRegistry (src/tools/registry.ts)
+  Agent → Slack: via response-generator.ts
+```
 
 **Component Boundaries:**
-
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                        SLACK LAYER                              │
-│   src/slack/                                                    │
-│   - Receives webhooks, formats responses, streams to Slack      │
-│   - ONLY touches Slack APIs                                     │
-└────────────────────────────┬───────────────────────────────────┘
-                             │ AgentContext
-                             ▼
-┌────────────────────────────────────────────────────────────────┐
-│                        AGENT LAYER                              │
-│   src/agent/                                                    │
-│   - Orchestrates agent loop, manages subagents                  │
-│   - ONLY talks to Tool Layer and Memory Layer                   │
-└────────────────────────────┬───────────────────────────────────┘
-                             │ ToolRequest
-                             ▼
-┌────────────────────────────────────────────────────────────────┐
-│                        TOOL LAYER                               │
-│   src/tools/                                                    │
-│   - MCP client, sandbox execution, tool discovery               │
-│   - ONLY executes external operations                           │
-└────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                        Slack Layer                          │
+│  (Handlers receive events, format responses, stream)        │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────┐
+│                        Agent Layer                          │
+│  (Loop, verification, subagents, context compaction)        │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────┐
+│                        Tool Layer                           │
+│  (Memory, MCP, sandbox, search — all via registry)          │
+└─────────────────────────────────────────────────────────────┘
 ```
-
-**Data Boundaries:**
-
-| Data Type | Storage | Access Pattern |
-|-----------|---------|----------------|
-| Thread History | Slack API | Fetch on each request |
-| Agent Context | LLM provider context window (model-dependent) | Session-scoped |
-| Persistent Memory | `orion-context/` files | Read/write via file-store.ts |
-| Prompt Templates | Langfuse | Cached (TTL configurable) |
-| Traces/Logs | Langfuse | Write-only from app |
-
-### Integration Points
-
-**Internal Communication:**
-
-| From | To | Pattern |
-|------|-----|---------|
-| `handlers/*.ts` | `agent/loop.ts` | Async function call |
-| `agent/loop.ts` | `agent/subagents/*.ts` | `spawnSubagent()` |
-| `agent/*.ts` | `tools/*.ts` | `executeTool()` |
-| `agent/*.ts` | `memory/*.ts` | `contextStore.save()/load()` |
-| All modules | `observability/tracing.ts` | `startActiveObservation()` |
-
-**External Integrations:**
-
-| System | Integration Point | Connection |
-|--------|-------------------|------------|
-| Slack | `src/slack/app.ts` | Bolt SDK (HTTP mode) |
-| LLM Provider API | `src/agent/orion.ts` | Anthropic SDK (messages.create) |
-| Langfuse | `src/instrumentation.ts` | OpenTelemetry SDK |
-| MCP Servers | `src/tools/mcp/servers.ts` | Dynamic per-server (Rube primary) |
-| Vercel Env Vars | `src/config/environment.ts` | Available at runtime |
 
 **Data Flow:**
-
 ```
-User Message (Slack)
-       │
-       ▼
-[Slack Handler] ─────────────────────────────────▶ [Langfuse Trace Start]
-       │
-       ▼
-[Fetch Thread History] ◀───────────────────────── [Slack API]
-       │
-       ▼
-[Agent Loop: GATHER] ─────────────────────────────▶ [Load from orion-context/]
-       │
-       ▼
-[Agent Loop: ACT] ────────────────────────────────▶ [MCP Tools / Sandbox]
-       │
-       ▼
-[Agent Loop: VERIFY] ─────────────────────────────▶ [Verification Subagent]
-       │
-       ▼
-[Stream Response] ────────────────────────────────▶ [Slack Chat Stream]
-       │
-       ▼
-[Save Context] ───────────────────────────────────▶ [orion-context/]
-       │
-       ▼
-[Langfuse Trace End]
+1. Slack Event → src/slack/handlers/
+2. Handler → src/agent/loop.ts (runs agent)
+3. Agent → src/tools/registry.ts (when tool_use)
+4. Tools → MCP/GCS/external
+5. Agent → src/agent/verification.ts (verify response)
+6. Agent → src/slack/response-generator.ts (stream to Slack)
+7. All steps → src/observability/ (Langfuse traces)
 ```
 
-### File Organization Patterns
+### Requirements to Structure Mapping
 
-**Configuration Files:**
+| Requirement | File(s) |
+|-------------|---------|
+| FR1-2 (Agent loop, verification) | `src/agent/loop.ts`, `src/agent/verification.ts` |
+| FR3-4 (Subagents) | `src/agent/subagents/spawner.ts`, `aggregator.ts` |
+| FR5 (Context compaction) | `src/agent/compaction.ts` |
+| FR13-18 (Slack) | `src/slack/*` |
+| FR19-23 (Code gen) | `src/tools/sandbox/executor.ts` *(Phase 2)* |
+| FR24-29 (Extensions) | `.orion/skills/`, `src/skills/loader.ts` |
+| FR26-28 (MCP) | `src/tools/mcp/client.ts` |
+| FR35-40 (Observability) | `src/observability/langfuse.ts` |
+| AR29-31 (Memory) | `src/tools/memory/handler.ts` |
+| FR47-50 (Slack AI) | `src/slack/handlers/*.ts`, `src/slack/feedback.ts` |
 
-| File | Purpose |
-|------|---------|
-| `package.json` | Dependencies, scripts |
-| `tsconfig.json` | TypeScript compiler options |
-| `eslint.config.js` | Linting rules |
-| `prettier.config.js` | Formatting rules |
-| `vitest.config.ts` | Test configuration |
-| `.env.example` | Environment variable template |
-| `.orion/config.yaml` | Agent configurations |
+### Slack AI App Patterns (FR47-50)
 
-**Test Organization:**
+Slack's AI Apps framework provides native UX patterns we must leverage. Reference: [Slack AI Apps Docs](https://docs.slack.dev/tools/bolt-js/concepts/ai-apps/)
 
-- Co-located unit tests: `*.test.ts` next to source
-- Integration tests: `tests/integration/`
-- E2E tests: `tests/e2e/`
+**1. Dynamic Status Messages (FR47)**
 
-### Development Workflow Integration
+Use `setStatus` with `loading_messages` array for tool execution feedback:
 
-**Local Development:**
-
-```bash
-pnpm install
-cp .env.example .env          # Configure secrets
-pnpm dev                       # Runs with hot reload
+```typescript
+// Instead of static: setStatus('is thinking...')
+// Use dynamic array that Slack cycles through:
+await setStatus({
+  status: 'thinking...',
+  loading_messages: [
+    'Searching Confluence...',
+    'Calling Jira API...',
+    'Analyzing results...',
+    'Preparing response...',
+  ],
+});
 ```
 
-**Build Process:**
+When to update status:
+- Before starting tool execution → add tool-specific message
+- During multi-tool execution → cycle shows progress
+- Agent knows which tool is active → status reflects it
 
-```bash
-pnpm build                     # tsc → dist/
-pnpm docker:build              # Build Docker image
+**2. Feedback Buttons (FR48)**
+
+Slack provides native `feedback_buttons` Block Kit element:
+
+```typescript
+const feedbackBlock = {
+  type: 'context_actions',
+  elements: [{
+    type: 'feedback_buttons',
+    action_id: 'orion_feedback',
+    positive_button: {
+      text: { type: 'plain_text', text: 'Helpful' },
+      accessibility_label: 'Mark this response as helpful',
+      value: 'positive',
+    },
+    negative_button: {
+      text: { type: 'plain_text', text: 'Not helpful' },
+      accessibility_label: 'Mark this response as not helpful',
+      value: 'negative',
+    },
+  }],
+};
+
+// Attach to streamer.stop()
+await streamer.stop({ blocks: [feedbackBlock] });
 ```
 
-**Deployment Pipeline:**
+**3. Feedback Handler (FR49)**
 
-1. PR → GitHub Actions (lint + test) + Vercel preview deploy
-2. Merge → Vercel automatic production deploy
-3. No Docker required — Vercel builds from source
+Log feedback to Langfuse for quality tracking:
 
-## Architecture Validation Results
+```typescript
+// src/slack/handlers/feedback.ts
+app.action('orion_feedback', async ({ ack, body, client, context }) => {
+  await ack();
+  
+  const isPositive = body.actions[0].value === 'positive';
+  const messageTs = body.message.ts;
+  
+  // Log to Langfuse with trace correlation
+  langfuse.score({
+    name: 'user_feedback',
+    value: isPositive ? 1 : 0,
+    traceId: getTraceIdFromMessageTs(messageTs),
+    comment: isPositive ? 'positive' : 'negative',
+  });
+  
+  // Acknowledge to user
+  await client.chat.postEphemeral({
+    channel: body.channel.id,
+    user: body.user.id,
+    text: isPositive 
+      ? "Thanks for the feedback! 👍" 
+      : "Sorry this wasn't helpful. Starting a new thread may help.",
+  });
+});
+```
+
+**4. Error Messages (FR50)**
+
+Contextual error messages with suggested actions:
+
+```typescript
+// On tool failure
+await say({
+  text: `I couldn't complete that request. The ${toolName} service is currently unavailable.`,
+  blocks: [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `⚠️ *Unable to complete request*\nThe ${toolName} service didn't respond.\n\n*What you can try:*\n• Wait a moment and try again\n• Rephrase your request\n• Ask me to use a different approach`,
+      },
+    },
+  ],
+});
+```
+
+**Reference Implementation:**
+- [Slack App Agent Template](https://github.com/slack-samples/bolt-js-assistant-template)
+
+## Architecture Validation Results (Step 7)
 
 ### Coherence Validation ✅
 
 **Decision Compatibility:**
 
-| Decision Pair | Status | Assessment |
-|---------------|--------|------------|
-| Anthropic API + Slack Bolt | ✅ Compatible | Both TypeScript, async-native, work together |
-| Langfuse + OpenTelemetry | ✅ Compatible | Langfuse provides OTEL SDK integration |
-| MCP 1.0 + Anthropic tools | ✅ Compatible | MCP tools exposed as Claude tool definitions |
-| Vercel + Stateless design | ✅ Compatible | File-based memory with external source of truth (Slack) |
-| pnpm + TypeScript 5.x | ✅ Compatible | Standard modern stack |
+All technology choices work together without conflicts:
+
+| Stack Element | Compatible With | Verified |
+|---------------|-----------------|----------|
+| TypeScript 5.x | @anthropic-ai/sdk 0.71.x | ✅ |
+| Node.js 20 LTS | All dependencies | ✅ |
+| Direct Anthropic API | Agent Skills (SKILL.md) | ✅ |
+| Cloud Run (300s) | Long agent loops | ✅ |
+| GCS + Memory Tool | Cloud Run stateless | ✅ |
+| Langfuse | OpenTelemetry | ✅ |
+| Slack Bolt 4.x | HTTP mode | ✅ |
 
 **Pattern Consistency:**
 
-- Naming conventions (kebab-case files, camelCase code) → Standard TypeScript patterns
-- Agent loop (gather → act → verify) → Consistent across all handlers
-- Error handling (graceful degradation) → Unified `OrionError` interface
-- Observability (trace wrapping) → Single pattern via `startActiveObservation`
+All implementation patterns support architectural decisions:
+
+| Area | Pattern | Consistent |
+|------|---------|------------|
+| Tool naming | `snake_case` via `TOOL_NAMES` registry | ✅ |
+| Memory paths | `Memory.*` builders (branded types) | ✅ |
+| Error handling | Layered: InternalError → ToolError → UserError | ✅ |
+| Logging | traceId required on all entries | ✅ |
+| Span naming | `{component}.{operation}` pattern | ✅ |
 
 **Structure Alignment:**
 
-- `src/slack/` isolates Slack concerns → Clean boundary
-- `src/agent/` contains all orchestration → No leakage to other layers
-- `src/tools/` handles all external calls → Unified tool interface
-- `.orion/` separates agent definitions from code → BMAD pattern preserved
+Project structure supports all decisions with clear boundaries.
 
 ### Requirements Coverage Validation ✅
 
-**Functional Requirements Coverage:**
+**Epic Coverage:**
 
-| FR Domain | FRs | Coverage | Supporting Architecture |
-|-----------|-----|----------|------------------------|
-| Agent Core | FR1-6 | ✅ Full | `src/agent/loop.ts`, subagents pattern |
-| Research | FR7-12 | ✅ Full | Research subagent, parallel execution |
-| Communication | FR13-18 | ✅ Full | `src/slack/handlers/`, streaming pattern |
-| Code Execution | FR19-23 | ✅ Full | Via Rube RUBE_REMOTE_WORKBENCH for Python/bash execution |
-| Extensions | FR24-29 | ✅ Full | MCP layer, `.claude/skills/`, `.claude/commands/` |
-| Knowledge | FR30-34 | ✅ Full | `orion-context/knowledge/`, `.orion/workflows/` |
-| Observability | FR35-40 | ✅ Full | Langfuse integration, tracing pattern |
+| Epic | Description | Support Status |
+|------|-------------|----------------|
+| Epic 1 | Slack Integration | ✅ `src/slack/` |
+| Epic 2 | Agent Loop | ✅ `src/agent/` |
+| Epic 3 | MCP Integration | ✅ `src/tools/mcp/` |
+| Epic 4 | Subagents & Research | ✅ `src/agent/subagents/` |
+| Epic 5 | Skills & Extensions | ✅ `.orion/` + `src/skills/` |
+| Epic 6 | UX & Polish | ✅ `src/slack/suggested-prompts.ts` |
+| Epic 7 | Slack AI App (FR47-50) | ✅ `src/slack/feedback.ts`, handlers |
+| Epic 8 | Observability | ✅ `src/observability/` |
+| Epic 9 | Sandbox/Code Execution | ⏳ `src/tools/sandbox/` (Phase 2) |
 
-**Non-Functional Requirements Coverage:**
+**Functional Requirements Coverage:** 50/50 FRs covered (FR1-46 + FR47-50)
 
-| NFR | Target | Architectural Support |
-|-----|--------|----------------------|
-| Response time (simple) | 1-3s | ✅ Streaming, async handlers |
-| Response time (tools) | 3-10s | ✅ Parallel tool execution, lazy MCP |
-| Deep research | <5 min | ✅ Subagent parallelization |
-| Uptime | >99.5% | ✅ min-instances: 1, health checks |
-| Tool success rate | >98% | ✅ Graceful degradation, retries |
-| Cost per query | <$0.10 | ✅ Prompt caching, token optimization |
-| Concurrent users | 50 | ✅ Vercel serverless auto-scaling |
+**Non-Functional Requirements Coverage:** 28/28 NFRs addressed
 
 ### Implementation Readiness Validation ✅
 
 **Decision Completeness:**
-
-| Category | Status | Assessment |
-|----------|--------|------------|
-| Technology versions | ✅ Complete | TypeScript 5.x, Node 20, all deps versioned |
-| Integration patterns | ✅ Complete | MCP, Langfuse, Slack patterns defined |
-| Error handling | ✅ Complete | `OrionError` interface, graceful degradation |
-| Examples | ✅ Complete | Code examples for all major patterns |
+- ✅ All critical technologies have versions specified
+- ✅ Implementation code patterns provided with examples
+- ✅ Type definitions shown (ToolResult, MemoryPath, ErrorCode)
 
 **Structure Completeness:**
+- ✅ Complete directory tree with all files
+- ✅ Epic → directory mapping explicit
+- ✅ Component boundaries diagrammed
 
-| Element | Status | Assessment |
-|---------|--------|------------|
-| Root configuration | ✅ Complete | All config files defined |
-| Source structure | ✅ Complete | Full directory tree with files |
-| Test organization | ✅ Complete | Co-located + integration + e2e |
-| Agent definitions | ✅ Complete | `.orion/` and `.claude/` structures |
+**Pattern Completeness:**
+- ✅ All conflict points addressed via TypeScript types
+- ✅ Test organization defined (co-located unit, separate integration)
+- ✅ CI/CD structure specified
 
 ### Gap Analysis Results
 
-**Critical Gaps:** None identified
+**Critical Gaps:** None
 
-**Important Gaps (Post-MVP):**
+**Important Gaps (addressable during implementation):**
+1. Health check endpoint (`/health`) for Cloud Run — add to `src/index.ts`
+2. Rate limiting pattern — implement at Slack handler level
+3. Model fallback strategy — add to config if primary model unavailable
 
-| Gap | Impact | Recommendation |
-|-----|--------|----------------|
-| Vector store for semantic memory | Medium | Add Chroma when file search becomes slow |
-| Redis for hot session data | Low | Add if file I/O becomes bottleneck |
-| Rate limiting | Low | Add if multi-user scaling needed |
+**Future Enhancements:**
+1. Semantic memory via Mem0 (documented)
+2. OpenAPI spec for internal tools
 
 ### Architecture Completeness Checklist
 
 **✅ Requirements Analysis**
-
 - [x] Project context thoroughly analyzed
-- [x] Scale and complexity assessed (Medium-High)
-- [x] Technical constraints identified (6 major constraints)
-- [x] Cross-cutting concerns mapped (6 concerns)
+- [x] Scale and complexity assessed
+- [x] Technical constraints identified
+- [x] Cross-cutting concerns mapped
 
 **✅ Architectural Decisions**
-
 - [x] Critical decisions documented with versions
 - [x] Technology stack fully specified
 - [x] Integration patterns defined
 - [x] Performance considerations addressed
 
 **✅ Implementation Patterns**
-
-- [x] Naming conventions established (5 categories)
+- [x] Naming conventions established
 - [x] Structure patterns defined
-- [x] Communication patterns specified (agent loop, subagents)
-- [x] Process patterns documented (observability, streaming)
+- [x] Communication patterns specified
+- [x] Process patterns documented
 
 **✅ Project Structure**
-
-- [x] Complete directory structure defined (50+ files)
-- [x] Component boundaries established (3 layers)
-- [x] Integration points mapped (5 external systems)
+- [x] Complete directory structure defined
+- [x] Component boundaries established
+- [x] Integration points mapped
 - [x] Requirements to structure mapping complete
 
 ### Architecture Readiness Assessment
@@ -980,34 +1114,47 @@ pnpm docker:build              # Build Docker image
 **Confidence Level:** HIGH
 
 **Key Strengths:**
-
-- Clear separation of concerns (Slack → Agent → Tools)
-- Consistent patterns prevent AI agent conflicts
-- Built on production-ready frameworks (Anthropic API, Bolt, Langfuse)
-- Simple memory model with upgrade path
-- Comprehensive observability from day one
-- No complex subprocess/sandbox requirements — direct API calls
+- Direct Anthropic API gives full control over agent loop
+- Cloud Run provides sufficient timeout (300s) for complex workflows
+- GCS-backed Memory Tool enables persistent learning
+- Type-safe patterns prevent common implementation errors
+- Clear Epic → Directory mapping guides AI agents
 
 **Areas for Future Enhancement:**
+- Mem0 semantic memory for cross-conversation search
+- Model router for multi-provider support
+- Advanced rate limiting with per-user quotas
 
-- Semantic memory search (vector store)
-- Hot session caching (Redis)
-- Multi-user memory patterns
-- Advanced rate limiting
+### Implementation Handoff
 
-## Architecture Completion Summary
+**AI Agent Guidelines:**
+1. Follow all architectural decisions exactly as documented
+2. Use implementation patterns consistently across all components
+3. Respect project structure and boundaries
+4. Refer to this document for all architectural questions
+5. Use branded types (`MemoryPath`, `ToolName`, `ErrorCode`) — never raw strings
+
+**First Implementation Priority:**
+```bash
+# Start with Epic 2: Agent Loop (core capability)
+pnpm install
+# Create src/agent/loop.ts following the patterns in this document
+```
+
+## Architecture Completion Summary (Step 8)
 
 ### Workflow Completion
 
-**Architecture Decision Workflow:** COMPLETED ✅
-**Total Steps Completed:** 8
-**Date Completed:** 2025-12-17
-**Document Location:** `_bmad-output/architecture.md`
+| Metric | Value |
+|--------|-------|
+| **Status** | ✅ COMPLETED |
+| **Steps Completed** | 8/8 |
+| **Date Completed** | 2025-12-22 |
+| **Document Location** | `_bmad-output/architecture.md` |
 
 ### Final Architecture Deliverables
 
 **📋 Complete Architecture Document**
-
 - All architectural decisions documented with specific versions
 - Implementation patterns ensuring AI agent consistency
 - Complete project structure with all files and directories
@@ -1015,67 +1162,35 @@ pnpm docker:build              # Build Docker image
 - Validation confirming coherence and completeness
 
 **🏗️ Implementation Ready Foundation**
-
-- 25+ architectural decisions made
-- 12 implementation patterns defined
-- 8 architectural components specified
+- 15+ architectural decisions made
+- 10+ implementation patterns defined
+- 9 epics mapped to architectural components
 - 43 functional requirements fully supported
-- 7 non-functional requirements addressed
-
-**📚 AI Agent Implementation Guide**
-
-- Technology stack with verified versions
-- Consistency rules that prevent implementation conflicts
-- Project structure with clear boundaries
-- Integration patterns and communication standards
-
-### Implementation Handoff
-
-**For AI Agents:**
-This architecture document is your complete guide for implementing Orion. Follow all decisions, patterns, and structures exactly as documented.
-
-**First Implementation Priority:**
-
-```bash
-mkdir orion-slack-agent && cd orion-slack-agent
-pnpm init
-# Follow project structure exactly as defined in this document
-```
-
-**Development Sequence:**
-
-1. Initialize project using documented structure
-2. Set up development environment per architecture
-3. Implement core architectural foundations (Slack Bolt + Anthropic API + Langfuse)
-4. Build features following established patterns
-5. Maintain consistency with documented rules
+- 28 non-functional requirements addressed
 
 ### Quality Assurance Checklist
 
 **✅ Architecture Coherence**
-
 - [x] All decisions work together without conflicts
 - [x] Technology choices are compatible
 - [x] Patterns support the architectural decisions
 - [x] Structure aligns with all choices
 
 **✅ Requirements Coverage**
-
-- [x] All functional requirements are supported
-- [x] All non-functional requirements are addressed
-- [x] Cross-cutting concerns are handled
-- [x] Integration points are defined
+- [x] All functional requirements supported
+- [x] All non-functional requirements addressed
+- [x] Cross-cutting concerns handled
+- [x] Integration points defined
 
 **✅ Implementation Readiness**
-
 - [x] Decisions are specific and actionable
 - [x] Patterns prevent agent conflicts
 - [x] Structure is complete and unambiguous
-- [x] Examples are provided for clarity
+- [x] Examples provided for clarity
 
 ---
 
-**Architecture Status:** READY FOR IMPLEMENTATION ✅
+**Architecture Status:** ✅ READY FOR IMPLEMENTATION
 
 **Next Phase:** Begin implementation using the architectural decisions and patterns documented herein.
 

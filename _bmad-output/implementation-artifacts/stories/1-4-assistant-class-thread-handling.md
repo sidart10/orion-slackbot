@@ -520,6 +520,14 @@ src/
 | UI utilities | Manual | `setTitle()`, `setStatus()`, `setSuggestedPrompts()` |
 | Thread history | Not implemented | `fetchThreadHistory()` via Slack API |
 
+### Breaking Changes (Bolt 3.x → 4.x)
+
+- **Handler signature:** `SlackEventMiddlewareArgs` → `AssistantUserMessageMiddlewareArgs`
+- **Registration:** `app.message(handler)` still works, but `app.assistant(assistant)` is preferred for AI apps
+- **Test mocks:** Need updating for 4.x types — use `configHolder` wrapper pattern
+- **Context object:** New properties available (`context.userId`, `context.threadTs`)
+- **Async utilities:** `setSuggestedPrompts`, `setTitle`, `setStatus` now available in callbacks
+
 ### References
 
 - [Source: _bmad-output/epics.md#Story 1.4: Assistant Class & Thread Handling] — Original story definition

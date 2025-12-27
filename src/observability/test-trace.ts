@@ -22,7 +22,7 @@
 // Import instrumentation first (mimics production startup)
 import '../instrumentation.js';
 
-import { startActiveObservation, createSpan, logGeneration } from './tracing.js';
+import { startActiveObservation, type TraceWrapper } from './tracing.js';
 import { getLangfuse, shutdown } from './langfuse.js';
 
 // Structured logging helper
@@ -58,56 +58,53 @@ async function testTracing(): Promise<void> {
         testTimestamp: new Date().toISOString(),
       },
     },
-    async (trace) => {
+    async (trace: TraceWrapper) => {
       log('Created trace', { traceId: trace.id });
 
       // Simulate gather phase (like collecting context from Slack/Confluence)
-      const gatherSpan = createSpan(trace, {
-        name: 'gather-context',
+      const gatherSpan = trace.startSpan('gather-context', {
         input: { sources: ['slack', 'confluence'] },
         metadata: { phase: 'gather' },
       });
       await new Promise((resolve) => setTimeout(resolve, 100));
-      gatherSpan.end({ output: { documentsFound: 5, relevantSources: 3 } });
+      gatherSpan.update({ output: { documentsFound: 5, relevantSources: 3 } }).end();
       log('Completed gather phase');
 
       // Simulate act phase (like generating a response with Claude)
-      const actSpan = createSpan(trace, {
-        name: 'generate-response',
+      const actSpan = trace.startSpan('generate-response', {
         input: { prompt: 'Summarize context about Orion' },
         metadata: { phase: 'act' },
       });
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Log a generation event (simulating Claude API call)
-      logGeneration(trace, {
-        name: 'claude-completion',
+      const generation = trace.startGeneration('claude-completion', {
         model: 'claude-sonnet-4-20250514',
         input: 'Summarize context about Orion',
         output: 'Orion is an agentic AI system built with Claude.',
-        usage: {
-          promptTokens: 150,
-          completionTokens: 50,
-          totalTokens: 200,
+        usageDetails: {
+          input: 150,
+          output: 50,
+          total: 200,
         },
         metadata: { temperature: 0.7 },
       });
+      generation.end();
 
-      actSpan.end({
+      actSpan.update({
         output: { response: 'Orion is an agentic AI system.' },
-      });
+      }).end();
       log('Completed act phase');
 
       // Simulate verify phase (like checking response quality)
-      const verifySpan = createSpan(trace, {
-        name: 'verify-response',
+      const verifySpan = trace.startSpan('verify-response', {
         input: { response: 'Orion is an agentic AI system.' },
         metadata: { phase: 'verify' },
       });
       await new Promise((resolve) => setTimeout(resolve, 50));
-      verifySpan.end({
+      verifySpan.update({
         output: { verified: true, confidence: 0.95 },
-      });
+      }).end();
       log('Completed verify phase');
 
       return {

@@ -32,6 +32,10 @@ export interface FetchThreadHistoryParams {
   limit?: number;
   /** Maximum tokens to include in history (default: 4000) */
   maxTokens?: number;
+  /** Keep only the most recent N messages (default: 50) */
+  keepLastN?: number;
+  /** Trace ID for observability (passed through to logs) */
+  traceId?: string;
 }
 
 /**
@@ -57,11 +61,43 @@ export async function fetchThreadHistory({
   threadTs,
   limit = 100,
   maxTokens = DEFAULT_MAX_TOKENS,
+  keepLastN = 50,
+  traceId,
 }: FetchThreadHistoryParams): Promise<ThreadMessage[]> {
-  const allMessages: ThreadMessage[] = [];
+  const recentMessages: ThreadMessage[] = [];
   let cursor: string | undefined;
-  let totalChars = 0;
   const maxChars = maxTokens * CHARS_PER_TOKEN_ESTIMATE;
+  let recentChars = 0;
+  let loggedTokenTrim = false;
+
+  const pushRecent = (msg: ThreadMessage): void => {
+    recentMessages.push(msg);
+    recentChars += msg.text.length;
+
+    // Enforce "keep only the most recent N"
+    while (recentMessages.length > keepLastN) {
+      const removed = recentMessages.shift();
+      if (removed) recentChars -= removed.text.length;
+    }
+
+    // Enforce token/char budget on the retained window (keep most recent)
+    while (recentChars > maxChars && recentMessages.length > 0) {
+      const removed = recentMessages.shift();
+      if (removed) recentChars -= removed.text.length;
+
+      if (!loggedTokenTrim) {
+        loggedTokenTrim = true;
+        logger.info({
+          event: 'thread_history_token_budget_trimmed',
+          channel,
+          threadTs,
+          keepLastN,
+          maxChars,
+          ...(traceId && { traceId }),
+        });
+      }
+    }
+  };
 
   try {
     // Paginate through all messages in the thread
@@ -80,30 +116,12 @@ export async function fetchThreadHistory({
 
       for (const msg of result.messages) {
         const text = msg.text || '';
-        const charCount = text.length;
-
-        // Check if adding this message would exceed token limit
-        if (totalChars + charCount > maxChars && allMessages.length > 0) {
-          logger.info({
-            event: 'thread_history_token_limit_reached',
-            channel,
-            threadTs,
-            messagesLoaded: allMessages.length,
-            totalChars,
-            maxChars,
-          });
-          // Return what we have, excluding current message
-          return allMessages.slice(0, -1);
-        }
-
-        allMessages.push({
+        pushRecent({
           user: msg.user || 'unknown',
           text,
           ts: msg.ts || '',
           isBot: !!msg.bot_id,
         });
-
-        totalChars += charCount;
       }
 
       // Get cursor for next page
@@ -112,13 +130,14 @@ export async function fetchThreadHistory({
 
     // Filter out the current message (last one) to avoid duplication
     // Keep all previous messages for context
-    return allMessages.slice(0, -1);
+    return recentMessages.slice(0, -1);
   } catch (error) {
     logger.error({
       event: 'fetch_thread_history_failed',
       channel,
       threadTs,
       error: error instanceof Error ? error.message : String(error),
+      ...(traceId && { traceId }),
     });
     return [];
   }

@@ -1,0 +1,65 @@
+# Cloud Build configuration for Orion Slack Agent
+# Substitutions:
+#   _REGION: GCP region (e.g., us-central1)
+#   _TAG: Environment tag (staging, production)
+
+timeout: '600s' # 10 minutes
+
+steps:
+  # Build Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'docker/Dockerfile'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/orion-slack-agent:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/orion-slack-agent:${_TAG}'
+      - '.'
+
+  # Push to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'gcr.io/$PROJECT_ID/orion-slack-agent'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'orion-slack-agent'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/orion-slack-agent:$COMMIT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--min-instances'
+      - '1'
+      - '--max-instances'
+      - '10'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '240'
+      - '--set-secrets'
+      - 'SLACK_BOT_TOKEN=slack-bot-token:latest,SLACK_SIGNING_SECRET=slack-signing-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,ANTHROPIC_MODEL=anthropic-model:latest,GCS_MEMORIES_BUCKET=gcs-memories-bucket:latest,LANGFUSE_PUBLIC_KEY=langfuse-public-key:latest,LANGFUSE_SECRET_KEY=langfuse-secret-key:latest'
+    - '--tag'
+    - '${_TAG}'
+    - '--no-traffic'
+
+substitutions:
+  _REGION: 'us-central1'
+  _TAG: 'staging'
+
+images:
+  - 'gcr.io/$PROJECT_ID/orion-slack-agent:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/orion-slack-agent:${_TAG}'
+
