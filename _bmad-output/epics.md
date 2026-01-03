@@ -352,11 +352,15 @@ Enable developers to add new capabilities via file-based definitions.
 **FRs:** FR24, FR25
 **NFRs:** None specific
 
+**Course Correction (2026-01-02):**
+Story 6-1 implemented incorrectly — used full content injection (~15k tokens) instead of progressive disclosure (~1.2k tokens). Refactor required to follow Agent Skills open standard ([agentskills.io](https://agentskills.io)). Story 6-2 enhanced with skill filesystem sync to GKE sandbox.  
+See: `sprint-change-proposal-2026-01-02-skills-architecture-fix.md`
+
 **Stories:**
 | Story | Title | Status |
 |-------|-------|--------|
-| 6.1 | Agent Skills Loader | ready-for-dev |
-| 6.2 | Commands Framework | ready-for-dev |
+| 6.1 | Agent Skills Loader | refactor-needed |
+| 6.2 | Execute Code Tool | in-progress |
 
 ---
 

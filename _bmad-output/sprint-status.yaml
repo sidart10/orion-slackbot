@@ -126,9 +126,12 @@ development_status:
   # ═══════════════════════════════════════════════════════════════════════════
   # Epic 6: Skills & Extensions Framework 🔄 IN PROGRESS
   # ═══════════════════════════════════════════════════════════════════════════
+  # COURSE CORRECTION (2026-01-02): 6-1 implemented wrong pattern (full content
+  # injection vs progressive disclosure). Refactor required per Agent Skills
+  # open standard (agentskills.io). See: sprint-change-proposal-2026-01-02-skills-architecture-fix.md
   epic-6: in-progress
-  6-1-agent-skills-loader: done               # ✅ Code review passed 2026-01-03; 50 tests passing
-  6-2-execute-code-tool: done                 # ✅ Code review passed 2026-01-03; 31 tests passing
+  6-1-agent-skills-loader: refactor-needed    # ⚠️ Course correction: metadata-only loading required
+  6-2-execute-code-tool: in-progress          # Adding skill filesystem sync to sandbox
   epic-6-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
