@@ -62,9 +62,22 @@ export async function executeToolCall(params: {
       });
 
       // Merge server defaults with user-provided args (user args take precedence)
-      const mergedArgs = server.defaults 
+      let mergedArgs = server.defaults 
         ? { ...server.defaults, ...params.args }
         : params.args;
+
+      // Veo 3.1 only supports durations [4, 6, 8] - fix invalid values
+      if (mcpTool.originalName === 'veo_t2v' && mergedArgs.duration !== undefined) {
+        const validDurations = [4, 6, 8];
+        const dur = Number(mergedArgs.duration);
+        if (!validDurations.includes(dur)) {
+          // Round to nearest valid duration
+          const closest = validDurations.reduce((a, b) => 
+            Math.abs(b - dur) < Math.abs(a - dur) ? b : a
+          );
+          mergedArgs = { ...mergedArgs, duration: closest };
+        }
+      }
 
       const result = await client.callTool(
         mcpTool.originalName, // Use the original tool name (without server prefix)
