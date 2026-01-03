@@ -30,6 +30,7 @@
     "@slack/web-api": "^7.13.0",
     "dotenv": "^16.4.7",
     "glob": "^10.3.10",
+    "google-auth-library": "^10.5.0",
     "gray-matter": "^4.0.3",
     "langfuse": "^3.38.6",
     "yaml": "^2.6.1"

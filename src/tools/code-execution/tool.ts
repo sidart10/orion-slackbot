@@ -24,6 +24,18 @@ import type { ToolResult } from '../../utils/tool-result.js';
 // Cache the MCP bootstrap script
 let mcpBootstrapCache: string | null = null;
 
+// Fallback MCP bootstrap stub when file cannot be loaded
+const MCP_BOOTSTRAP_FALLBACK = `
+import os, json
+MCP_SERVERS = json.loads(os.environ.get('MCP_SERVERS', '{}'))
+
+def call_tool(server, tool, args):
+    raise RuntimeError("MCP bootstrap not available - httpx required")
+
+def list_mcp_servers():
+    return list(MCP_SERVERS.keys())
+`;
+
 /**
  * Load MCP bootstrap script for injection into sandbox.
  * Cached after first load.
@@ -37,20 +49,20 @@ async function getMcpBootstrap(): Promise<string> {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
     const bootstrapPath = join(__dirname, 'mcp-bootstrap.py');
-    mcpBootstrapCache = await readFile(bootstrapPath, 'utf-8');
+    const content = await readFile(bootstrapPath, 'utf-8');
+
+    // Validate we got actual content (handles mock returning undefined)
+    if (content && typeof content === 'string' && content.length > 0) {
+      mcpBootstrapCache = content;
+      return mcpBootstrapCache;
+    }
+
+    // Fall through to fallback
+    mcpBootstrapCache = MCP_BOOTSTRAP_FALLBACK;
     return mcpBootstrapCache;
   } catch {
     // Fallback if file not found - provide minimal stub
-    mcpBootstrapCache = `
-import os, json
-MCP_SERVERS = json.loads(os.environ.get('MCP_SERVERS', '{}'))
-
-def call_tool(server, tool, args):
-    raise RuntimeError("MCP bootstrap not available")
-
-def list_mcp_servers():
-    return list(MCP_SERVERS.keys())
-`;
+    mcpBootstrapCache = MCP_BOOTSTRAP_FALLBACK;
     return mcpBootstrapCache;
   }
 }
@@ -71,6 +83,14 @@ export function setExecuteCodeContext(ctx: { traceId: string }): void {
  */
 export function clearExecuteCodeContext(): void {
   currentContext = { traceId: 'unknown' };
+}
+
+/**
+ * Reset internal caches for testing.
+ * @internal
+ */
+export function __resetCacheForTests(): void {
+  mcpBootstrapCache = null;
 }
 
 /**
