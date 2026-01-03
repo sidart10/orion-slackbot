@@ -44,6 +44,7 @@ import {
   setMemoryToolContext,
   clearMemoryToolContext,
 } from '../../tools/memory/index.js';
+import { getSkills, buildSkillsPrompt } from '../../skills/index.js';
 
 /**
  * Extract message text by stripping the leading bot mention.
@@ -278,6 +279,28 @@ export async function handleAppMention({
           });
           systemPrompt =
             'You are Orion, a helpful AI assistant. Use Slack mrkdwn formatting: *bold* for emphasis, _italic_ for secondary emphasis. Never use blockquotes.';
+        }
+
+        // Story 6.1: Inject skills into system prompt (AC#4)
+        try {
+          const skills = await getSkills(trace.id);
+          if (skills.length > 0) {
+            const skillsPrompt = buildSkillsPrompt(skills);
+            systemPrompt = `${systemPrompt}\n\n${skillsPrompt}`;
+            logger.info({
+              event: 'skills_injected',
+              skillCount: skills.length,
+              skillNames: skills.map((s) => s.name),
+              traceId: trace.id,
+            });
+          }
+        } catch (skillsError) {
+          // Best-effort: log and continue without skills
+          logger.warn({
+            event: 'skills_injection_failed',
+            reason: skillsError instanceof Error ? skillsError.message : String(skillsError),
+            traceId: trace.id,
+          });
         }
 
         // Update trace with context

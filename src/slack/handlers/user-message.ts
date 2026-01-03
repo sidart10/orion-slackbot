@@ -56,6 +56,7 @@ import {
   setSummarizeToolContext,
   clearSummarizeToolContext,
 } from '../../tools/summarize/index.js';
+import { getSkills, buildSkillsPrompt } from '../../skills/index.js';
 import { uploadImagesFromResponse } from '../utils/image-upload.js';
 import {
   setMemoryToolContext,
@@ -321,6 +322,28 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             logger.debug({
               event: 'memory_context_retrieval_skipped',
               reason: ctxError instanceof Error ? ctxError.message : String(ctxError),
+              traceId: trace.id,
+            });
+          }
+
+          // Story 6.1: Inject skills into system prompt (AC#4)
+          try {
+            const skills = await getSkills(trace.id);
+            if (skills.length > 0) {
+              const skillsPrompt = buildSkillsPrompt(skills);
+              systemPrompt = `${systemPrompt}\n\n${skillsPrompt}`;
+              logger.info({
+                event: 'skills_injected',
+                skillCount: skills.length,
+                skillNames: skills.map((s) => s.name),
+                traceId: trace.id,
+              });
+            }
+          } catch (skillsError) {
+            // Best-effort: log and continue without skills
+            logger.warn({
+              event: 'skills_injection_failed',
+              reason: skillsError instanceof Error ? skillsError.message : String(skillsError),
               traceId: trace.id,
             });
           }
