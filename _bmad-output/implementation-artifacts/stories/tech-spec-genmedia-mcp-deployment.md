@@ -1,9 +1,9 @@
 # Tech-Spec: Google Cloud Genmedia MCP Deployment
 
 **Created:** 2026-01-02  
-**Status:** ✅ COMPLETE  
+**Status:** ✅ COMPLETE (Auth + Timeout + Defaults implemented)  
 **Author:** Barry (Quick Flow Solo Dev)  
-**Last Review:** 2026-01-02 (3 HIGH, 4 MEDIUM, 2 LOW issues fixed)  
+**Last Review:** 2026-01-03 (Extended implementation for local dev + Slack integration)  
 **Deployed:** 2026-01-03
 
 ---
@@ -275,15 +275,28 @@ gcloud run services add-iam-policy-binding mcp-veo \
 
 | File | Change |
 |------|--------|
-| `.orion/config.yaml` | Added genmedia-imagen and genmedia-veo server entries with correct URLs |
+| `.orion/config.yaml` | Added genmedia-imagen and genmedia-veo with authType, defaults, requestTimeoutMs |
 | `infra/mcp-genmedia/Dockerfile.imagen` | Created; GOTOOLCHAIN=auto for Go 1.24.3 |
 | `infra/mcp-genmedia/Dockerfile.veo` | Created; GOTOOLCHAIN=auto for Go 1.24.3 |
 | `infra/mcp-genmedia/cloudbuild-imagen.yaml` | Created; IAM grant + Artifact Registry |
 | `infra/mcp-genmedia/cloudbuild-veo.yaml` | Created; IAM grant + Artifact Registry |
 | `infra/mcp-genmedia/README.md` | Created; actual URLs and test examples |
-| `src/config/mcp-servers.ts` | Added defaults extraction from config |
-| `src/tools/mcp/types.ts` | Added defaults field to MCP config types |
-| `src/tools/router.ts` | Added defaults merging for MCP tool calls |
+| `src/config/mcp-servers.ts` | Added extraction for defaults, authType, requestTimeoutMs from YAML |
+| `src/tools/mcp/types.ts` | Added defaults, authType, audience fields to MCP config types |
+| `src/tools/mcp/config.ts` | Added passthrough for authType, defaults, requestTimeoutMs in transformToSdkConfig |
+| `src/tools/mcp/client.ts` | Added dynamic GCP identity token auth via getAuthHeader() |
+| `src/tools/mcp/gcp-auth.ts` | **NEW:** GCP identity token fetching with service account impersonation |
+| `src/tools/mcp/discovery.ts` | Pass server.defaults to mcpToolToClaude for schema injection |
+| `src/tools/mcp/schema-converter.ts` | Inject server defaults into tool descriptions, remove from required |
+| `src/tools/mcp/manager.ts` | Added debug logging for requestTimeoutMs on client creation |
+| `src/tools/router.ts` | Merge server.defaults with user args; validate Veo duration |
+| `src/tools/executor.ts` | Uses timeoutMs from options (passed from orion.ts) |
+| `src/agent/orion.ts` | Look up server-specific timeout for MCP tools |
+| `src/agent/loop.ts` | Added extractPlainUrls for GCS URL extraction from tool results |
+| `src/slack/utils/image-upload.ts` | **NEW:** Download images from GCS and upload to Slack |
+| `src/slack/handlers/app-mention.ts` | Integrated image upload for tool results |
+| `src/slack/handlers/user-message.ts` | Integrated image upload for tool results |
+| `package.json` | Added google-auth-library, execa dependencies |
 
 ### Change Log
 
@@ -303,6 +316,181 @@ gcloud run services add-iam-policy-binding mcp-veo \
 | 2026-01-03 | Barry | Added substitutions for _TAG (was $COMMIT_SHA) |
 | 2026-01-03 | Barry | ✅ All ACs verified - image and video generation working |
 | 2026-01-03 | Barry | Added defaults: Imagen 4 + Veo 3.1 as default models |
+| 2026-01-03 | Barry | **AUTH:** Added GCP identity token auth for local development |
+| 2026-01-03 | Barry | **AUTH:** Added service account impersonation for gcloud CLI fallback |
+| 2026-01-03 | Barry | **TIMEOUT:** Fixed 30s hardcoded timeout - now uses server config |
+| 2026-01-03 | Barry | **TIMEOUT:** Imagen 60s, Veo 180s timeouts in config |
+| 2026-01-03 | Barry | **DEFAULTS:** Inject server defaults into tool descriptions |
+| 2026-01-03 | Barry | **DEFAULTS:** Remove defaulted params from required list |
+| 2026-01-03 | Barry | **VALIDATION:** Auto-correct invalid Veo duration to nearest valid |
+| 2026-01-03 | Barry | **SLACK:** Added image download/upload utility (partial - needs review) |
+
+---
+
+## Extended Implementation Details (Post-Deployment)
+
+### 1. GCP Identity Token Authentication
+
+Cloud Run services require IAM authentication. Added support for local development:
+
+**Config (`.orion/config.yaml`):**
+```yaml
+genmedia-imagen:
+  type: http
+  enabled: true
+  url: "https://mcp-imagen-201626763325.us-central1.run.app/mcp"
+  authType: gcp_identity      # ← NEW: triggers identity token fetch
+  requestTimeoutMs: 60000     # ← NEW: image gen takes ~30s
+  defaults:
+    model: "imagen-4.0-generate-001"
+    gcs_bucket_uri: "gs://orion-genmedia/imagen_outputs/"
+
+genmedia-veo:
+  type: http
+  enabled: true  
+  url: "https://mcp-veo-201626763325.us-central1.run.app/mcp"
+  authType: gcp_identity
+  requestTimeoutMs: 180000    # ← NEW: video gen takes 60-90s
+  defaults:
+    model: "veo-3.1-generate-preview"
+    generate_audio: false
+    duration: 6
+    gcs_bucket_uri: "gs://orion-genmedia/veo_outputs/"
+```
+
+**New File: `src/tools/mcp/gcp-auth.ts`**
+- Primary: `google-auth-library` for ADC (metadata server on GCP, local creds)
+- Fallback: `gcloud auth print-identity-token --impersonate-service-account=...`
+- Caching: Tokens cached until 5 min before expiry
+
+**Required IAM for local dev:**
+```bash
+gcloud iam service-accounts add-iam-policy-binding \
+  201626763325-compute@developer.gserviceaccount.com \
+  --member="user:YOUR_EMAIL" \
+  --role="roles/iam.serviceAccountTokenCreator"
+```
+
+### 2. Timeout Configuration
+
+**Problem:** `executor.ts` had hardcoded 30s timeout, video gen takes 60-90s.
+
+**Solution:** Pass server-specific timeout through the call chain:
+
+1. `.orion/config.yaml` → `requestTimeoutMs: 180000`
+2. `mcp-servers.ts` → `extractRequestTimeoutMs()` extracts from YAML
+3. `orion.ts` → Looks up server config by tool name, passes `timeoutMs`
+4. `executor.ts` → Uses `options.timeoutMs ?? DEFAULT_TIMEOUT_MS`
+5. `client.ts` → Uses `config.requestTimeoutMs` for fetch timeout
+
+### 3. Server Defaults Injection
+
+**Problem:** Claude kept asking for `gcs_bucket_uri` even though it's pre-configured.
+
+**Solution:** Inject defaults into tool schema so Claude knows they exist:
+
+**`schema-converter.ts`:**
+```typescript
+// Add defaults to description
+description += '\n\n**Defaults (can be overridden):**\n';
+for (const [key, value] of defaultsForTool) {
+  description += `- \`${key}\`: \`${JSON.stringify(value)}\`\n`;
+  // Remove from required list
+  requiredParams.delete(key);
+}
+```
+
+**`router.ts`:**
+```typescript
+// Merge defaults with user args (user wins)
+let mergedArgs = server.defaults 
+  ? { ...server.defaults, ...params.args }
+  : params.args;
+```
+
+### 4. Veo Duration Validation
+
+**Problem:** Claude sometimes passes invalid duration (5s) - Veo only supports [4, 6, 8].
+
+**Solution:** Auto-correct in `router.ts`:
+```typescript
+if (mcpTool.originalName === 'veo_t2v' && mergedArgs.duration !== undefined) {
+  const validDurations = [4, 6, 8];
+  const dur = Number(mergedArgs.duration);
+  if (!validDurations.includes(dur)) {
+    const closest = validDurations.reduce((a, b) => 
+      Math.abs(b - dur) < Math.abs(a - dur) ? b : a
+    );
+    mergedArgs = { ...mergedArgs, duration: closest };
+  }
+}
+```
+
+### 5. Image/Video URL Extraction
+
+**Problem:** GCS URLs in tool results weren't being extracted for sources.
+
+**Solution:** Added `extractPlainUrls()` in `loop.ts`:
+```typescript
+function extractPlainUrls(text: string): Array<{ title: string; url: string }> {
+  const urlRegex = /(https?:\/\/[^\s/$.?#].[^\s]*)/g;
+  // ... extract and return URLs
+}
+```
+
+### 6. Slack Image Upload (Partial)
+
+**New File: `src/slack/utils/image-upload.ts`**
+- Downloads image from GCS signed URL
+- Uploads to Slack via `files.uploadV2`
+- Integrated into `app-mention.ts` and `user-message.ts`
+
+**Status:** ⚠️ Images still showing as links - URL extraction may need debugging.
+**TODO:** Video download/display not yet implemented.
+
+---
+
+## Current Configuration Summary
+
+**.orion/config.yaml (genmedia section):**
+```yaml
+genmedia-imagen:
+  type: http
+  enabled: true
+  description: "Google Imagen - image generation via Vertex AI"
+  url: "https://mcp-imagen-201626763325.us-central1.run.app/mcp"
+  headers: {}
+  authType: gcp_identity
+  requestTimeoutMs: 60000
+  defaults:
+    model: "imagen-4.0-generate-001"
+    gcs_bucket_uri: "gs://orion-genmedia/imagen_outputs/"
+
+genmedia-veo:
+  type: http
+  enabled: true
+  description: "Google Veo - video generation via Vertex AI"
+  url: "https://mcp-veo-201626763325.us-central1.run.app/mcp"
+  headers: {}
+  authType: gcp_identity
+  requestTimeoutMs: 180000
+  defaults:
+    model: "veo-3.1-generate-preview"
+    generate_audio: false
+    duration: 6
+    gcs_bucket_uri: "gs://orion-genmedia/veo_outputs/"
+```
+
+---
+
+## Known Issues / TODO
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| Image inline display | ⚠️ Partial | URL extraction works, upload may need debugging |
+| Video inline display | ❌ Not implemented | Would need video download + Slack video upload |
+| Multiple processes | ⚠️ Manual | Must `pkill -f orion-slack-agent` before restart |
+| Token caching | ✅ Working | 5-min buffer before expiry refresh |
 
 ### Review Follow-ups (AI)
 
