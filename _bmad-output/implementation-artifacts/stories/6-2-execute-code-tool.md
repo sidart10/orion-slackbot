@@ -1,6 +1,6 @@
 # Story 6.2: execute_code Tool (GKE Agent Sandbox)
 
-Status: review
+Status: done
 
 ## Story
 
@@ -616,7 +616,7 @@ See: `infra/gke-sandbox/` for manifests, `project-context.md` for connection det
 
 ### Completion Notes
 ✅ Story 6.2 implementation complete
-- 28 tests passing in code-execution module
+- 31 tests passing in code-execution module (after review fixes)
 - All 8 tasks implemented per story specification
 - Follows project-context.md patterns: ESM imports, ToolResult returns, traceId logging
 - Latency verification (Task 8.7, 8.8) deferred to live GKE cluster testing
@@ -633,6 +633,7 @@ See: `infra/gke-sandbox/` for manifests, `project-context.md` for connection det
 | Created | src/tools/code-execution/mcp-bootstrap.py |
 | Created | src/tools/code-execution/index.ts |
 | Modified | src/config/environment.ts |
+| Modified | src/tools/index.ts |
 
 ## Change Log
 
@@ -641,3 +642,4 @@ See: `infra/gke-sandbox/` for manifests, `project-context.md` for connection det
 | 2026-01-02 | Story created for GKE Agent Sandbox integration |
 | 2026-01-02 | **Validation review (SM)**: Critical fixes: (1) Added ToolResult return type, (2) Added gkeSandboxRouterUrl to environment config, (3) Fixed sandbox router URL to match infra, (4) Added readFile import, (5) Added registerStaticTool() registration pattern, (6) Aligned with Story 6.1 Skill interface (hasExecutableScripts check, skill: prefix handling), (7) Added code hash logging, (8) Added verification latency tests |
 | 2026-01-03 | **Implementation complete (Dev)**: All 8 tasks done; 28 tests passing; ready for review |
+| 2026-01-03 | **Code review (Dev)**: Fixed 4 critical + 3 medium issues: (1) MCP bootstrap now injected into sandbox code, (2) MCP_SERVERS env var passed to sandbox, (3) Added registerExecuteCodeTool export to src/tools/index.ts, (4) Fixed traceId propagation via context pattern (setExecuteCodeContext/clearExecuteCodeContext), (5) Added MCP injection tests, (6) Added gkeSandboxRouterUrl validation comment, (7) 31 tests passing |
