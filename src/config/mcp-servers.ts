@@ -76,6 +76,16 @@ function extractAuthType(config: ClaudeSdkMcpConfig): 'gcp_identity' | undefined
   return undefined;
 }
 
+/**
+ * Extract requestTimeoutMs from config if present
+ */
+function extractRequestTimeoutMs(config: ClaudeSdkMcpConfig): number {
+  if ('requestTimeoutMs' in config && typeof config.requestTimeoutMs === 'number') {
+    return config.requestTimeoutMs;
+  }
+  return 30000; // Default 30s
+}
+
 // Test override: set to true to skip file-based config loading
 let __skipFileConfigForTests = false;
 
@@ -96,11 +106,7 @@ export function getMcpServerConfigs(): McpServerConfig[] {
         if (url) {
           const defaults = extractDefaults(sdkConfig);
           const authType = extractAuthType(sdkConfig);
-          
-          // Debug: log genmedia server config
-          if (name.startsWith('genmedia')) {
-            console.log(`[DEBUG] MCP server ${name}:`, { url, defaults, authType });
-          }
+          const requestTimeoutMs = extractRequestTimeoutMs(sdkConfig);
           
           configs.push({
             name,
@@ -108,7 +114,7 @@ export function getMcpServerConfigs(): McpServerConfig[] {
             enabled: true, // Already filtered to enabled servers by loadMcpServersConfig
             bearerToken: extractBearerToken(sdkConfig),
             connectionTimeoutMs: 5000,
-            requestTimeoutMs: 30000,
+            requestTimeoutMs,
             defaults,
             authType,
           });

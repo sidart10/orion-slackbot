@@ -106,6 +106,10 @@ function transformToSdkConfig(name: string, config: McpServerConfig): ClaudeSdkM
     if (config.defaults) {
       (sdkConfig as { defaults?: Record<string, unknown> }).defaults = config.defaults;
     }
+    // Copy requestTimeoutMs for long-running operations
+    if (config.requestTimeoutMs) {
+      (sdkConfig as { requestTimeoutMs?: number }).requestTimeoutMs = config.requestTimeoutMs;
+    }
     return sdkConfig;
   }
 

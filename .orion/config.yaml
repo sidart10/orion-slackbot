@@ -61,6 +61,8 @@ mcp_servers:
     headers: {}
     # Cloud Run requires IAM auth - fetch identity token at runtime
     authType: gcp_identity
+    # Image generation can take up to 30s
+    requestTimeoutMs: 60000
     # Preferred defaults (pass to tool calls when not specified by user)
     defaults:
       model: "imagen-4.0-generate-001"  # Imagen 4 - best quality
@@ -74,6 +76,8 @@ mcp_servers:
     headers: {}
     # Cloud Run requires IAM auth - fetch identity token at runtime
     authType: gcp_identity
+    # Video generation takes 60-120s
+    requestTimeoutMs: 180000
     # Preferred defaults (pass to tool calls when not specified by user)
     defaults:
       model: "veo-3.1-generate-preview"  # Veo 3.1 - best quality with audio
