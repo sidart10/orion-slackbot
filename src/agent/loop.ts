@@ -20,6 +20,11 @@ import type { AgentContext, AgentResult } from './orion.js';
 import { gatherContext, type ContextSource } from './gather.js';
 import { verify } from './verify.js';
 import {
+  getMemoryTool,
+  setMemoryToolContext,
+  clearMemoryToolContext,
+} from '../tools/memory/tool.js';
+import {
   verifyResponse,
   createGracefulFailureResponse,
   buildRetryPrompt,
@@ -109,8 +114,12 @@ export interface AgentLoopOptions {
 }
 
 // Initialize Anthropic client (uses ANTHROPIC_API_KEY env var automatically)
+// Story 5.1 AC#7: Enable memory tool auto-context via beta header
 const anthropic = new Anthropic({
   apiKey: config.anthropicApiKey,
+  defaultHeaders: {
+    'anthropic-beta': 'context-management-2025-06-27',
+  },
 });
 
 const DEFAULT_MAX_TOOL_LOOPS = 10;
@@ -372,7 +381,40 @@ export async function* executeAgentLoop(
     });
   }
 
-  const tools = getToolDefinitions();
+  // Story 5.1: Set up memory tool context for this request
+  // Memory tool uses SDK betaMemoryTool helper with GCS backend
+  let memoryTool: ReturnType<typeof getMemoryTool> | null = null;
+  const traceIdForMemory = context.traceId ?? 'no-trace';
+  if (config.gcsMemoriesBucket) {
+    try {
+      setMemoryToolContext(config.gcsMemoriesBucket, traceIdForMemory);
+      memoryTool = getMemoryTool();
+      logger.debug({
+        event: 'memory_tool.configured',
+        traceId: traceIdForMemory,
+        bucket: config.gcsMemoriesBucket,
+      });
+    } catch (e) {
+      logger.warn({
+        event: 'memory_tool.setup_failed',
+        traceId: context.traceId,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  // Get MCP + static tools from registry, add memory tool if configured
+  const registryTools = getToolDefinitions();
+  // Memory tool uses BetaRunnableTool type from @anthropic-ai/sdk/helpers/beta/memory
+  // This type is NOT Anthropic.Tool, but the SDK's messages.create() accepts both.
+  // The type assertion is safe because:
+  // 1. betaMemoryTool returns { type: 'memory_20250818', name: 'memory', ... }
+  // 2. The API accepts this tool format alongside standard Anthropic.Tool objects
+  // 3. Runtime behavior is validated via integration tests
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tools = memoryTool
+    ? [...registryTools, memoryTool as unknown as Anthropic.Tool]
+    : registryTools;
   void options.setStatus?.({ phase: 'gather' });
   const gatherSpan = createAgentSpan(trace, 'agent.gather', {
     messageLength: userMessage.length,
@@ -493,9 +535,7 @@ export async function* executeAgentLoop(
         messages: attemptMessages,
         stream: true,
         ...(tools.length > 0 ? { tools } : {}),
-        // Story 5.1 AC#7: Enable memory tool auto-context
-        betas: ['context-management-2025-06-27'],
-      } as unknown as Anthropic.MessageCreateParams)) as unknown as AsyncIterable<Anthropic.RawMessageStreamEvent>;
+      })) as unknown as AsyncIterable<Anthropic.RawMessageStreamEvent>;
 
       let inputTokensThisCall = 0;
       let outputTokensThisCall = 0;
@@ -729,21 +769,41 @@ export async function* executeAgentLoop(
           });
 
           const startMs = Date.now();
-          const result = options.executeTool
-            ? await options.executeTool({
-                name: toolUse.name,
-                toolUseId: toolUse.id,
-                input: toolUse.input,
-                traceId: context.traceId,
-              })
-            : {
+          
+          // Story 5.1: Handle memory tool via SDK helper's .run() method
+          let result: unknown;
+          if (toolUse.name === 'memory' && memoryTool && 'run' in memoryTool) {
+            try {
+              // Parse and run via SDK helper
+              const parsed = memoryTool.parse(toolUse.input);
+              result = await memoryTool.run(parsed);
+            } catch (e) {
+              result = {
                 success: false,
                 error: {
-                  code: 'TOOL_NOT_IMPLEMENTED',
-                  message: `Tool '${toolUse.name}' is not available yet`,
+                  code: 'MEMORY_TOOL_ERROR',
+                  message: e instanceof Error ? e.message : String(e),
                   retryable: false,
                 },
               };
+            }
+          } else if (options.executeTool) {
+            result = await options.executeTool({
+              name: toolUse.name,
+              toolUseId: toolUse.id,
+              input: toolUse.input,
+              traceId: context.traceId,
+            });
+          } else {
+            result = {
+              success: false,
+              error: {
+                code: 'TOOL_NOT_IMPLEMENTED',
+                message: `Tool '${toolUse.name}' is not available yet`,
+                retryable: false,
+              },
+            };
+          }
 
           // End tool span with output and duration
           toolSpan?.end({
@@ -1016,6 +1076,9 @@ export async function* executeAgentLoop(
   });
 
   void options.setStatus?.({ phase: 'final' });
+  
+  // Story 5.1: Clear memory tool context after request completes
+  clearMemoryToolContext();
   
   // Merge gather sources with tool sources
   const toolSources = Array.from(toolSourcesMap.values());

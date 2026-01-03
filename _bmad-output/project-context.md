@@ -343,6 +343,76 @@ App crashes on startup if any are missing.
 
 ---
 
+## GKE Agent Sandbox (Code Execution)
+
+### Overview
+
+Orion uses **GKE Agent Sandbox** for secure Python code execution with network access. This enables custom Skills and programmatic tool calling that Anthropic's container cannot support (no network access in Anthropic's container).
+
+### Connection Details
+
+| Property | Value |
+|----------|-------|
+| **GCP Project** | `ai-workflows-459123` |
+| **Cluster** | `orion-sandbox-cluster` |
+| **Region** | `us-central1` |
+| **Namespace** | `default` |
+| **Template** | `python-runtime-template` |
+| **Warm Pool** | `orion-sandbox-warmpool` (2 replicas) |
+| **Router Service** | `sandbox-router-svc:8080` |
+
+### Python Client Usage
+
+```python
+from agentic_sandbox import SandboxClient
+
+with SandboxClient(
+    template_name='python-runtime-template',
+    namespace='default'
+) as sandbox:
+    result = sandbox.run('python3 -c "print(2+2)"')
+    print(result.stdout)  # "4"
+```
+
+### Capabilities (Verified 2026-01-03)
+
+| Capability | Status |
+|------------|--------|
+| Python 3.11 execution | ✅ |
+| Network connectivity | ✅ |
+| HTTP requests (urllib, requests) | ✅ |
+| Socket connections | ✅ |
+| MCP tool calls | ✅ (via HTTP) |
+| Custom packages | ✅ (via SandboxTemplate) |
+
+### Infrastructure Files
+
+```
+infra/gke-sandbox/
+├── sandbox-template-and-pool.yaml  # SandboxTemplate + WarmPool
+├── sandbox-router.yaml              # Router Deployment + Service
+└── README.md                         # Operational docs
+```
+
+### kubectl Access
+
+```bash
+# Set up credentials
+gcloud container clusters get-credentials orion-sandbox-cluster \
+  --region=us-central1 \
+  --project=ai-workflows-459123
+
+# Check status
+kubectl get pods -n default -l sandbox=orion-python-sandbox
+kubectl get sandboxwarmpools
+```
+
+### Cost Estimate
+
+~$70-150/month (GKE Autopilot with warm pools)
+
+---
+
 ## JSDoc Convention
 
 ```typescript

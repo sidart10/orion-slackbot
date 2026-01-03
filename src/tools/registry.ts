@@ -1,11 +1,13 @@
 /**
- * Unified tool registry (static + MCP).
+ * Unified tool registry (static + MCP + dynamic skill tools).
  *
  * Story 3.2: Tool Discovery & Registration
+ * Story 6.1: Agent Skills Loader - Dynamic Tool Registration
  *
  * Notes:
  * - Static tools have no server prefix (serverName = null)
  * - MCP tools are exposed to Claude as: `${serverName}__${toolName}`
+ * - Skill tools are exposed as: `${skillName}__${toolName}` (registered dynamically)
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
@@ -47,6 +49,16 @@ export type RegisteredStaticTool = {
   handler: (input: unknown) => Promise<unknown>;
 };
 
+/**
+ * Skill tool registered dynamically at runtime.
+ * @see Story 6.1 - Agent Skills Loader
+ */
+export type RegisteredSkillTool = {
+  claudeTool: Anthropic.Tool;
+  skillName: string;
+  originalName: string; // Tool name without skill prefix
+};
+
 type DiscoveryCacheEntry = { lastDiscoveryMs: number; toolCount: number };
 
 const DISCOVERY_TTL_MS = 5 * 60 * 1000;
@@ -54,6 +66,7 @@ const DISCOVERY_TTL_MS = 5 * 60 * 1000;
 export class ToolRegistry {
   private readonly staticTools = new Map<string, RegisteredStaticTool>();
   private readonly mcpTools = new Map<string, RegisteredTool>();
+  private readonly skillTools = new Map<string, RegisteredSkillTool>();
   private readonly discoveryCache = new Map<string, DiscoveryCacheEntry>();
 
   registerStaticTool(
@@ -127,7 +140,8 @@ export class ToolRegistry {
   getToolsForClaude(): Anthropic.Tool[] {
     const staticTools = Array.from(this.staticTools.values()).map((t) => t.claudeTool);
     const mcpTools = Array.from(this.mcpTools.values()).map((t) => t.claudeTool);
-    return [...staticTools, ...mcpTools].sort((a, b) => a.name.localeCompare(b.name));
+    const skillTools = Array.from(this.skillTools.values()).map((t) => t.claudeTool);
+    return [...staticTools, ...mcpTools, ...skillTools].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   getStaticTool(toolName: string): RegisteredStaticTool | undefined {
@@ -144,9 +158,118 @@ export class ToolRegistry {
     return Date.now() - entry.lastDiscoveryMs > DISCOVERY_TTL_MS;
   }
 
+  /**
+   * Register a dynamic skill tool at runtime.
+   *
+   * Unlike static tools, skill tools are discovered at startup and can be
+   * reloaded when skills change.
+   *
+   * @param skillName - Name of the skill this tool belongs to
+   * @param toolName - Original tool name (will be prefixed with skillName__)
+   * @param toolDefinition - Claude tool definition
+   *
+   * @see Story 6.1 - Agent Skills Loader AC#5
+   */
+  registerDynamicTool(
+    skillName: string,
+    toolName: string,
+    toolDefinition: Anthropic.Tool
+  ): void {
+    const fullName = `${skillName}__${toolName}`;
+
+    // Check for conflicts with static tools
+    if (this.staticTools.has(fullName)) {
+      logger.warn({
+        event: 'tools.registry.skill_tool_conflict',
+        skillName,
+        toolName: fullName,
+        conflictsWith: 'static',
+      });
+      return;
+    }
+
+    // Check for conflicts with MCP tools
+    if (this.mcpTools.has(fullName)) {
+      logger.warn({
+        event: 'tools.registry.skill_tool_conflict',
+        skillName,
+        toolName: fullName,
+        conflictsWith: 'mcp',
+      });
+      return;
+    }
+
+    this.skillTools.set(fullName, {
+      claudeTool: { ...toolDefinition, name: fullName },
+      skillName,
+      originalName: toolName,
+    });
+
+    logger.debug({
+      event: 'tools.registry.skill_tool_registered',
+      skillName,
+      toolName: fullName,
+    });
+  }
+
+  /**
+   * Remove all tools for a specific skill.
+   *
+   * Call this before re-registering skill tools on reload.
+   *
+   * @param skillName - Name of the skill to remove tools for
+   * @returns Number of tools removed
+   */
+  removeSkillTools(skillName: string): number {
+    let removed = 0;
+    for (const [key, tool] of this.skillTools.entries()) {
+      if (tool.skillName === skillName) {
+        this.skillTools.delete(key);
+        removed += 1;
+      }
+    }
+
+    if (removed > 0) {
+      logger.debug({
+        event: 'tools.registry.skill_tools_removed',
+        skillName,
+        removedCount: removed,
+      });
+    }
+
+    return removed;
+  }
+
+  /**
+   * Clear all skill tools.
+   *
+   * Call this before reloading all skills.
+   */
+  clearSkillTools(): void {
+    const count = this.skillTools.size;
+    this.skillTools.clear();
+
+    if (count > 0) {
+      logger.debug({
+        event: 'tools.registry.skill_tools_cleared',
+        removedCount: count,
+      });
+    }
+  }
+
+  /**
+   * Get a registered skill tool.
+   *
+   * @param toolName - Full tool name (skillName__toolName)
+   */
+  getSkillTool(toolName: string): RegisteredSkillTool | undefined {
+    return this.skillTools.get(toolName);
+  }
+
   __resetForTests(): void {
     this.staticTools.clear();
     this.mcpTools.clear();
+    this.skillTools.clear();
     this.discoveryCache.clear();
   }
 

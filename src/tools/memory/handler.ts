@@ -121,7 +121,7 @@ export async function handleMemoryTool(
       case 'view':
         if (input.path.endsWith('/')) {
           const files = await listFiles(context.bucket, gcsPath);
-          resultContent = files.join('\n');
+          resultContent = files.map((f) => f.path).join('\n');
         } else {
           resultContent = await readFile(context.bucket, gcsPath);
         }

@@ -14,6 +14,7 @@ const { mockState } = vi.hoisted(() => ({
     download: vi.fn(),
     save: vi.fn(),
     delete: vi.fn(),
+    copy: vi.fn(),
     getFiles: vi.fn(),
   },
 }));
@@ -27,6 +28,7 @@ vi.mock('@google-cloud/storage', () => {
         download: (...args: unknown[]) => mockState.download(...args),
         save: (...args: unknown[]) => mockState.save(...args),
         delete: (...args: unknown[]) => mockState.delete(...args),
+        copy: (...args: unknown[]) => mockState.copy(...args),
       })),
       getFiles: (...args: unknown[]) => mockState.getFiles(...args),
     })),
@@ -36,7 +38,7 @@ vi.mock('@google-cloud/storage', () => {
   };
 });
 
-import { readFile, writeFile, deleteFile, listFiles } from './storage.js';
+import { readFile, writeFile, deleteFile, listFiles, copyFile, fileExists } from './storage.js';
 
 describe('GCS Storage Layer', () => {
   const TEST_BUCKET = 'test-bucket';
@@ -49,6 +51,7 @@ describe('GCS Storage Layer', () => {
     mockState.download.mockReset();
     mockState.save.mockReset();
     mockState.delete.mockReset();
+    mockState.copy.mockReset();
     mockState.getFiles.mockReset();
   });
 
@@ -123,13 +126,19 @@ describe('GCS Storage Layer', () => {
   });
 
   describe('listFiles', () => {
-    it('should list files with prefix', async () => {
-      const mockFiles = [{ name: 'users/U123/file1.json' }, { name: 'users/U123/file2.json' }];
+    it('should list files with prefix and sizes', async () => {
+      const mockFiles = [
+        { name: 'users/U123/file1.json', metadata: { size: '1024' } },
+        { name: 'users/U123/file2.json', metadata: { size: '2048' } },
+      ];
       mockState.getFiles.mockResolvedValue([mockFiles]);
 
       const result = await listFiles(TEST_BUCKET, 'users/U123/');
 
-      expect(result).toEqual(['/memories/users/U123/file1.json', '/memories/users/U123/file2.json']);
+      expect(result).toEqual([
+        { path: '/memories/users/U123/file1.json', size: 1024 },
+        { path: '/memories/users/U123/file2.json', size: 2048 },
+      ]);
       expect(mockState.getFiles).toHaveBeenCalledWith({ prefix: 'users/U123/' });
     });
 
@@ -139,6 +148,54 @@ describe('GCS Storage Layer', () => {
       const result = await listFiles(TEST_BUCKET, 'empty/');
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('copyFile', () => {
+    it('should copy file within GCS bucket', async () => {
+      mockState.exists.mockResolvedValue([true]);
+      mockState.copy.mockResolvedValue(undefined);
+
+      await copyFile(TEST_BUCKET, 'source.txt', 'dest.txt');
+
+      expect(mockState.exists).toHaveBeenCalled();
+      expect(mockState.copy).toHaveBeenCalled();
+    });
+
+    it('should throw error when source file does not exist', async () => {
+      mockState.exists.mockResolvedValue([false]);
+
+      await expect(copyFile(TEST_BUCKET, 'missing.txt', 'dest.txt')).rejects.toThrow(
+        'File not found: missing.txt'
+      );
+    });
+
+    it('should propagate GCS copy errors', async () => {
+      mockState.exists.mockResolvedValue([true]);
+      mockState.copy.mockRejectedValue(new Error('GCS copy failed'));
+
+      await expect(copyFile(TEST_BUCKET, 'source.txt', 'dest.txt')).rejects.toThrow(
+        'GCS copy failed'
+      );
+    });
+  });
+
+  describe('fileExists', () => {
+    it('should return true when file exists', async () => {
+      mockState.exists.mockResolvedValue([true]);
+
+      const result = await fileExists(TEST_BUCKET, TEST_PATH);
+
+      expect(result).toBe(true);
+      expect(mockState.exists).toHaveBeenCalled();
+    });
+
+    it('should return false when file does not exist', async () => {
+      mockState.exists.mockResolvedValue([false]);
+
+      const result = await fileExists(TEST_BUCKET, TEST_PATH);
+
+      expect(result).toBe(false);
     });
   });
 });

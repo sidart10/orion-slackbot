@@ -89,6 +89,7 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
     setTitle,
     setStatus,
     setSuggestedPrompts,
+    getThreadContext,
     client,
     context,
   }) => {
@@ -299,6 +300,28 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             });
             // Fallback to minimal prompt
             systemPrompt = 'You are Orion, a helpful AI assistant. Use Slack mrkdwn formatting: *bold* for emphasis, _italic_ for secondary emphasis. Never use blockquotes.';
+          }
+
+          // Story 5.3: Inject memory context into system prompt (AC#1)
+          // Memory was loaded at thread start and saved via saveThreadContext
+          try {
+            const savedContext = await getThreadContext();
+            const memoryContext = savedContext?.memoryContext as string | undefined;
+            if (memoryContext && memoryContext.trim().length > 0) {
+              systemPrompt = `${memoryContext}\n\n---\n\n${systemPrompt}`;
+              logger.info({
+                event: 'memory_context_injected',
+                memoryContextLength: memoryContext.length,
+                traceId: trace.id,
+              });
+            }
+          } catch (ctxError) {
+            // Best-effort: log and continue without memory context
+            logger.debug({
+              event: 'memory_context_retrieval_skipped',
+              reason: ctxError instanceof Error ? ctxError.message : String(ctxError),
+              traceId: trace.id,
+            });
           }
 
           // Update trace with context for observability

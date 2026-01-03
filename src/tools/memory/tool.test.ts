@@ -1,47 +1,52 @@
 /**
- * Memory Tool Registration Tests
+ * Memory Tool Registration Tests (SDK Helper)
+ *
+ * Tests for getMemoryTool using betaMemoryTool helper.
  *
  * @see Story 5.1 - Memory Tool Handler
- * @see AC#1-7 - Tool registration and context management
+ * @see AC#10 - betaMemoryTool integration
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock dependencies
-vi.mock('../registry.js', () => ({
-  toolRegistry: {
-    registerStaticTool: vi.fn(),
-  },
+// Mock SDK helper
+vi.mock('@anthropic-ai/sdk/helpers/beta/memory', () => ({
+  betaMemoryTool: vi.fn().mockReturnValue({
+    type: 'memory_20250818',
+    name: 'memory',
+  }),
 }));
 
-vi.mock('../../config/environment.js', () => ({
-  config: {
-    gcsMemoriesBucket: 'test-bucket',
-  },
-}));
-
-vi.mock('./handler.js', () => ({
-  handleMemoryTool: vi.fn(),
+// Mock handlers
+vi.mock('./handlers.js', () => ({
+  createMemoryHandlers: vi.fn().mockReturnValue({
+    view: vi.fn(),
+    create: vi.fn(),
+    str_replace: vi.fn(),
+    insert: vi.fn(),
+    delete: vi.fn(),
+    rename: vi.fn(),
+  }),
 }));
 
 vi.mock('../../utils/logger.js', () => ({
   logger: {
     info: vi.fn(),
     error: vi.fn(),
+    debug: vi.fn(),
   },
 }));
 
-import { toolRegistry } from '../registry.js';
-import { handleMemoryTool } from './handler.js';
+import { betaMemoryTool } from '@anthropic-ai/sdk/helpers/beta/memory';
+import { createMemoryHandlers } from './handlers.js';
 import {
-  registerMemoryTool,
-  handleMemoryToolWrapper,
+  getMemoryTool,
   setMemoryToolContext,
   clearMemoryToolContext,
   MEMORY_TOOL_NAME,
 } from './tool.js';
 
-describe('Memory Tool Registration', () => {
+describe('Memory Tool (SDK Helper)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -50,118 +55,50 @@ describe('Memory Tool Registration', () => {
     clearMemoryToolContext();
   });
 
-  describe('registerMemoryTool', () => {
-    it('should register memory tool with registry', () => {
-      registerMemoryTool();
-
-      expect(toolRegistry.registerStaticTool).toHaveBeenCalledWith(
-        MEMORY_TOOL_NAME,
-        expect.any(Function),
-        expect.objectContaining({
-          name: MEMORY_TOOL_NAME,
-          description: expect.stringContaining('persistent memory'),
-          input_schema: expect.objectContaining({
-            properties: expect.objectContaining({
-              command: expect.any(Object),
-              path: expect.any(Object),
-              content: expect.any(Object),
-            }),
-          }),
-        })
-      );
+  describe('getMemoryTool', () => {
+    it('throws if context not set', () => {
+      expect(() => getMemoryTool()).toThrow('Memory tool context not set');
     });
 
-    it('should export correct tool name', () => {
+    it('returns betaMemoryTool with handlers', () => {
+      setMemoryToolContext('test-bucket', 'trace-123');
+
+      const tool = getMemoryTool();
+
+      expect(tool).toEqual({ type: 'memory_20250818', name: 'memory' });
+      expect(createMemoryHandlers).toHaveBeenCalledWith('test-bucket', 'trace-123');
+      expect(betaMemoryTool).toHaveBeenCalled();
+    });
+
+    it('returns tool with type memory_20250818', () => {
+      setMemoryToolContext('test-bucket', 'trace-123');
+
+      const tool = getMemoryTool();
+
+      expect(tool.type).toBe('memory_20250818');
+    });
+  });
+
+  describe('context management', () => {
+    it('setMemoryToolContext sets bucket and traceId', () => {
+      setMemoryToolContext('my-bucket', 'my-trace');
+
+      getMemoryTool();
+
+      expect(createMemoryHandlers).toHaveBeenCalledWith('my-bucket', 'my-trace');
+    });
+
+    it('clearMemoryToolContext clears context', () => {
+      setMemoryToolContext('my-bucket', 'my-trace');
+      clearMemoryToolContext();
+
+      expect(() => getMemoryTool()).toThrow('context not set');
+    });
+  });
+
+  describe('MEMORY_TOOL_NAME', () => {
+    it('exports correct tool name', () => {
       expect(MEMORY_TOOL_NAME).toBe('memory');
     });
   });
-
-  describe('handleMemoryToolWrapper', () => {
-    it('should return success result as JSON', async () => {
-      vi.mocked(handleMemoryTool).mockResolvedValue({
-        success: true,
-        data: { content: 'test content', path: '/memories/test.json' },
-      });
-      setMemoryToolContext('trace-123');
-
-      const result = await handleMemoryToolWrapper({
-        command: 'view',
-        path: '/memories/test.json',
-      });
-
-      const parsed = JSON.parse(result);
-      expect(parsed.content).toBe('test content');
-      expect(parsed.path).toBe('/memories/test.json');
-    });
-
-    it('should return error result as JSON', async () => {
-      vi.mocked(handleMemoryTool).mockResolvedValue({
-        success: false,
-        error: {
-          code: 'MEMORY_NOT_FOUND',
-          message: 'File not found',
-          retryable: false,
-        },
-      });
-      setMemoryToolContext('trace-123');
-
-      const result = await handleMemoryToolWrapper({
-        command: 'view',
-        path: '/memories/missing.json',
-      });
-
-      const parsed = JSON.parse(result);
-      expect(parsed.error).toBe('File not found');
-      expect(parsed.code).toBe('MEMORY_NOT_FOUND');
-      expect(parsed.retryable).toBe(false);
-    });
-
-    it('should pass traceId from context', async () => {
-      vi.mocked(handleMemoryTool).mockResolvedValue({
-        success: true,
-        data: { content: '', path: '/memories/test.json' },
-      });
-      setMemoryToolContext('my-trace-id');
-
-      await handleMemoryToolWrapper({
-        command: 'view',
-        path: '/memories/test.json',
-      });
-
-      expect(handleMemoryTool).toHaveBeenCalledWith(
-        expect.any(Object),
-        expect.objectContaining({
-          traceId: 'my-trace-id',
-          bucket: 'test-bucket',
-        })
-      );
-    });
-  });
-
-
-  describe('context management', () => {
-    it('should set and clear context', async () => {
-      vi.mocked(handleMemoryTool).mockResolvedValue({
-        success: true,
-        data: { content: '', path: '/memories/test.json' },
-      });
-
-      setMemoryToolContext('trace-1');
-      await handleMemoryToolWrapper({ command: 'view', path: '/memories/test.json' });
-
-      expect(handleMemoryTool).toHaveBeenCalledWith(
-        expect.any(Object),
-        expect.objectContaining({ traceId: 'trace-1' })
-      );
-
-      clearMemoryToolContext();
-      await handleMemoryToolWrapper({ command: 'view', path: '/memories/test.json' });
-
-      expect(handleMemoryTool).toHaveBeenLastCalledWith(
-        expect.any(Object),
-        expect.objectContaining({ traceId: 'no-trace' })
-      );
-    });
-  });
 });
-

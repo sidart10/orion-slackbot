@@ -54,7 +54,7 @@ gcloud run services add-iam-policy-binding mcp-veo \
 
 ```bash
 # Test Imagen
-curl -X POST https://mcp-imagen-vjlizxe2vq-uc.a.run.app/mcp \
+curl -X POST https://mcp-imagen-201626763325.us-central1.run.app/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
@@ -73,7 +73,7 @@ curl -X POST https://mcp-imagen-vjlizxe2vq-uc.a.run.app/mcp \
   }'
 
 # Test Veo
-curl -X POST https://mcp-veo-vjlizxe2vq-uc.a.run.app/mcp \
+curl -X POST https://mcp-veo-201626763325.us-central1.run.app/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer $(gcloud auth print-identity-token)" \

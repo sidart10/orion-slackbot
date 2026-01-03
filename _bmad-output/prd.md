@@ -574,7 +574,7 @@ Orion connects to enterprise systems through a unified tool layer:
 
 ### Persistent Memory
 
-- FR44: System maintains persistent memory across sessions via Memory Tool pattern (view, create, update, delete operations) with Google Cloud Storage backend
+- FR44: System maintains persistent memory across sessions via Anthropic Memory Tool SDK helper (`betaMemoryTool`) with 6 operations (view, create, str_replace, insert, delete, rename) and Google Cloud Storage backend
 - FR45: System organizes memory in three scopes: global (shared learnings), user-level (per Slack user preferences), and session-level (per thread context)
 - FR46: Claude automatically checks `/memories` directory at conversation start to restore relevant context
 

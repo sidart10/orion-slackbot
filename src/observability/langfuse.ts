@@ -35,6 +35,16 @@ export interface LangfuseLike {
     input?: unknown;
     metadata?: Record<string, unknown>;
   }) => LangfuseTrace;
+  /**
+   * Create a span on an existing trace by traceId.
+   * Used for tool handlers that need to attach spans to the parent trace.
+   */
+  span: (data: {
+    traceId: string;
+    name: string;
+    input?: unknown;
+    metadata?: Record<string, unknown>;
+  }) => LangfuseSpan;
   flushAsync: () => Promise<void>;
   shutdownAsync: () => Promise<void>;
   // Feedback scoring methods - optional since noop client doesn't implement them
@@ -58,6 +68,7 @@ function createNoopLangfuse(): LangfuseLike {
 
   return {
     trace: (): LangfuseTrace => noopTrace,
+    span: (): LangfuseSpan => noopSpan,
     flushAsync: async (): Promise<void> => {},
     shutdownAsync: async (): Promise<void> => {},
     score: (): void => {},

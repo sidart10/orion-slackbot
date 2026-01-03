@@ -3,6 +3,9 @@
 
 timeout: '900s' # 15 minutes (Go build can be slow)
 
+substitutions:
+  _TAG: 'latest'  # Override with --substitutions=_TAG=v1.0.0
+
 steps:
   # Build Docker image
   - name: 'gcr.io/cloud-builders/docker'
@@ -11,7 +14,7 @@ steps:
       - '-f'
       - 'infra/mcp-genmedia/Dockerfile.imagen'
       - '-t'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-imagen:$COMMIT_SHA'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-imagen:${_TAG}'
       - '-t'
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-imagen:latest'
       - '.'
@@ -31,7 +34,7 @@ steps:
       - 'deploy'
       - 'mcp-imagen'
       - '--image'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-imagen:$COMMIT_SHA'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-imagen:${_TAG}'
       - '--region'
       - 'us-central1'
       - '--platform'
@@ -61,11 +64,11 @@ steps:
       - '--region'
       - 'us-central1'
       - '--member'
-      - 'serviceAccount:orion-agent@$PROJECT_ID.iam.gserviceaccount.com'
+      - 'serviceAccount:201626763325-compute@developer.gserviceaccount.com'
       - '--role'
       - 'roles/run.invoker'
 
 images:
-  - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-imagen:$COMMIT_SHA'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-imagen:${_TAG}'
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-imagen:latest'
 

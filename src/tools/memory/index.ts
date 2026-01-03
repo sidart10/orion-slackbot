@@ -1,30 +1,28 @@
 /**
  * Memory Tool Module
  *
- * Provides persistent memory storage via GCS using Anthropic's Memory Tool pattern.
+ * Provides persistent memory storage via GCS using Anthropic's betaMemoryTool helper.
  *
  * @see Story 5.1 - Memory Tool Handler
  * @see Story 5.2 - Memory Scopes & Path Builders
  */
 
-// Tool registration
+// Tool registration (SDK helper pattern)
 export {
-  registerMemoryTool,
+  getMemoryTool,
   setMemoryToolContext,
   clearMemoryToolContext,
   MEMORY_TOOL_NAME,
 } from './tool.js';
 
-// Handler (for direct testing)
-export {
-  handleMemoryTool,
-  type MemoryToolInput,
-  type MemoryData,
-  type MemoryToolContext,
-} from './handler.js';
+// Handlers (for direct testing)
+export { createMemoryHandlers } from './handlers.js';
 
 // Storage (for direct testing)
-export { readFile, writeFile, deleteFile, listFiles } from './storage.js';
+export { readFile, writeFile, deleteFile, listFiles, copyFile, fileExists } from './storage.js';
+
+// Formatting utilities
+export { formatFileWithLineNumbers, formatDirectoryListing } from './format.js';
 
 // Path builders and validation (Story 5.2)
 export {
@@ -38,3 +36,10 @@ export {
   type PathValidation,
 } from './paths.js';
 
+// Memory loader (Story 5.3)
+export {
+  loadRelevantMemories,
+  formatMemoriesForContext,
+  type MemoryContext,
+  type LoadedMemories,
+} from './loader.js';

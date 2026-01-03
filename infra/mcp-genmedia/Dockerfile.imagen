@@ -10,8 +10,8 @@ RUN git clone --depth 1 https://github.com/GoogleCloudPlatform/vertex-ai-creativ
 
 WORKDIR /build/vertex-ai-creative-studio/experiments/mcp-genmedia/mcp-genmedia-go/mcp-imagen-go
 
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o mcp-imagen-go .
+# Build the binary (GOTOOLCHAIN=auto downloads required Go version per go.work)
+RUN GOTOOLCHAIN=auto CGO_ENABLED=0 GOOS=linux go build -o mcp-imagen-go .
 
 # Runtime stage
 FROM alpine:3.19

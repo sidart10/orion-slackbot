@@ -1043,4 +1043,87 @@ describe('Assistant User Message Handler', () => {
       );
     });
   });
+
+  describe('Memory Context Injection (Story 5.3)', () => {
+    it('should inject memory context into system prompt when available (AC#1)', async () => {
+      const mockGetThreadContext = vi.fn().mockResolvedValue({
+        memoryContext: '# Restored Memory\n\n## User Preferences\n\n- *timezone*: UTC',
+        scopesLoaded: ['user'],
+      });
+      const args = createAssistantArgs();
+      (args as unknown as { getThreadContext: typeof mockGetThreadContext }).getThreadContext =
+        mockGetThreadContext;
+
+      await handleAssistantUserMessage(args);
+
+      // Verify runOrionAgent was called with memory context prepended to system prompt
+      expect(runOrionAgent).toHaveBeenCalledWith(
+        'Hello Orion',
+        expect.objectContaining({
+          systemPrompt: expect.stringContaining('# Restored Memory'),
+        })
+      );
+
+      // Verify logging
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'memory_context_injected',
+        })
+      );
+    });
+
+    it('should proceed without memory context when getThreadContext returns undefined', async () => {
+      const mockGetThreadContext = vi.fn().mockResolvedValue(undefined);
+      const args = createAssistantArgs();
+      (args as unknown as { getThreadContext: typeof mockGetThreadContext }).getThreadContext =
+        mockGetThreadContext;
+
+      await handleAssistantUserMessage(args);
+
+      // Should still call runOrionAgent with base system prompt
+      expect(runOrionAgent).toHaveBeenCalledWith(
+        'Hello Orion',
+        expect.objectContaining({
+          systemPrompt: expect.not.stringContaining('# Restored Memory'),
+        })
+      );
+    });
+
+    it('should proceed without memory context when memoryContext is empty', async () => {
+      const mockGetThreadContext = vi.fn().mockResolvedValue({
+        memoryContext: '',
+        scopesLoaded: [],
+      });
+      const args = createAssistantArgs();
+      (args as unknown as { getThreadContext: typeof mockGetThreadContext }).getThreadContext =
+        mockGetThreadContext;
+
+      await handleAssistantUserMessage(args);
+
+      // Should still call runOrionAgent with base system prompt
+      expect(runOrionAgent).toHaveBeenCalledWith(
+        'Hello Orion',
+        expect.objectContaining({
+          systemPrompt: expect.not.stringContaining('# Restored Memory'),
+        })
+      );
+    });
+
+    it('should gracefully handle getThreadContext failure', async () => {
+      const mockGetThreadContext = vi.fn().mockRejectedValue(new Error('Context failed'));
+      const args = createAssistantArgs();
+      (args as unknown as { getThreadContext: typeof mockGetThreadContext }).getThreadContext =
+        mockGetThreadContext;
+
+      // Should NOT throw - handler completes successfully
+      await expect(handleAssistantUserMessage(args)).resolves.not.toThrow();
+
+      // Should have logged debug (not error - this is expected in some cases)
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'memory_context_retrieval_skipped',
+        })
+      );
+    });
+  });
 });

@@ -1,12 +1,12 @@
-# Story 6.1: Agent Skills Loader
+# Story 6.1: Agent Skills Loader with GKE Sandbox Integration
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
 As a **developer**,
-I want to add new skills by creating SKILL.md files,
-So that I can extend Orion's capabilities without changing code.
+I want to add new skills by creating SKILL.md files with optional executable scripts,
+So that I can extend Orion's capabilities with both instructions AND programmatic tool orchestration.
 
 ## Acceptance Criteria
 
@@ -24,51 +24,55 @@ So that I can extend Orion's capabilities without changing code.
 
 7. **Given** the standard, **When** creating skills, **Then** the [Agent Skills open standard](https://agentskills.io) is followed
 
+8. **Given** a skill with `scripts/` directory, **When** loaded, **Then** script paths are cataloged for GKE sandbox execution (see Story 6.2)
+
+9. **Given** skill instructions that reference MCP tools, **When** executed, **Then** Claude calls MCP tools directly OR routes to `execute_code` for complex orchestration
+
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Create Skills Loader** (AC: #1, #3)
-  - [ ] Create `src/skills/loader.ts`
-  - [ ] Implement `loadSkills(traceId: string)` function
-  - [ ] Discover SKILL.md files via glob in `.skills/` directory
-  - [ ] Handle missing directory gracefully (return empty array)
-  - [ ] Skip invalid skills with warning log (include traceId)
+- [x] **Task 1: Create Skills Loader** (AC: #1, #3)
+  - [x] Create `src/skills/loader.ts`
+  - [x] Implement `loadSkills(traceId: string)` function
+  - [x] Discover SKILL.md files via glob in `.skills/` directory
+  - [x] Handle missing directory gracefully (return empty array)
+  - [x] Skip invalid skills with warning log (include traceId)
 
-- [ ] **Task 2: SKILL.md Parser** (AC: #2, #5)
-  - [ ] Create `src/skills/parser.ts`
-  - [ ] Parse markdown frontmatter (YAML) using `gray-matter`
-  - [ ] Extract name, description, version
-  - [ ] Extract instructions from markdown body
-  - [ ] Extract and validate tool definitions (snake_case names)
+- [x] **Task 2: SKILL.md Parser** (AC: #2, #5)
+  - [x] Create `src/skills/parser.ts`
+  - [x] Parse markdown frontmatter (YAML) using `gray-matter`
+  - [x] Extract name, description, version
+  - [x] Extract instructions from markdown body
+  - [x] Extract and validate tool definitions (snake_case names)
 
-- [ ] **Task 3: Skill Types** (AC: #2, #5)
-  - [ ] Create `src/skills/types.ts`
-  - [ ] Define `Skill` interface
-  - [ ] Define `SkillTool` interface
-  - [ ] Export type-safe structures
+- [x] **Task 3: Skill Types** (AC: #2, #5)
+  - [x] Create `src/skills/types.ts`
+  - [x] Define `Skill` interface
+  - [x] Define `SkillTool` interface
+  - [x] Export type-safe structures
 
-- [ ] **Task 4: System Prompt Injection** (AC: #4)
-  - [ ] Create `src/skills/prompt-builder.ts`
-  - [ ] Format skills for system prompt
-  - [ ] Handle empty skills gracefully
-  - [ ] Export for use in `src/agent/context.ts`
+- [x] **Task 4: System Prompt Injection** (AC: #4)
+  - [x] Create `src/skills/prompt-builder.ts`
+  - [x] Format skills for system prompt
+  - [x] Handle empty skills gracefully
+  - [x] Export for use in `src/agent/context.ts`
 
-- [ ] **Task 5: Tool Registration** (AC: #5)
-  - [ ] Validate tool names match `/^[a-z][a-z0-9_]*$/`
-  - [ ] Register skill tools with tool registry (from Story 3.2)
-  - [ ] Prefix tools with skill name: `{skill_name}__{tool_name}`
-  - [ ] Handle tool execution routing via registry
+- [x] **Task 5: Tool Registration** (AC: #5)
+  - [x] Validate tool names match `/^[a-z][a-z0-9_]*$/`
+  - [x] Register skill tools with tool registry (from Story 3.2)
+  - [x] Prefix tools with skill name: `{skill_name}__{tool_name}`
+  - [x] Handle tool execution routing via registry
 
-- [ ] **Task 6: Observability** (AC: #6)
-  - [ ] Log skills loaded at startup with traceId
-  - [ ] Create Langfuse span for loading process
-  - [ ] Track parse failures with skill path and error
+- [x] **Task 6: Observability** (AC: #6)
+  - [x] Log skills loaded at startup with traceId
+  - [x] Create Langfuse span for loading process
+  - [x] Track parse failures with skill path and error
 
-- [ ] **Task 7: Verification**
-  - [ ] Create sample skill in `.skills/example/SKILL.md`
-  - [ ] Verify skill is discovered and loaded
-  - [ ] Verify skill appears in system prompt
-  - [ ] Verify skill tool is registered
-  - [ ] Test malformed skill handling (invalid YAML, missing fields)
+- [x] **Task 7: Verification**
+  - [x] Create sample skill in `.skills/example/SKILL.md`
+  - [x] Verify skill is discovered and loaded
+  - [x] Verify skill appears in system prompt
+  - [x] Verify skill tool is registered
+  - [x] Test malformed skill handling (invalid YAML, missing fields)
 
 ## Dev Notes
 
@@ -80,6 +84,9 @@ So that I can extend Orion's capabilities without changing code.
 | AR | architecture.md:113-120 | Custom skill loader reading SKILL.md files |
 | Logging | project-context.md | ALL logs must include `traceId` |
 | Tool names | project-context.md | Must be `snake_case` |
+| ESM imports | project-context.md:50-58 | ALL imports MUST use `.js` extension |
+| Tool handlers | project-context.md:69-92 | MUST return `ToolResult<T>`, NEVER throw |
+| Test naming | project-context.md:129 | Tests: `kebab-case.test.ts`, co-located |
 
 ### Canonical Skills Directory
 
@@ -150,7 +157,7 @@ You are a research specialist. When the user asks for deep research, comprehensi
 - Provide confidence levels for findings
 ```
 
-### Skill Types
+### Skill Types (AUTHORITATIVE — Single Source of Truth)
 
 ```typescript
 // src/skills/types.ts
@@ -163,9 +170,13 @@ export interface Skill {
   description: string;
   version?: string;
   author?: string;
-  instructions: string;  // Markdown content after frontmatter
+  instructions: string;       // Markdown content after frontmatter
   tools?: SkillTool[];
-  filePath: string;      // For debugging
+  filePath: string;           // For debugging/logging
+  
+  // GKE Sandbox integration (Story 6.1 catalogs, Story 6.2 executes)
+  scripts?: SkillScript[];    // Discovered from scripts/ directory
+  hasExecutableScripts: boolean;
 }
 
 export interface SkillTool {
@@ -178,8 +189,14 @@ export interface SkillToolParameter {
   type: 'string' | 'number' | 'boolean' | 'array';
   description: string;
   required?: boolean;
-  items?: string;  // For arrays
-  enum?: string[]; // For enums
+  items?: string;   // For arrays
+  enum?: string[];  // For enums
+}
+
+export interface SkillScript {
+  name: string;           // e.g., "search_and_aggregate.py"
+  path: string;           // Full path for GKE execution
+  requirements?: string;  // Path to requirements.txt if present
 }
 ```
 
@@ -447,16 +464,53 @@ export async function buildSystemPrompt(traceId: string): Promise<string> {
 
 ### Tool Registration (Integration with Story 3.2)
 
+**CRITICAL:** Skill tools are registered **dynamically** at runtime. They do NOT get added to the static `TOOL_NAMES` const array. This is intentional—skill tools are discovered at startup, not compile time.
+
+**Tool Naming Convention:** `{skill_name}__{tool_name}` (double underscore separator)
+- Example: `deep_research__initiate_research`
+- Allows routing: parse on `__` to identify skill vs core tools
+
+**Handler Pattern (MANDATORY):** All skill tool handlers MUST return `ToolResult<T>`:
+
 ```typescript
-// In src/skills/loader.ts - add after skill parsing
-import { registerTool, type ToolDefinition } from '../tools/registry.js';
+// src/skills/tool-handler.ts
+import type { ToolResult, ToolError } from '../types/tools.js';
 
 /**
- * Register skill tools with the tool registry
- * 
- * Tool names are prefixed: {skill_name}__{tool_name}
- * e.g., deep_research__initiate_research
+ * Execute a skill tool - NEVER throws, always returns ToolResult
  */
+export async function executeSkillTool(
+  toolName: string,
+  input: unknown,
+  traceId: string
+): Promise<ToolResult<unknown>> {
+  try {
+    // Parse skill name from tool: "skill_name__tool_name"
+    const [skillName, localToolName] = toolName.split('__');
+    
+    // Route to appropriate skill handler
+    const result = await routeToSkill(skillName, localToolName, input, traceId);
+    return { success: true, data: result };
+  } catch (e) {
+    return {
+      success: false,
+      error: {
+        code: 'TOOL_EXECUTION_FAILED',
+        message: e instanceof Error ? e.message : String(e),
+        retryable: false,
+      },
+    };
+  }
+}
+```
+
+**Registration:**
+
+```typescript
+// In src/skills/loader.ts
+import { registerDynamicTool } from '../tools/registry.js';
+import type { ToolDefinition } from '../tools/registry.js';
+
 export function registerSkillTools(skills: Skill[], traceId: string): void {
   for (const skill of skills) {
     if (!skill.tools) continue;
@@ -464,7 +518,8 @@ export function registerSkillTools(skills: Skill[], traceId: string): void {
     for (const tool of skill.tools) {
       const fullName = `${skill.name}__${tool.name}`;
       
-      const definition: ToolDefinition = {
+      // Use registerDynamicTool (not registerTool) for runtime additions
+      registerDynamicTool({
         name: fullName,
         description: `[${skill.name}] ${tool.description}`,
         input_schema: {
@@ -474,9 +529,7 @@ export function registerSkillTools(skills: Skill[], traceId: string): void {
             .filter(([, v]) => (v as { required?: boolean }).required)
             .map(([k]) => k),
         },
-      };
-      
-      registerTool(definition);
+      });
       
       logger.debug({
         event: 'skills.tool_registered',
@@ -488,6 +541,11 @@ export function registerSkillTools(skills: Skill[], traceId: string): void {
   }
 }
 ```
+
+**Registry Update Required (Story 3.2):** Add `registerDynamicTool()` function that:
+- Accepts tools at runtime (not compile-time checked)
+- Adds to handler map without TOOL_NAMES validation
+- Supports removal when skills are reloaded
 
 ### Package Dependencies
 
@@ -528,11 +586,27 @@ When the user asks about past discussions, decisions, or context that might be i
 4. Cite message authors and dates
 ```
 
+### Startup Order & Validation
+
+**Startup Sequence:**
+1. `instrumentation.ts` loads first (OTel)
+2. `config/environment.ts` validates env vars
+3. Skills load **lazily** on first `getSkills(traceId)` call
+4. Skills should NOT block app startup — failures return empty array
+
+**Validation Strategy:**
+- Parse SKILL.md → validate required fields (`name`, `description`)
+- Invalid skills: log warning with `traceId`, skip (don't cache)
+- Valid skills: cache in memory for process lifetime
+- Tool name validation: MUST match `/^[a-z][a-z0-9_]*$/`
+
+**Config Access:** Skills loader is a utility, not an entry point. If config values are needed, pass them as parameters—do NOT import `config` directly in `loader.ts`.
+
 ### Dependencies (Story Prerequisites)
 
 | Dependency | Story | What It Provides |
 |------------|-------|------------------|
-| Tool Registry | 3.2 | `registerTool()` function for skill tool registration |
+| Tool Registry | 3.2 | `registerDynamicTool()` function for runtime skill tool registration |
 | Agent Context | 2.1 | System prompt assembly that includes skills |
 | Langfuse | 1.2 | `langfuse.span()` for observability |
 | Logger | 1.1 | Structured logging with traceId |
@@ -554,6 +628,142 @@ When the user asks about past discussions, decisions, or context that might be i
 | Use camelCase tool names | Use `snake_case` only |
 | Throw on missing directory | Return empty array gracefully |
 | Create `.orion/skills/` | Use `.skills/` at project root |
+| `throw new Error()` in skill tool handler | Return `{ success: false, error: { code, message, retryable } }` |
+| `import from './parser'` without extension | `import from './parser.js'` (MANDATORY) |
+| Cache invalid skills | Skip with warning, don't add to cache |
+| Block startup on skill load | Load lazily on first request |
+
+## GKE Sandbox Integration
+
+> **Scope Boundary:** This story (6.1) **discovers and catalogs** skill scripts. Story 6.2 **executes** them in GKE Sandbox. Do NOT implement execution logic here—only discovery.
+
+### Why GKE Sandbox?
+
+Anthropic's code execution container has **no network access** and **cannot call MCP tools programmatically**. For complex Skills that need to:
+
+- Call multiple MCP tools in loops/conditionals
+- Process results programmatically
+- Call external APIs
+- Use custom Python packages
+
+...we route execution through GKE Agent Sandbox (deployed in Phase 1).
+
+### Skill Script Discovery
+
+Skills can include executable scripts in a `scripts/` subdirectory:
+
+```
+.skills/
+└── confluence-research/
+    ├── SKILL.md
+    └── scripts/
+        ├── search_and_aggregate.py
+        └── requirements.txt
+```
+
+The loader catalogs these scripts and makes them available to the `execute_code` tool (Story 6.2).
+
+### Skill Types
+
+| Type | Detection | Execution |
+|------|-----------|-----------|
+| **Instruction-only** | No `scripts/` dir | Claude reads instructions, calls tools directly |
+| **Script-enabled** | Has `scripts/` dir | Claude can use `execute_code` to run scripts in GKE |
+
+### Skill Interface Reference
+
+See **Skill Types** section above for the authoritative `Skill` and `SkillScript` interfaces. The `scripts` and `hasExecutableScripts` fields are set by the loader during skill discovery.
+
+### Script Discovery Implementation
+
+```typescript
+// src/skills/loader.ts - add to loadSkills()
+
+async function discoverScripts(skillDir: string): Promise<SkillScript[]> {
+  const scriptsDir = path.join(skillDir, 'scripts');
+  
+  if (!existsSync(scriptsDir)) {
+    return [];
+  }
+  
+  const pyFiles = await glob('*.py', { cwd: scriptsDir });
+  const requirementsPath = path.join(scriptsDir, 'requirements.txt');
+  const hasRequirements = existsSync(requirementsPath);
+  
+  return pyFiles.map(file => ({
+    name: file,
+    path: path.join(scriptsDir, file),
+    requirements: hasRequirements ? requirementsPath : undefined,
+  }));
+}
+```
+
+### Relationship to Story 6.2
+
+This story (6.1) **discovers and catalogs** skill scripts.
+Story 6.2 (`execute_code` tool) **executes** them in GKE Sandbox.
+
+```
+Story 6.1: loadSkills() → { ..., scripts: [...], hasExecutableScripts: true }
+                                      │
+                                      ▼
+Story 6.2: execute_code({ script: "skill:confluence-research/search.py", args: {...} })
+                                      │
+                                      ▼
+           GKE Sandbox → Execute script → Return results
+```
+
+## Dev Agent Record
+
+### Implementation Plan
+
+Implemented Agent Skills Loader following the story tasks in order:
+1. Created types.ts with Skill, SkillTool, SkillScript interfaces and TOOL_NAME_PATTERN
+2. Created parser.ts using gray-matter to parse SKILL.md frontmatter + markdown body
+3. Created loader.ts with loadSkills(), loadSkillsWithResult(), getSkills(), reloadSkills() for skill discovery
+4. Created prompt-builder.ts for system prompt injection
+5. Added registerDynamicTool(), removeSkillTools(), clearSkillTools(), getSkillTool() to registry.ts for runtime skill tool registration
+6. Created tool-handler.ts with executeSkillTool() (returns not-implemented until Story 6.2)
+7. Created index.ts for module re-exports
+8. Created .skills/example/SKILL.md sample skill
+9. Added comprehensive test coverage (42 skills tests + 8 registry skill tests = 50 tests passing)
+
+### Completion Notes
+
+- All ACs verified via tests
+- Skill loading is lazy (first call to getSkills)
+- Invalid skills logged but don't block valid ones
+- Script discovery implemented for GKE Sandbox (Story 6.2)
+- No lint errors introduced
+- Pre-existing test failures in memory/vercel-bundling unrelated to this story
+
+## File List
+
+### New Files
+
+- src/skills/types.ts
+- src/skills/types.test.ts
+- src/skills/parser.ts
+- src/skills/parser.test.ts
+- src/skills/loader.ts
+- src/skills/loader.test.ts
+- src/skills/prompt-builder.ts
+- src/skills/prompt-builder.test.ts
+- src/skills/tool-handler.ts
+- src/skills/tool-handler.test.ts
+- src/skills/index.ts
+- src/skills/integration.test.ts
+- .skills/example/SKILL.md
+
+### Pre-existing Files (not created by this story)
+
+- .skills/summarize/SKILL.md (pre-existing skill, used to verify loader works with multiple skills)
+
+### Modified Files
+
+- src/tools/registry.ts (added skillTools map, registerDynamicTool, removeSkillTools, clearSkillTools, getSkillTool)
+- src/tools/registry.test.ts (added skill tool registration tests)
+- package.json (added gray-matter, glob dependencies)
 
 ## Change Log
 
@@ -561,3 +771,7 @@ When the user asks about past discussions, decisions, or context that might be i
 |------|--------|
 | 2025-12-22 | Story created for Epic 6 |
 | 2025-12-22 | Validation review: Added traceId to all logs, tool name validation, cache invalidation docs, fixed directory location |
+| 2026-01-02 | Added GKE Sandbox integration, script discovery, updated Skill interface |
+| 2026-01-02 | **Validation review (SM)**: Critical fixes: (1) Added ToolResult pattern requirement for skill tool handlers, (2) Clarified dynamic tool registration vs TOOL_NAMES registry, (3) Added ESM .js extension requirement, (4) Consolidated duplicate type definitions, (5) Added startup order & validation strategy, (6) Clarified GKE sandbox scope boundary (discovery only, not execution), (7) Enhanced anti-patterns table |
+| 2026-01-03 | **Implementation complete**: All 7 tasks implemented with 50 tests passing (42 skills + 8 registry). Skills module created with loader, parser, prompt-builder, tool-handler. Registry extended with registerDynamicTool(). Sample skill created in .skills/example/ |
+| 2026-01-03 | **Code review (AI)**: Fixed test count (55→50), documented pre-existing .skills/summarize/, added loadSkillsWithResult() to implementation plan. All ACs verified. No HIGH issues. |

@@ -13,7 +13,7 @@ completedAt: '2025-12-22'
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22); MCP SDK adoption (2025-12-31)'
+course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22); MCP SDK adoption (2025-12-31); GKE Agent Sandbox for code execution (2026-01-03)'
 hasProjectContext: false
 ---
 
@@ -296,6 +296,109 @@ Client → tools/list (with Mcp-Session-Id + MCP-Protocol-Version headers)
 
 ---
 
+## GKE Agent Sandbox for Code Execution (ADR-2026-01-03)
+
+### Context
+
+The original architecture planned to use Anthropic's Agent Skills feature for custom skills with code execution. Research revealed a critical limitation:
+
+> **Anthropic's code execution container has NO network access.**
+
+This blocks:
+- Custom skills that call MCP tools
+- External API calls from generated code
+- Programmatic tool calling patterns
+
+### Decision
+
+**Adopt GKE Agent Sandbox** as a self-managed code execution environment.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Orion Slack Agent (Cloud Run)                                  │
+│                                                                 │
+│  ┌──────────┐    ┌────────────────────────────────────────────┐│
+│  │ Claude   │───►│  execute_code Tool                         ││
+│  │ (API)    │◄───│                                            ││
+│  └──────────┘    │  ┌──────────────────────────────────────┐  ││
+│                  │  │  GKE Agent Sandbox (us-central1)     │  ││
+│                  │  │                                      │  ││
+│                  │  │  • Python 3.11 runtime               │  ││
+│                  │  │  • Network access ✅                 │  ││
+│                  │  │  • MCP tool calls ✅                 │  ││
+│                  │  │  • External APIs ✅                  │  ││
+│                  │  │  • gVisor isolation                  │  ││
+│                  │  └──────────────────────────────────────┘  ││
+│                  └────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Infrastructure Details
+
+| Component | Value |
+|-----------|-------|
+| **GCP Project** | `ai-workflows-459123` |
+| **Cluster** | `orion-sandbox-cluster` |
+| **Region** | `us-central1` |
+| **Controller** | `agent-sandbox-controller-0` (namespace: `agent-sandbox-system`) |
+| **Template** | `python-runtime-template` |
+| **Warm Pool** | `orion-sandbox-warmpool` (2 replicas, sub-second startup) |
+| **Router** | `sandbox-router-svc:8080` (2 replicas) |
+| **Isolation** | gVisor (GKE Autopilot default) |
+
+### Python Client Integration
+
+```python
+from agentic_sandbox import SandboxClient
+
+with SandboxClient(
+    template_name='python-runtime-template',
+    namespace='default'
+) as sandbox:
+    result = sandbox.run('python3 -c "import urllib.request; ..."')
+    # result.stdout, result.stderr available
+```
+
+### Verification (2026-01-03)
+
+| Test | Result |
+|------|--------|
+| Python execution (`2+2`) | ✅ `4` |
+| Socket connectivity (8.8.8.8:53) | ✅ `CONNECTED` |
+| HTTP request (httpbin.org) | ✅ `HTTP 200` |
+
+### Rationale
+
+| Option | Verdict |
+|--------|---------|
+| **Anthropic's container** | ❌ No network access |
+| **Local execution** | ❌ Security risk, no isolation |
+| **GKE Agent Sandbox** | ✅ Network + isolation + control |
+
+### Cost
+
+~$70-150/month (GKE Autopilot auto-scaling)
+
+### Files
+
+```
+infra/gke-sandbox/
+├── sandbox-template-and-pool.yaml  # SandboxTemplate + WarmPool
+├── sandbox-router.yaml              # Router Deployment + Service
+└── README.md                         # Operational docs
+```
+
+### Status
+
+- **Decision Date:** 2026-01-03
+- **Status:** Deployed & Verified
+- **Implementation:** Pending `execute_code` tool in `src/tools/code-execution/`
+- **Reference:** `_bmad-output/sprint-change-proposal-2026-01-03-gke-agent-sandbox.md`
+
+---
+
 ## Memory Architecture (Step 4)
 
 ### Research Validation
@@ -320,27 +423,35 @@ Architecture validated against production patterns:
 ### How Anthropic Memory Tool Works
 
 1. Enable with beta header: `context-management-2025-06-27`
-2. Claude auto-checks `/memories` directory before tasks
-3. Claude makes tool calls: `view`, `create`, `update`, `delete`
-4. Your handler executes operations against your storage
+2. Use SDK helper: `betaMemoryTool(handlers)` from `@anthropic-ai/sdk/helpers/beta/memory`
+3. Tool type is `memory_20250818` (set automatically by helper)
+4. Claude auto-checks `/memories` directory before tasks
+5. Claude makes tool calls with 6 commands: `view`, `create`, `str_replace`, `insert`, `delete`, `rename`
+6. Your handler executes operations against GCS with formatted responses
+
+**SDK Helper Usage:**
 
 ```typescript
-// Example memory tool call from Claude
-{
-  "type": "tool_use",
-  "name": "memory",
-  "input": {
-    "command": "view",
-    "path": "/memories"
-  }
-}
+import { betaMemoryTool, MemoryToolHandlers } from '@anthropic-ai/sdk/helpers/beta/memory';
 
-// Your handler responds with file listing
-{
-  "type": "tool_result",
-  "content": "/memories/project-context.md\n/memories/user-prefs/sid.json"
-}
+const handlers: MemoryToolHandlers = {
+  view: async (cmd) => formatViewResponse(await gcsRead(cmd.path)),
+  create: async (cmd) => { await gcsWrite(cmd.path, cmd.file_text); return `File created at: ${cmd.path}`; },
+  str_replace: async (cmd) => strReplaceInFile(cmd.path, cmd.old_str, cmd.new_str),
+  insert: async (cmd) => insertAtLine(cmd.path, cmd.insert_line, cmd.insert_text),
+  delete: async (cmd) => { await gcsDelete(cmd.path); return `Successfully deleted ${cmd.path}`; },
+  rename: async (cmd) => { await gcsMove(cmd.old_path, cmd.new_path); return `Renamed ${cmd.old_path} to ${cmd.new_path}`; },
+};
+
+const memoryTool = betaMemoryTool(handlers);
+// memoryTool.type === 'memory_20250818'
+// memoryTool.name === 'memory'
 ```
+
+**Response Format Requirements:**
+
+- Directories: `{size}\t{path}` per line (e.g., `5.5K\t/memories/global/file.md`)
+- Files: 6-char right-aligned line numbers, tab-separated (e.g., `     1\tHello World`)
 
 ### Memory Storage Architecture
 
@@ -349,12 +460,14 @@ Architecture validated against production patterns:
 │                    CLOUD RUN CONTAINER                       │
 │  ┌─────────────────────────────────────────────────────────┐ │
 │  │  Agent Loop (messages.create + tool_use)                │ │
-│  │  └── Memory Tool Handler                                 │ │
-│  │      └── memoryToolHandler.ts                           │ │
-│  │          ├── view(path)   → GCS list/read               │ │
-│  │          ├── create(path) → GCS write                    │ │
-│  │          ├── update(path) → GCS overwrite                │ │
-│  │          └── delete(path) → GCS delete                   │ │
+│  │  └── Memory Tool (via betaMemoryTool SDK helper)         │ │
+│  │      └── handler.ts (MemoryToolHandlers)                 │ │
+│  │          ├── view(path)       → GCS list/read            │ │
+│  │          ├── create(path)     → GCS write                │ │
+│  │          ├── str_replace()    → GCS read/modify/write    │ │
+│  │          ├── insert(line)     → GCS read/modify/write    │ │
+│  │          ├── delete(path)     → GCS delete               │ │
+│  │          └── rename(old,new)  → GCS copy+delete          │ │
 │  └─────────────────────────────────────────────────────────┘ │
 └──────────────────────────────┬──────────────────────────────┘
                                │

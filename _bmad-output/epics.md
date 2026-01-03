@@ -81,7 +81,7 @@ FR42: System supports Summarization workflow (threads, documents, conversations)
 FR43: System supports Q&A workflow (grounded, verified, cited)
 
 **Persistent Memory (FR44-46):**
-FR44: System maintains persistent memory across sessions via Memory Tool pattern (view, create, update, delete operations) with Google Cloud Storage backend
+FR44: System maintains persistent memory across sessions via Anthropic Memory Tool SDK helper (`betaMemoryTool`) with 6 operations (view, create, str_replace, insert, delete, rename) and Google Cloud Storage backend
 FR45: System organizes memory in three scopes: global (shared learnings), user-level (per Slack user preferences), and session-level (per thread context)
 FR46: Claude automatically checks /memories directory at conversation start to restore relevant context
 
@@ -320,7 +320,7 @@ Enable Orion to remember context across sessions.
 **User Outcome:** Orion learns user preferences and retains context between conversations.
 
 **Scope:**
-- Memory Tool handler (view, create, update, delete operations)
+- Memory Tool handler via SDK helper (view, create, str_replace, insert, delete, rename)
 - GCS backend for durable storage
 - 3-scope structure: global, user-level, session-level
 - Memory auto-check at conversation start
@@ -332,7 +332,7 @@ Enable Orion to remember context across sessions.
 **Stories:**
 | Story | Title | Status |
 |-------|-------|--------|
-| 5.1 | Memory Tool Handler (GCS Backend) | ready-for-dev |
+| 5.1 | Memory Tool Handler (SDK Helper + GCS Backend) | in-progress |
 | 5.2 | Memory Scopes & Path Builders | ready-for-dev |
 | 5.3 | Memory Auto-Check at Conversation Start | ready-for-dev |
 

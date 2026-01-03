@@ -5,6 +5,7 @@
  * - AC#1 - threadStarted events handled
  * - AC#5 - Handler wrapped in Langfuse trace
  * - AR11 - All handlers wrapped in Langfuse traces
+ * - Story 5.3 - Memory auto-check at conversation start
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -32,13 +33,35 @@ vi.mock('../../utils/logger.js', () => ({
   },
 }));
 
+// Mock the memory loader (Story 5.3)
+vi.mock('../../tools/memory/loader.js', () => ({
+  loadRelevantMemories: vi.fn().mockResolvedValue({
+    global: undefined,
+    user: undefined,
+    session: undefined,
+    loadDurationMs: 50,
+    scopesFound: [],
+  }),
+  formatMemoriesForContext: vi.fn().mockReturnValue(''),
+}));
+
+// Mock config
+vi.mock('../../config/environment.js', () => ({
+  config: {
+    gcsMemoriesBucket: 'test-bucket',
+  },
+}));
+
 describe('Thread Started Handler', () => {
   let handleThreadStarted: typeof import('./thread-started.js').handleThreadStarted;
   let mockSay: ReturnType<typeof vi.fn>;
   let mockSetSuggestedPrompts: ReturnType<typeof vi.fn>;
   let mockSaveThreadContext: ReturnType<typeof vi.fn>;
+  let mockSetStatus: ReturnType<typeof vi.fn>;
   let startActiveObservation: ReturnType<typeof vi.fn>;
   let logger: { info: ReturnType<typeof vi.fn> };
+  let loadRelevantMemories: ReturnType<typeof vi.fn>;
+  let formatMemoriesForContext: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -52,12 +75,17 @@ describe('Thread Started Handler', () => {
       info: ReturnType<typeof vi.fn>;
     };
 
+    const memoryLoaderModule = await import('../../tools/memory/loader.js');
+    loadRelevantMemories = memoryLoaderModule.loadRelevantMemories as ReturnType<typeof vi.fn>;
+    formatMemoriesForContext = memoryLoaderModule.formatMemoriesForContext as ReturnType<typeof vi.fn>;
+
     const handlerModule = await import('./thread-started.js');
     handleThreadStarted = handlerModule.handleThreadStarted;
 
     mockSay = vi.fn().mockResolvedValue(undefined);
     mockSetSuggestedPrompts = vi.fn().mockResolvedValue(undefined);
     mockSaveThreadContext = vi.fn().mockResolvedValue(undefined);
+    mockSetStatus = vi.fn().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -81,7 +109,7 @@ describe('Thread Started Handler', () => {
       saveThreadContext: mockSaveThreadContext,
       getThreadContext: vi.fn().mockResolvedValue({}),
       setTitle: vi.fn().mockResolvedValue(undefined),
-      setStatus: vi.fn().mockResolvedValue(undefined),
+      setStatus: mockSetStatus,
       client: {},
       context: {
         teamId: 'T123456',
@@ -132,11 +160,18 @@ describe('Thread Started Handler', () => {
     );
   });
 
-  it('should save thread context', async () => {
+  it('should save thread context with memory state (Story 5.3 AC#1, AC#3)', async () => {
     const event = createThreadStartedEvent();
     await handleThreadStarted(event);
 
     expect(mockSaveThreadContext).toHaveBeenCalledTimes(1);
+    expect(mockSaveThreadContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memoryContext: expect.any(String),
+        memoryLoadedAt: expect.any(String),
+        scopesLoaded: expect.any(Array),
+      })
+    );
   });
 
   it('should log thread started event', async () => {
@@ -151,6 +186,90 @@ describe('Thread Started Handler', () => {
         traceId: 'mock-trace-id',
       })
     );
+  });
+
+  describe('Memory Auto-Check (Story 5.3)', () => {
+    it('should load memories at thread start (AC#1)', async () => {
+      const event = createThreadStartedEvent();
+      await handleThreadStarted(event);
+
+      expect(loadRelevantMemories).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'U123456',
+          threadTs: '1234567890.123456',
+          bucket: 'test-bucket',
+        })
+      );
+    });
+
+    it('should show loading status while fetching memories (AC#1)', async () => {
+      const event = createThreadStartedEvent();
+      await handleThreadStarted(event);
+
+      expect(mockSetStatus).toHaveBeenCalledWith('Restoring your preferences...');
+    });
+
+    it('should send personalized greeting when user preferences exist (AC#2)', async () => {
+      loadRelevantMemories.mockResolvedValueOnce({
+        user: '{"timezone": "UTC"}',
+        loadDurationMs: 50,
+        scopesFound: ['user'],
+      });
+
+      const event = createThreadStartedEvent();
+      await handleThreadStarted(event);
+
+      expect(mockSay).toHaveBeenCalledWith(
+        expect.stringContaining('Welcome back')
+      );
+    });
+
+    it('should send default greeting when no user preferences (AC#6)', async () => {
+      loadRelevantMemories.mockResolvedValueOnce({
+        loadDurationMs: 50,
+        scopesFound: [],
+      });
+
+      const event = createThreadStartedEvent();
+      await handleThreadStarted(event);
+
+      expect(mockSay).toHaveBeenCalledWith(
+        expect.stringContaining("I'm Orion")
+      );
+    });
+
+    it('should format memories for context injection (AC#1, AC#4)', async () => {
+      loadRelevantMemories.mockResolvedValueOnce({
+        global: 'Global context',
+        user: '{"pref": "value"}',
+        loadDurationMs: 50,
+        scopesFound: ['global', 'user'],
+      });
+
+      const event = createThreadStartedEvent();
+      await handleThreadStarted(event);
+
+      expect(formatMemoriesForContext).toHaveBeenCalled();
+    });
+
+    it('should log memory loading result (AC#7)', async () => {
+      loadRelevantMemories.mockResolvedValueOnce({
+        global: 'Global context',
+        loadDurationMs: 100,
+        scopesFound: ['global'],
+      });
+
+      const event = createThreadStartedEvent();
+      await handleThreadStarted(event);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'thread_started.memories_loaded',
+          scopesFound: ['global'],
+          durationMs: 100,
+        })
+      );
+    });
   });
 });
 

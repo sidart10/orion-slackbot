@@ -146,3 +146,4 @@ Handle errors gracefully with user-friendly messages:
 
 **User:** "tldr"
 → If in thread, summarize thread; if in channel, summarize last 7 days
+

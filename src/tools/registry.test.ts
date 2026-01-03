@@ -116,4 +116,130 @@ describe('ToolRegistry (Task 1 conflict policy)', () => {
   });
 });
 
+describe('ToolRegistry - Skill Tools (Story 6.1)', () => {
+  beforeEach(() => {
+    toolRegistry.__resetForTests();
+  });
+
+  it('registers skill tool with prefixed name', () => {
+    toolRegistry.registerDynamicTool('deep_research', 'initiate_search', {
+      name: 'initiate_search',
+      description: 'Start search',
+      input_schema: { type: 'object', properties: {} },
+    });
+
+    const tool = toolRegistry.getSkillTool('deep_research__initiate_search');
+    expect(tool).toBeDefined();
+    expect(tool?.skillName).toBe('deep_research');
+    expect(tool?.originalName).toBe('initiate_search');
+    expect(tool?.claudeTool.name).toBe('deep_research__initiate_search');
+  });
+
+  it('includes skill tools in getToolsForClaude', () => {
+    toolRegistry.registerDynamicTool('my_skill', 'my_tool', {
+      name: 'my_tool',
+      description: 'My tool',
+      input_schema: { type: 'object', properties: {} },
+    });
+
+    const tools = toolRegistry.getToolsForClaude();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('my_skill__my_tool');
+  });
+
+  it('removes skill tools by skill name', () => {
+    toolRegistry.registerDynamicTool('skill_a', 'tool_1', {
+      name: 'tool_1',
+      input_schema: { type: 'object', properties: {} },
+    });
+    toolRegistry.registerDynamicTool('skill_a', 'tool_2', {
+      name: 'tool_2',
+      input_schema: { type: 'object', properties: {} },
+    });
+    toolRegistry.registerDynamicTool('skill_b', 'tool_1', {
+      name: 'tool_1',
+      input_schema: { type: 'object', properties: {} },
+    });
+
+    const removed = toolRegistry.removeSkillTools('skill_a');
+
+    expect(removed).toBe(2);
+    expect(toolRegistry.getSkillTool('skill_a__tool_1')).toBeUndefined();
+    expect(toolRegistry.getSkillTool('skill_a__tool_2')).toBeUndefined();
+    expect(toolRegistry.getSkillTool('skill_b__tool_1')).toBeDefined();
+  });
+
+  it('clears all skill tools', () => {
+    toolRegistry.registerDynamicTool('skill_a', 'tool', {
+      name: 'tool',
+      input_schema: { type: 'object', properties: {} },
+    });
+    toolRegistry.registerDynamicTool('skill_b', 'tool', {
+      name: 'tool',
+      input_schema: { type: 'object', properties: {} },
+    });
+
+    toolRegistry.clearSkillTools();
+
+    expect(toolRegistry.getSkillTool('skill_a__tool')).toBeUndefined();
+    expect(toolRegistry.getSkillTool('skill_b__tool')).toBeUndefined();
+  });
+
+  it('prevents conflict with static tools', () => {
+    toolRegistry.registerStaticTool(
+      'skill__tool',
+      async () => ({}),
+      { name: 'skill__tool', input_schema: { type: 'object', properties: {} } }
+    );
+
+    toolRegistry.registerDynamicTool('skill', 'tool', {
+      name: 'tool',
+      input_schema: { type: 'object', properties: {} },
+    });
+
+    // Skill tool should not override static tool
+    expect(toolRegistry.getSkillTool('skill__tool')).toBeUndefined();
+    expect(toolRegistry.getStaticTool('skill__tool')).toBeDefined();
+  });
+
+  it('prevents conflict with MCP tools', () => {
+    toolRegistry.registerMcpTools('skill', [
+      {
+        originalName: 'tool',
+        claudeTool: { name: 'skill__tool', input_schema: { type: 'object', properties: {} } },
+      },
+    ]);
+
+    toolRegistry.registerDynamicTool('skill', 'tool', {
+      name: 'tool',
+      input_schema: { type: 'object', properties: {} },
+    });
+
+    // Skill tool should not override MCP tool
+    expect(toolRegistry.getSkillTool('skill__tool')).toBeUndefined();
+    expect(toolRegistry.getMcpTool('skill__tool')).toBeDefined();
+  });
+
+  it('sorts skill tools alongside static and MCP tools', () => {
+    toolRegistry.registerStaticTool(
+      'aaa',
+      async () => ({}),
+      { name: 'aaa', input_schema: { type: 'object', properties: {} } }
+    );
+    toolRegistry.registerMcpTools('mcp', [
+      {
+        originalName: 'bbb',
+        claudeTool: { name: 'mcp__bbb', input_schema: { type: 'object', properties: {} } },
+      },
+    ]);
+    toolRegistry.registerDynamicTool('skill', 'ccc', {
+      name: 'ccc',
+      input_schema: { type: 'object', properties: {} },
+    });
+
+    const names = toolRegistry.getToolsForClaude().map((t) => t.name);
+    expect(names).toEqual(['aaa', 'mcp__bbb', 'skill__ccc']);
+  });
+});
+
 

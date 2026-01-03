@@ -48,3 +48,21 @@ mcp_servers:
     url: "https://rube.app/mcp"
     headers:
       Authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiJ1c2VyXzAxS0RWRVFONkoyQkFQTU5IODM5V1BGNENQIiwib3JnSWQiOiJvcmdfMDFLRFZFUVFKVDAwUlhWWjFGTVM4WlBIWEMiLCJpYXQiOjE3Njc0MTM0NzB9.CnOGZgq5Hl2u4le4jV2i1HABjqi6c7-Qkn3CKsLocEc"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Generative Media MCP Servers (Google Vertex AI)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  genmedia-imagen:
+    type: http
+    enabled: true
+    description: "Google Imagen - image generation via Vertex AI (Imagen 3/4/4 Ultra)"
+    url: "https://mcp-imagen-201626763325.us-central1.run.app/mcp"
+    headers: {}
+
+  genmedia-veo:
+    type: http
+    enabled: true
+    description: "Google Veo - video generation via Vertex AI (Veo 2/3/3.1)"
+    url: "https://mcp-veo-201626763325.us-central1.run.app/mcp"
+    headers: {}

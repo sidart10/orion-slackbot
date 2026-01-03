@@ -21,8 +21,10 @@ import { handleAppMention } from './slack/handlers/app-mention.js';
 import { config } from './config/environment.js';
 import { logger } from './utils/logger.js';
 import { registerSummarizeTool } from './tools/summarize/index.js';
-import { registerMemoryTool } from './tools/memory/index.js';
 import { shutdown as shutdownLangfuse } from './observability/langfuse.js';
+
+// Note: Memory tool uses SDK betaMemoryTool helper — passed directly to messages.create()
+// via getMemoryTool() in agent loop, not registered in toolRegistry
 
 /**
  * Starts the Orion Slack agent.
@@ -37,9 +39,9 @@ export async function startApp(): Promise<void> {
     nodeEnv: config.nodeEnv,
   });
 
-  // Register static tools before app start (Story 7.6, 5.1)
+  // Register static tools before app start (Story 7.6)
+  // Note: Memory tool (Story 5.1) uses SDK helper, passed directly in agent loop
   registerSummarizeTool();
-  registerMemoryTool();
 
   // Create and configure Slack app with ExpressReceiver
   const { app } = createSlackApp();

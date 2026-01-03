@@ -88,11 +88,57 @@ export async function deleteFile(bucketName: string, path: string): Promise<void
  *
  * @param bucketName - GCS bucket name
  * @param prefix - Directory prefix to list
- * @returns Array of file paths with /memories/ prefix
+ * @returns Array of file metadata with path and size
  */
-export async function listFiles(bucketName: string, prefix: string): Promise<string[]> {
+export async function listFiles(
+  bucketName: string,
+  prefix: string
+): Promise<Array<{ path: string; size: number }>> {
   const bucket = getBucket(bucketName);
   const [files] = await bucket.getFiles({ prefix });
-  return files.map((f) => `/memories/${f.name}`);
+  return files.map((f) => ({
+    path: `/memories/${f.name}`,
+    size: parseInt(f.metadata.size as string, 10) || 0,
+  }));
+}
+
+/**
+ * Copy file within GCS bucket.
+ * Used by rename operation (copy + delete).
+ *
+ * @param bucketName - GCS bucket name
+ * @param sourcePath - Source file path
+ * @param destPath - Destination file path
+ * @throws Error if source file does not exist
+ */
+export async function copyFile(
+  bucketName: string,
+  sourcePath: string,
+  destPath: string
+): Promise<void> {
+  const bucket = getBucket(bucketName);
+  const sourceFile = bucket.file(sourcePath);
+  const destFile = bucket.file(destPath);
+
+  const [exists] = await sourceFile.exists();
+  if (!exists) {
+    throw new Error(`File not found: ${sourcePath}`);
+  }
+
+  await sourceFile.copy(destFile);
+}
+
+/**
+ * Check if a file exists in GCS.
+ *
+ * @param bucketName - GCS bucket name
+ * @param path - File path within bucket
+ * @returns true if file exists
+ */
+export async function fileExists(bucketName: string, path: string): Promise<boolean> {
+  const bucket = getBucket(bucketName);
+  const file = bucket.file(path);
+  const [exists] = await file.exists();
+  return exists;
 }
 

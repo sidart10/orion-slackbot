@@ -74,8 +74,8 @@ describe('handleMemoryTool', () => {
         path: '/memories/users/',
       };
       vi.mocked(listFiles).mockResolvedValue([
-        '/memories/users/U123/prefs.json',
-        '/memories/users/U456/prefs.json',
+        { path: '/memories/users/U123/prefs.json', size: 1024 },
+        { path: '/memories/users/U456/prefs.json', size: 2048 },
       ]);
 
       const result = await handleMemoryTool(input, mockContext);

@@ -44,3 +44,8 @@ yarn.lock
 # Docker
 .dockerignore
 
+# Python virtual environments (for GKE sandbox testing)
+.sandbox-venv/
+venv/
+.venv/
+
