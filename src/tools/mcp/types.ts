@@ -224,12 +224,16 @@ export type ClaudeSdkMcpHttpConfig = {
   type: 'http';
   url: string;
   headers?: Record<string, string>;
+  /** Default arguments to merge into tool calls */
+  defaults?: Record<string, unknown>;
 };
 
 export type ClaudeSdkMcpSseConfig = {
   type: 'sse';
   url: string;
   headers?: Record<string, string>;
+  /** Default arguments to merge into tool calls */
+  defaults?: Record<string, unknown>;
 };
 
 export type ClaudeSdkMcpConfig = ClaudeSdkMcpStdioConfig | ClaudeSdkMcpHttpConfig | ClaudeSdkMcpSseConfig;

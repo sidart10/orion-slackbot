@@ -1,6 +1,6 @@
 # Story 6.1: Agent Skills Loader with GKE Sandbox Integration
 
-Status: review
+Status: done
 
 ## Story
 

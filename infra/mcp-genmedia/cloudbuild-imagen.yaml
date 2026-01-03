@@ -51,7 +51,7 @@ steps:
       - '--timeout'
       - '300'
       - '--set-env-vars'
-      - 'PROJECT_ID=$PROJECT_ID,LOCATION=us-central1,GENMEDIA_BUCKET=orion-genmedia'
+      - 'PROJECT_ID=$PROJECT_ID,LOCATION=us-central1,GENMEDIA_BUCKET=orion-genmedia,DEFAULT_MODEL=imagen-4.0-generate-001'
 
   # Grant Orion service account invoker access
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

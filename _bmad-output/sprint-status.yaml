@@ -32,12 +32,13 @@
 # CURRENT FOCUS:
 # ==============
 # 🎯 EPIC 5: PERSISTENT MEMORY - completing remaining stories
+# 🎯 EPIC 6: SKILLS - 6-1 complete, 6-2 ready
 #
 # PRIORITY ORDER (work in sequence):
 #   1. 5-2-memory-scopes-path-builders → in review
-#   2. Epic 6 (Skills) → after Epic 5 complete
+#   2. 6-2-commands-framework → ready-for-dev
 #
-# COMPLETED: Epic 7 (Slack Polish) ✅
+# COMPLETED: Epic 7 (Slack Polish) ✅, Story 6-1 (Agent Skills Loader) ✅
 
 generated: 2026-01-02
 project: 2025-12 orion-slack-agent
@@ -123,11 +124,11 @@ development_status:
   epic-5-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 6: Skills & Extensions Framework ⏸️ BACKLOG - after Epic 5
+  # Epic 6: Skills & Extensions Framework 🔄 IN PROGRESS
   # ═══════════════════════════════════════════════════════════════════════════
-  epic-6: backlog
-  6-1-agent-skills-loader: review
-  6-2-commands-framework: ready-for-dev
+  epic-6: in-progress
+  6-1-agent-skills-loader: done               # ✅ Code review passed 2026-01-03; 50 tests passing
+  6-2-execute-code-tool: in-progress
   epic-6-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════

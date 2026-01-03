@@ -20,6 +20,8 @@ export type McpServerConfig = {
   bearerToken?: string;
   connectionTimeoutMs?: number;
   requestTimeoutMs?: number;
+  /** Default arguments to merge into tool calls for this server */
+  defaults?: Record<string, unknown>;
 };
 
 function parseEnabled(value: string | undefined): boolean {
@@ -52,6 +54,16 @@ function extractBearerToken(config: ClaudeSdkMcpConfig): string | undefined {
   return undefined;
 }
 
+/**
+ * Extract defaults from config if present
+ */
+function extractDefaults(config: ClaudeSdkMcpConfig): Record<string, unknown> | undefined {
+  if ('defaults' in config && config.defaults && typeof config.defaults === 'object') {
+    return config.defaults as Record<string, unknown>;
+  }
+  return undefined;
+}
+
 // Test override: set to true to skip file-based config loading
 let __skipFileConfigForTests = false;
 
@@ -77,6 +89,7 @@ export function getMcpServerConfigs(): McpServerConfig[] {
             bearerToken: extractBearerToken(sdkConfig),
             connectionTimeoutMs: 5000,
             requestTimeoutMs: 30000,
+            defaults: extractDefaults(sdkConfig),
           });
         }
       }

@@ -60,9 +60,14 @@ export async function executeToolCall(params: {
         requestTimeoutMs: server.requestTimeoutMs,
       });
 
+      // Merge server defaults with user-provided args (user args take precedence)
+      const mergedArgs = server.defaults 
+        ? { ...server.defaults, ...params.args }
+        : params.args;
+
       const result = await client.callTool(
         mcpTool.originalName, // Use the original tool name (without server prefix)
-        params.args,
+        mergedArgs,
         params.traceId,
         undefined,
         params.signal
