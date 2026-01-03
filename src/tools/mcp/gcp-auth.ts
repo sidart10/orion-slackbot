@@ -76,37 +76,56 @@ async function tryGoogleAuthLibrary(audience: string): Promise<string | null> {
   }
 }
 
+/** Service account to impersonate for local dev */
+const IMPERSONATE_SA = process.env.GCP_IMPERSONATE_SA || '201626763325-compute@developer.gserviceaccount.com';
+
 /**
- * Fallback: Get identity token using gcloud CLI (works locally).
+ * Fallback: Get identity token using gcloud CLI with SA impersonation.
+ * User accounts can't get identity tokens with --audiences directly,
+ * so we impersonate a service account that has invoker access.
  */
 async function tryGcloudCli(audience: string): Promise<string | null> {
+  // Try with impersonation first (for user accounts)
   try {
-    const { stdout, stderr } = await execAsync(
+    const { stdout } = await execAsync(
+      `gcloud auth print-identity-token --impersonate-service-account=${IMPERSONATE_SA} --audiences=${audience}`,
+      { timeout: 15000 }
+    );
+    
+    const token = stdout.trim();
+    if (token && token.includes('.')) {
+      logger.debug({ event: 'gcp.auth.impersonation_success', audience });
+      return token;
+    }
+  } catch (error) {
+    logger.debug({
+      event: 'gcp.auth.impersonation_failed',
+      audience,
+      sa: IMPERSONATE_SA,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  
+  // Fallback: try without audiences (for service accounts)
+  try {
+    const { stdout } = await execAsync(
       `gcloud auth print-identity-token --audiences=${audience}`,
       { timeout: 10000 }
     );
-    
-    if (stderr && !stdout.trim()) {
-      logger.warn({
-        event: 'gcp.auth.gcloud_stderr',
-        stderr: stderr.slice(0, 200),
-      });
-      return null;
-    }
     
     const token = stdout.trim();
     if (token && token.includes('.')) {
       return token;
     }
-    return null;
   } catch (error) {
     logger.debug({
       event: 'gcp.auth.gcloud_failed',
       audience,
       error: error instanceof Error ? error.message : String(error),
     });
-    return null;
   }
+  
+  return null;
 }
 
 /**
