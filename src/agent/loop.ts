@@ -199,6 +199,25 @@ export function extractMarkdownLinks(text: string): Array<{ title: string; url: 
 }
 
 /**
+ * Extract plain GCS/image URLs from text (not markdown formatted).
+ * Used for Imagen/Veo responses that include URLs in plain text.
+ */
+function extractPlainImageUrls(text: string): Array<{ title: string; url: string }> {
+  const links: Array<{ title: string; url: string }> = [];
+  // GCS URLs (multiple domains) ending with image/video extensions
+  const gcsPattern = /https?:\/\/storage\.(?:googleapis|mtls\.cloud\.google)\.com\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp|mp4)(?:\?[^\s<>"]*)?/gi;
+  const matches = text.matchAll(gcsPattern);
+  for (const match of matches) {
+    if (match[0]) {
+      const url = match[0];
+      const filename = url.split('/').pop()?.split('?')[0] || 'Generated Media';
+      links.push({ title: filename, url });
+    }
+  }
+  return links;
+}
+
+/**
  * Extract URL sources from tool results.
  * Looks for common patterns in web search, MCP, and other tool responses.
  * Also extracts markdown-formatted links from text content (e.g., Exa search results).
@@ -270,8 +289,22 @@ function extractUrlSourcesFromResult(
     
     // Check for MCP content blocks: { type: 'text', text: '...' }
     if (o.type === 'text' && typeof o.text === 'string') {
+      // Extract markdown links [title](url)
       const mdLinks = extractMarkdownLinks(o.text);
       for (const link of mdLinks) {
+        if (!seen.has(link.url)) {
+          seen.add(link.url);
+          sources.push({
+            type: 'tool',
+            title: link.title.slice(0, 80),
+            reference: toolName,
+            url: link.url,
+          });
+        }
+      }
+      // Extract plain GCS/image URLs (for Imagen/Veo responses)
+      const plainUrls = extractPlainImageUrls(o.text);
+      for (const link of plainUrls) {
         if (!seen.has(link.url)) {
           seen.add(link.url);
           sources.push({

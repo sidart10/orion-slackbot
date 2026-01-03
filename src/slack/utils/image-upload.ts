@@ -12,9 +12,9 @@
 import type { WebClient } from '@slack/web-api';
 import { logger } from '../../utils/logger.js';
 
-/** Regex to find GCS signed URLs or direct image URLs */
+/** Regex to find GCS URLs (multiple domains) or direct image URLs */
 const IMAGE_URL_PATTERN =
-  /https?:\/\/storage\.googleapis\.com\/[^\s<>"]+|https?:\/\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<>"]*)?/gi;
+  /https?:\/\/storage\.(?:googleapis|mtls\.cloud\.google)\.com\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<>"]*)?|https?:\/\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<>"]*)?/gi;
 
 /** Supported image MIME types */
 const IMAGE_MIME_TYPES: Record<string, string> = {
