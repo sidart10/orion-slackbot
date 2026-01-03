@@ -66,6 +66,14 @@ export const config = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
   logLevel: process.env.LOG_LEVEL ?? 'info',
+
+  // GKE Agent Sandbox (Story 6.2)
+  gkeSandboxRouterUrl:
+    process.env.GKE_SANDBOX_ROUTER_URL ??
+    'http://sandbox-router-svc.default.svc.cluster.local:8080',
+
+  // MCP servers for injection into sandbox (Story 6.2)
+  mcpServersJson: process.env.MCP_SERVERS_JSON ?? '{}',
 } as const;
 
 // Validate required variables in production

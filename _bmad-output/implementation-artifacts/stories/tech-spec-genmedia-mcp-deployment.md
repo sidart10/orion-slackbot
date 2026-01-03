@@ -150,7 +150,7 @@ From `project-context.md`:
 
 - [x] **Task 9:** Test image/video generation ✅ Both verified
   ```bash
-  curl -X POST https://mcp-imagen-vjlizxe2vq-uc.a.run.app/mcp \
+  curl -X POST https://mcp-imagen-201626763325.us-central1.run.app/mcp \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
@@ -178,12 +178,12 @@ From `project-context.md`:
   - When `gcloud storage buckets describe gs://orion-genmedia`
   - Then bucket info is returned with location=US-CENTRAL1
 
-- [x] **AC 2:** Imagen MCP server deployed to Cloud Run ✅ Verified: https://mcp-imagen-vjlizxe2vq-uc.a.run.app
+- [x] **AC 2:** Imagen MCP server deployed to Cloud Run ✅ https://mcp-imagen-201626763325.us-central1.run.app
   - Given Dockerfile and cloudbuild config exist
   - When `gcloud run services describe mcp-imagen --region=us-central1`
   - Then service is ACTIVE with HTTP endpoint
 
-- [x] **AC 3:** Veo MCP server deployed to Cloud Run ✅ Verified: https://mcp-veo-vjlizxe2vq-uc.a.run.app
+- [x] **AC 3:** Veo MCP server deployed to Cloud Run ✅ https://mcp-veo-201626763325.us-central1.run.app
   - Given Dockerfile and cloudbuild config exist
   - When `gcloud run services describe mcp-veo --region=us-central1`
   - Then service is ACTIVE with HTTP endpoint
@@ -238,12 +238,12 @@ Orion's service account needs Cloud Run Invoker role on both services:
 ```bash
 gcloud run services add-iam-policy-binding mcp-imagen \
   --region=us-central1 \
-  --member="serviceAccount:orion-agent@ai-workflows-459123.iam.gserviceaccount.com" \
+  --member="serviceAccount:201626763325-compute@developer.gserviceaccount.com" \
   --role="roles/run.invoker"
 
 gcloud run services add-iam-policy-binding mcp-veo \
   --region=us-central1 \
-  --member="serviceAccount:orion-agent@ai-workflows-459123.iam.gserviceaccount.com" \
+  --member="serviceAccount:201626763325-compute@developer.gserviceaccount.com" \
   --role="roles/run.invoker"
 ```
 
@@ -276,11 +276,14 @@ gcloud run services add-iam-policy-binding mcp-veo \
 | File | Change |
 |------|--------|
 | `.orion/config.yaml` | Added genmedia-imagen and genmedia-veo server entries with correct URLs |
-| `infra/mcp-genmedia/Dockerfile.imagen` | Created; fixed Go version 1.24→1.23 (code review) |
-| `infra/mcp-genmedia/Dockerfile.veo` | Created; fixed Go version 1.24→1.23 (code review) |
-| `infra/mcp-genmedia/cloudbuild-imagen.yaml` | Created; added IAM grant step (code review) |
-| `infra/mcp-genmedia/cloudbuild-veo.yaml` | Created; added IAM grant step (code review) |
-| `infra/mcp-genmedia/README.md` | Created; updated with actual URLs and Veo test (code review) |
+| `infra/mcp-genmedia/Dockerfile.imagen` | Created; GOTOOLCHAIN=auto for Go 1.24.3 |
+| `infra/mcp-genmedia/Dockerfile.veo` | Created; GOTOOLCHAIN=auto for Go 1.24.3 |
+| `infra/mcp-genmedia/cloudbuild-imagen.yaml` | Created; IAM grant + Artifact Registry |
+| `infra/mcp-genmedia/cloudbuild-veo.yaml` | Created; IAM grant + Artifact Registry |
+| `infra/mcp-genmedia/README.md` | Created; actual URLs and test examples |
+| `src/config/mcp-servers.ts` | Added defaults extraction from config |
+| `src/tools/mcp/types.ts` | Added defaults field to MCP config types |
+| `src/tools/router.ts` | Added defaults merging for MCP tool calls |
 
 ### Change Log
 
@@ -288,7 +291,7 @@ gcloud run services add-iam-policy-binding mcp-veo \
 |------|--------|--------|
 | 2026-01-02 | Barry | Initial implementation: Tasks 1-7 complete |
 | 2026-01-02 | Barry (Code Review) | **H1 FIXED:** Corrected config URLs from wrong project hash to actual deployed endpoints |
-| 2026-01-02 | Barry (Code Review) | **H3 FIXED:** Changed Go 1.24→1.23 in both Dockerfiles (1.24 doesn't exist) |
+| 2026-01-02 | Barry (Code Review) | **H3 FIXED:** Added GOTOOLCHAIN=auto for Go 1.24.3 requirement |
 | 2026-01-02 | Barry (Code Review) | **M2 FIXED:** Added IAM grant step to Cloud Build configs (automation) |
 | 2026-01-02 | Barry (Code Review) | **L1 FIXED:** Updated README with actual URLs and added Veo test example |
 | 2026-01-02 | Barry (Code Review) | **L2 FIXED:** Migrated from GCR to Artifact Registry |
@@ -299,6 +302,7 @@ gcloud run services add-iam-policy-binding mcp-veo \
 | 2026-01-03 | Barry | Fixed GOTOOLCHAIN=auto for Go 1.24.3 requirement |
 | 2026-01-03 | Barry | Added substitutions for _TAG (was $COMMIT_SHA) |
 | 2026-01-03 | Barry | ✅ All ACs verified - image and video generation working |
+| 2026-01-03 | Barry | Added defaults: Imagen 4 + Veo 3.1 as default models |
 
 ### Review Follow-ups (AI)
 
