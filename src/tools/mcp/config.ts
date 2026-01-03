@@ -98,6 +98,14 @@ function transformToSdkConfig(name: string, config: McpServerConfig): ClaudeSdkM
     if (config.headers) {
       (sdkConfig as { headers?: Record<string, string> }).headers = config.headers;
     }
+    // Copy authType for GCP identity token auth
+    if (config.authType) {
+      (sdkConfig as { authType?: string }).authType = config.authType;
+    }
+    // Copy defaults for tool call argument merging
+    if (config.defaults) {
+      (sdkConfig as { defaults?: Record<string, unknown> }).defaults = config.defaults;
+    }
     return sdkConfig;
   }
 

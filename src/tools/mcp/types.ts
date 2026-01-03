@@ -201,6 +201,10 @@ export interface McpServerHttpConfig extends McpServerConfigBase {
   type: 'http';
   url: string;
   headers?: Record<string, string>;
+  /** Authentication type for Cloud Run services */
+  authType?: 'gcp_identity';
+  /** Default arguments to merge into tool calls */
+  defaults?: Record<string, unknown>;
 }
 
 export interface McpServerSseConfig extends McpServerConfigBase {
