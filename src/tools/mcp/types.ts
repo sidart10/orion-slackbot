@@ -151,6 +151,14 @@ export interface McpClientConfig {
   requestTimeoutMs?: number;
   /** Connection timeout in ms (default: 5000) */
   connectionTimeoutMs?: number;
+  /** 
+   * Authentication type for dynamic token fetching.
+   * - 'gcp_identity': Fetch identity token from GCP metadata server (for Cloud Run)
+   * - undefined: Use bearerToken as-is (static auth)
+   */
+  authType?: 'gcp_identity';
+  /** Target audience URL for GCP identity token (defaults to server URL origin) */
+  audience?: string;
 }
 
 /**
@@ -226,6 +234,12 @@ export type ClaudeSdkMcpHttpConfig = {
   headers?: Record<string, string>;
   /** Default arguments to merge into tool calls */
   defaults?: Record<string, unknown>;
+  /** 
+   * Authentication type for Cloud Run services.
+   * - 'gcp_identity': Fetch identity token from GCP metadata server
+   * - undefined: Use headers as-is (static auth)
+   */
+  authType?: 'gcp_identity';
 };
 
 export type ClaudeSdkMcpSseConfig = {

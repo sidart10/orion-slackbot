@@ -58,6 +58,7 @@ export async function executeToolCall(params: {
         bearerToken: server.bearerToken,
         connectionTimeoutMs: server.connectionTimeoutMs,
         requestTimeoutMs: server.requestTimeoutMs,
+        authType: server.authType,
       });
 
       // Merge server defaults with user-provided args (user args take precedence)

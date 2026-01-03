@@ -108,6 +108,7 @@ async function discoverServerTools(
       bearerToken: server.bearerToken,
       connectionTimeoutMs: server.connectionTimeoutMs,
       requestTimeoutMs: server.requestTimeoutMs,
+      authType: server.authType,
     }, traceId);
 
     const tools = await client.listTools(traceId);

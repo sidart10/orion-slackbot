@@ -22,6 +22,8 @@ export type McpServerConfig = {
   requestTimeoutMs?: number;
   /** Default arguments to merge into tool calls for this server */
   defaults?: Record<string, unknown>;
+  /** Authentication type for dynamic token fetching */
+  authType?: 'gcp_identity';
 };
 
 function parseEnabled(value: string | undefined): boolean {
@@ -64,6 +66,16 @@ function extractDefaults(config: ClaudeSdkMcpConfig): Record<string, unknown> | 
   return undefined;
 }
 
+/**
+ * Extract authType from config if present
+ */
+function extractAuthType(config: ClaudeSdkMcpConfig): 'gcp_identity' | undefined {
+  if ('authType' in config && config.authType === 'gcp_identity') {
+    return 'gcp_identity';
+  }
+  return undefined;
+}
+
 // Test override: set to true to skip file-based config loading
 let __skipFileConfigForTests = false;
 
@@ -90,6 +102,7 @@ export function getMcpServerConfigs(): McpServerConfig[] {
             connectionTimeoutMs: 5000,
             requestTimeoutMs: 30000,
             defaults: extractDefaults(sdkConfig),
+            authType: extractAuthType(sdkConfig),
           });
         }
       }

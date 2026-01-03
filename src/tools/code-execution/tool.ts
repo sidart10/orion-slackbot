@@ -10,13 +10,68 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { readFile } from 'fs/promises';
 import { createHash } from 'crypto';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { executeSandbox } from './sandbox-client.js';
 import { getSkills } from '../../skills/loader.js';
 import { getLangfuse } from '../../observability/langfuse.js';
 import { logger } from '../../utils/logger.js';
+import { config } from '../../config/environment.js';
 import { toolRegistry } from '../registry.js';
 import type { ExecuteCodeInput, ExecuteCodeOutput } from './types.js';
 import type { ToolResult } from '../../utils/tool-result.js';
+
+// Cache the MCP bootstrap script
+let mcpBootstrapCache: string | null = null;
+
+/**
+ * Load MCP bootstrap script for injection into sandbox.
+ * Cached after first load.
+ */
+async function getMcpBootstrap(): Promise<string> {
+  if (mcpBootstrapCache !== null) {
+    return mcpBootstrapCache;
+  }
+
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const bootstrapPath = join(__dirname, 'mcp-bootstrap.py');
+    mcpBootstrapCache = await readFile(bootstrapPath, 'utf-8');
+    return mcpBootstrapCache;
+  } catch {
+    // Fallback if file not found - provide minimal stub
+    mcpBootstrapCache = `
+import os, json
+MCP_SERVERS = json.loads(os.environ.get('MCP_SERVERS', '{}'))
+
+def call_tool(server, tool, args):
+    raise RuntimeError("MCP bootstrap not available")
+
+def list_mcp_servers():
+    return list(MCP_SERVERS.keys())
+`;
+    return mcpBootstrapCache;
+  }
+}
+
+// Context holder for traceId injection
+let currentContext: { traceId: string } = { traceId: 'unknown' };
+
+/**
+ * Set the execution context for the execute_code tool.
+ * Must be called before tool execution to ensure proper traceId.
+ */
+export function setExecuteCodeContext(ctx: { traceId: string }): void {
+  currentContext = ctx;
+}
+
+/**
+ * Clear the execution context after tool execution.
+ */
+export function clearExecuteCodeContext(): void {
+  currentContext = { traceId: 'unknown' };
+}
 
 /**
  * Tool definition for Claude.
@@ -156,6 +211,10 @@ export async function executeCodeHandler(
 
     const timeout = Math.min(input.timeout ?? 30, 120);
 
+    // Inject MCP bootstrap script for MCP tool access (AC#3, Task 4)
+    const mcpBootstrap = await getMcpBootstrap();
+    const codeWithMcp = `${mcpBootstrap}\n\n# User code below\n${codeToExecute}`;
+
     // Log code hash, not full code (security)
     const codeHash = createHash('sha256').update(codeToExecute).digest('hex').slice(0, 16);
 
@@ -168,11 +227,19 @@ export async function executeCodeHandler(
       timeout,
     });
 
+    // Build environment with MCP servers config
+    const env: Record<string, string> = {
+      MCP_SERVERS: config.mcpServersJson,
+    };
+    if (input.args) {
+      env.ARGS = JSON.stringify(input.args);
+    }
+
     // Execute in GKE Sandbox
     const result = await executeSandbox({
-      code: codeToExecute,
+      code: codeWithMcp,
       timeout,
-      env: input.args ? { ARGS: JSON.stringify(input.args) } : undefined,
+      env,
     });
 
     const duration = Date.now() - startTime;
@@ -230,16 +297,14 @@ export async function executeCodeHandler(
  * Register execute_code tool with registry.
  *
  * Call this during agent initialization.
+ * Use setExecuteCodeContext() before executing to inject proper traceId.
  */
 export function registerExecuteCodeTool(): void {
   toolRegistry.registerStaticTool(
     'execute_code',
     async (input: unknown) => {
-      // Wrapper to match registry signature
-      // traceId should be injected by caller via context
-      const result = await executeCodeHandler(input as ExecuteCodeInput, {
-        traceId: 'unknown',
-      });
+      // Use currentContext which should be set by caller via setExecuteCodeContext()
+      const result = await executeCodeHandler(input as ExecuteCodeInput, currentContext);
       return result;
     },
     executeCodeToolDefinition

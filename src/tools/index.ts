@@ -51,3 +51,11 @@ export {
   clearMemoryToolContext,
   MEMORY_TOOL_NAME,
 } from './memory/index.js';
+
+// Execute Code Tool (Story 6.2)
+export {
+  registerExecuteCodeTool,
+  setExecuteCodeContext,
+  clearExecuteCodeContext,
+  EXECUTE_CODE_TOOL_NAME,
+} from './code-execution/index.js';

@@ -15,6 +15,9 @@ import type { Skill } from '../../skills/types.js';
 // Mock dependencies
 vi.mock('./sandbox-client.js');
 vi.mock('../../skills/loader.js');
+vi.mock('fs/promises', () => ({
+  readFile: vi.fn(),
+}));
 vi.mock('../../observability/langfuse.js', () => ({
   getLangfuse: () => ({
     span: () => ({ end: vi.fn() }),
@@ -219,6 +222,141 @@ describe('executeCodeHandler', () => {
         expect(typeof result.data.execution_time_ms).toBe('number');
       }
     });
+  });
+});
+
+describe('skill script execution (AC#4)', () => {
+  const mockContext = { traceId: 'test-trace-skill' };
+  const mockSkillWithScripts: Skill = {
+    name: 'test_skill',
+    description: 'Test skill',
+    instructions: 'Test',
+    filePath: '.skills/test_skill/SKILL.md',
+    hasExecutableScripts: true,
+    scripts: [
+      { name: 'process.py', path: '/mock/path/process.py' },
+      { name: 'analyze.py', path: '/mock/path/analyze.py' },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('executes skill script with skill: prefix', async () => {
+    vi.mocked(skillsLoader.getSkills).mockResolvedValue([mockSkillWithScripts]);
+    vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
+      stdout: 'skill output',
+      stderr: '',
+      return_code: 0,
+    });
+
+    // Mock readFile for the script
+    const { readFile } = await import('fs/promises');
+    vi.mocked(readFile as unknown as typeof vi.fn).mockResolvedValue(
+      'print("hello from skill")'
+    );
+
+    const result = await executeCodeHandler(
+      { skill_script: 'skill:test_skill/process.py' },
+      mockContext
+    );
+
+    expect(result.success).toBe(true);
+    expect(skillsLoader.getSkills).toHaveBeenCalledWith('test-trace-skill');
+  });
+
+  it('executes skill script without skill: prefix', async () => {
+    vi.mocked(skillsLoader.getSkills).mockResolvedValue([mockSkillWithScripts]);
+    vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
+      stdout: 'output',
+      stderr: '',
+      return_code: 0,
+    });
+
+    const { readFile } = await import('fs/promises');
+    vi.mocked(readFile as unknown as typeof vi.fn).mockResolvedValue('pass');
+
+    const result = await executeCodeHandler(
+      { skill_script: 'test_skill/process.py' },
+      mockContext
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it('returns error when skill not found', async () => {
+    vi.mocked(skillsLoader.getSkills).mockResolvedValue([]);
+
+    const result = await executeCodeHandler(
+      { skill_script: 'skill:nonexistent/script.py' },
+      mockContext
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain('Skill not found: nonexistent');
+    }
+  });
+
+  it('returns error when skill has no executable scripts', async () => {
+    const skillWithoutScripts: Skill = {
+      ...mockSkillWithScripts,
+      hasExecutableScripts: false,
+      scripts: undefined,
+    };
+    vi.mocked(skillsLoader.getSkills).mockResolvedValue([skillWithoutScripts]);
+
+    const result = await executeCodeHandler(
+      { skill_script: 'skill:test_skill/script.py' },
+      mockContext
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain('has no executable scripts');
+    }
+  });
+
+  it('returns error when script not found in skill', async () => {
+    vi.mocked(skillsLoader.getSkills).mockResolvedValue([mockSkillWithScripts]);
+
+    const result = await executeCodeHandler(
+      { skill_script: 'skill:test_skill/missing.py' },
+      mockContext
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain('Script not found: missing.py');
+      expect(result.error.message).toContain('process.py');
+    }
+  });
+
+  it('passes args as ARGS environment variable', async () => {
+    vi.mocked(skillsLoader.getSkills).mockResolvedValue([mockSkillWithScripts]);
+    vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
+      stdout: '',
+      stderr: '',
+      return_code: 0,
+    });
+
+    const { readFile } = await import('fs/promises');
+    vi.mocked(readFile as unknown as typeof vi.fn).mockResolvedValue('print(ARGS)');
+
+    await executeCodeHandler(
+      {
+        skill_script: 'skill:test_skill/process.py',
+        args: { query: 'test' },
+      },
+      mockContext
+    );
+
+    expect(sandboxClient.executeSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: { ARGS: '{"query":"test"}' },
+      })
+    );
   });
 });
 

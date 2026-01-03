@@ -7,7 +7,13 @@
  */
 
 export { executeSandbox } from './sandbox-client.js';
-export { executeCodeHandler, executeCodeToolDefinition, registerExecuteCodeTool } from './tool.js';
+export {
+  executeCodeHandler,
+  executeCodeToolDefinition,
+  registerExecuteCodeTool,
+  setExecuteCodeContext,
+  clearExecuteCodeContext,
+} from './tool.js';
 export type {
   ExecuteCodeInput,
   ExecuteCodeOutput,
@@ -15,4 +21,6 @@ export type {
   SandboxOptions,
   SandboxResult,
 } from './types.js';
+
+export const EXECUTE_CODE_TOOL_NAME = 'execute_code';
 

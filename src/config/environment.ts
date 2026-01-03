@@ -93,5 +93,11 @@ if (config.nodeEnv === 'production') {
       throw new Error(`Missing required environment variable for ${key}`);
     }
   }
+
+  // Warn if GKE sandbox URL is using default (Story 6.2)
+  if (config.gkeSandboxRouterUrl.includes('svc.cluster.local')) {
+    // In-cluster default is fine, but external access needs explicit URL
+    // This is expected when running inside GKE
+  }
 }
 

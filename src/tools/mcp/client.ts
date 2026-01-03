@@ -35,6 +35,7 @@ import type { ToolResult, ToolError } from '../../utils/tool-result.js';
 import { isRetryable } from '../../utils/tool-result.js';
 import { logger } from '../../utils/logger.js';
 import type { TraceWrapper } from '../../observability/tracing.js';
+import { getGcpIdentityToken } from './gcp-auth.js';
 
 /**
  * Custom error that preserves ToolError information through throw/catch.
@@ -77,9 +78,19 @@ const CLIENT_INFO = { name: 'orion-slack-agent', version: '1.0.0' };
  *   console.log(tools.data);
  * }
  */
+/** Internal config with resolved defaults */
+type ResolvedMcpClientConfig = {
+  url: string;
+  bearerToken: string;
+  requestTimeoutMs: number;
+  connectionTimeoutMs: number;
+  authType?: 'gcp_identity';
+  audience: string;
+};
+
 export class McpClient {
   private readonly serverName: string;
-  private readonly config: Required<McpClientConfig>;
+  private readonly config: ResolvedMcpClientConfig;
   private state: McpClientState = {};
   private requestId = 0;
   private sessionId: string | null = null;
@@ -93,6 +104,8 @@ export class McpClient {
 
   constructor(serverName: string, config: McpClientConfig) {
     this.serverName = serverName;
+    // Extract origin from URL for GCP identity token audience
+    const urlOrigin = new URL(config.url).origin;
     this.config = {
       url: config.url,
       bearerToken: config.bearerToken ?? '',
@@ -102,7 +115,39 @@ export class McpClient {
       // The requestTimeoutMs covers the entire request including TCP connect.
       // Connection failures (ECONNREFUSED, DNS) fail immediately without waiting for timeout.
       connectionTimeoutMs: config.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS,
+      authType: config.authType,
+      audience: config.audience ?? urlOrigin,
     };
+  }
+
+  /**
+   * Get Authorization header value (static token or dynamic GCP identity token).
+   * Returns undefined if no auth is configured.
+   */
+  private async getAuthHeader(): Promise<string | undefined> {
+    // Static bearer token takes precedence
+    if (this.config.bearerToken) {
+      return `Bearer ${this.config.bearerToken}`;
+    }
+
+    // GCP identity token for Cloud Run services
+    if (this.config.authType === 'gcp_identity') {
+      try {
+        const token = await getGcpIdentityToken(this.config.audience);
+        return `Bearer ${token}`;
+      } catch (error) {
+        logger.error({
+          event: 'mcp.auth.gcp_identity_failed',
+          serverName: this.serverName,
+          audience: this.config.audience,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Return undefined - request will fail with 401/403
+        return undefined;
+      }
+    }
+
+    return undefined;
   }
 
   /**
@@ -272,8 +317,10 @@ export class McpClient {
       Accept: 'application/json, text/event-stream',
     };
 
-    if (this.config.bearerToken) {
-      headers['Authorization'] = `Bearer ${this.config.bearerToken}`;
+    // Get auth header (static token or dynamic GCP identity token)
+    const authHeader = await this.getAuthHeader();
+    if (authHeader) {
+      headers['Authorization'] = authHeader;
     }
 
     const controller = new AbortController();
@@ -408,8 +455,10 @@ export class McpClient {
       Accept: 'application/json, text/event-stream',
     };
 
-    if (this.config.bearerToken) {
-      headers['Authorization'] = `Bearer ${this.config.bearerToken}`;
+    // Get auth header (static token or dynamic GCP identity token)
+    const authHeader = await this.getAuthHeader();
+    if (authHeader) {
+      headers['Authorization'] = authHeader;
     }
 
     if (this.sessionId) {
@@ -754,8 +803,10 @@ export class McpClient {
       Accept: 'application/json, text/event-stream',
     };
 
-    if (this.config.bearerToken) {
-      headers['Authorization'] = `Bearer ${this.config.bearerToken}`;
+    // Get auth header (static token or dynamic GCP identity token)
+    const authHeader = await this.getAuthHeader();
+    if (authHeader) {
+      headers['Authorization'] = authHeader;
     }
 
     // AC-S2: Send session ID on subsequent requests

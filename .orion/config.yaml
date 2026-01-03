@@ -59,6 +59,8 @@ mcp_servers:
     description: "Google Imagen - image generation via Vertex AI (Imagen 3/4/4 Ultra)"
     url: "https://mcp-imagen-201626763325.us-central1.run.app/mcp"
     headers: {}
+    # Cloud Run requires IAM auth - fetch identity token at runtime
+    authType: gcp_identity
     # Preferred defaults (pass to tool calls when not specified by user)
     defaults:
       model: "imagen-4.0-generate-001"  # Imagen 4 - best quality
@@ -70,6 +72,8 @@ mcp_servers:
     description: "Google Veo - video generation via Vertex AI (Veo 2/3/3.1)"
     url: "https://mcp-veo-201626763325.us-central1.run.app/mcp"
     headers: {}
+    # Cloud Run requires IAM auth - fetch identity token at runtime
+    authType: gcp_identity
     # Preferred defaults (pass to tool calls when not specified by user)
     defaults:
       model: "veo-3.1-generate-preview"  # Veo 3.1 - best quality with audio
