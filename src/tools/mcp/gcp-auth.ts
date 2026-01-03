@@ -5,16 +5,20 @@
  * (--no-allow-unauthenticated), we need to fetch an identity token.
  *
  * This works in both environments:
- * - Local development: Uses Application Default Credentials (ADC) from gcloud CLI
- * - GCP (Cloud Run/GCE): Uses metadata server
+ * - Local development: Uses `gcloud auth print-identity-token` CLI
+ * - GCP (Cloud Run/GCE): Uses metadata server or service account
  *
  * The token is cached and refreshed 5 minutes before expiry.
  *
  * @see https://cloud.google.com/run/docs/authenticating/service-to-service
  */
 
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { GoogleAuth } from 'google-auth-library';
 import { logger } from '../../utils/logger.js';
+
+const execAsync = promisify(exec);
 
 /** Token refresh buffer (refresh 5 min before expiry) */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
@@ -36,13 +40,85 @@ function getAuthClient(): GoogleAuth {
 }
 
 /**
+ * Parse JWT expiry from token.
+ */
+function parseTokenExpiry(token: string): number {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+    return payload.exp * 1000; // Convert to ms
+  } catch {
+    // Default to 50 minutes (tokens typically last 1 hour)
+    return Date.now() + 50 * 60 * 1000;
+  }
+}
+
+/**
+ * Try to get identity token using google-auth-library (works on GCP).
+ */
+async function tryGoogleAuthLibrary(audience: string): Promise<string | null> {
+  try {
+    const auth = getAuthClient();
+    const client = await auth.getIdTokenClient(audience);
+    const headers = await client.getRequestHeaders();
+    
+    const authHeader = headers['Authorization'] || headers['authorization'];
+    if (authHeader?.startsWith('Bearer ')) {
+      return authHeader.slice(7);
+    }
+    return null;
+  } catch (error) {
+    logger.debug({
+      event: 'gcp.auth.library_failed',
+      audience,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/**
+ * Fallback: Get identity token using gcloud CLI (works locally).
+ */
+async function tryGcloudCli(audience: string): Promise<string | null> {
+  try {
+    const { stdout, stderr } = await execAsync(
+      `gcloud auth print-identity-token --audiences=${audience}`,
+      { timeout: 10000 }
+    );
+    
+    if (stderr && !stdout.trim()) {
+      logger.warn({
+        event: 'gcp.auth.gcloud_stderr',
+        stderr: stderr.slice(0, 200),
+      });
+      return null;
+    }
+    
+    const token = stdout.trim();
+    if (token && token.includes('.')) {
+      return token;
+    }
+    return null;
+  } catch (error) {
+    logger.debug({
+      event: 'gcp.auth.gcloud_failed',
+      audience,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/**
  * Fetch a GCP identity token for the given audience.
  *
- * Works in both local development (via gcloud ADC) and on GCP (via metadata server).
+ * Tries multiple methods in order:
+ * 1. google-auth-library (works on GCP, service accounts)
+ * 2. gcloud CLI (works locally with user credentials)
  *
  * @param audience - The target service URL (e.g., https://mcp-imagen-xxx.run.app)
  * @returns Identity token string
- * @throws Error if authentication fails
+ * @throws Error if all methods fail
  */
 export async function getGcpIdentityToken(audience: string): Promise<string> {
   // Check cache
@@ -51,47 +127,38 @@ export async function getGcpIdentityToken(audience: string): Promise<string> {
     return cached.token;
   }
 
-  try {
-    const auth = getAuthClient();
-    const client = await auth.getIdTokenClient(audience);
-    const headers = await client.getRequestHeaders();
-    
-    // Extract token from "Bearer xxx" header
-    const authHeader = headers['Authorization'] || headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('No Authorization header returned from getRequestHeaders');
-    }
-    
-    const token = authHeader.slice(7);
+  // Try google-auth-library first (works on GCP)
+  let token = await tryGoogleAuthLibrary(audience);
+  
+  // Fallback to gcloud CLI (works locally)
+  if (!token) {
+    token = await tryGcloudCli(audience);
+  }
 
-    // Parse JWT to get expiry (tokens are typically valid for 1 hour)
-    try {
-      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-      const expiresAt = payload.exp * 1000; // Convert to ms
-
-      // Cache the token
-      tokenCache.set(audience, { token, expiresAt });
-
-      logger.debug({
-        event: 'gcp.identity_token.fetched',
-        audience,
-        expiresIn: Math.round((expiresAt - Date.now()) / 1000),
-      });
-    } catch {
-      // If we can't parse expiry, cache for 50 minutes (tokens last 1 hour)
-      tokenCache.set(audience, { token, expiresAt: Date.now() + 50 * 60 * 1000 });
-    }
-
-    return token;
-  } catch (error) {
+  if (!token) {
+    const error = new Error(
+      'Failed to get GCP identity token. ' +
+      'Run "gcloud auth login" and ensure you have access to the target service.'
+    );
     logger.error({
-      event: 'gcp.identity_token.failed',
+      event: 'gcp.identity_token.all_methods_failed',
       audience,
-      error: error instanceof Error ? error.message : String(error),
-      hint: 'Run "gcloud auth application-default login" for local development',
+      hint: 'Run "gcloud auth login" for local development',
     });
     throw error;
   }
+
+  // Cache the token
+  const expiresAt = parseTokenExpiry(token);
+  tokenCache.set(audience, { token, expiresAt });
+
+  logger.debug({
+    event: 'gcp.identity_token.fetched',
+    audience,
+    expiresIn: Math.round((expiresAt - Date.now()) / 1000),
+  });
+
+  return token;
 }
 
 /**
@@ -99,8 +166,8 @@ export async function getGcpIdentityToken(audience: string): Promise<string> {
  */
 export async function isGcpAuthAvailable(): Promise<boolean> {
   try {
-    const auth = getAuthClient();
-    await auth.getCredentials();
+    // Try a quick gcloud check
+    await execAsync('gcloud auth list --format="value(account)"', { timeout: 5000 });
     return true;
   } catch {
     return false;
