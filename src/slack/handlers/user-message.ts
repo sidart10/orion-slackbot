@@ -641,13 +641,18 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             }
           }
 
-          // Upload any images from the response inline
+          // Upload any images from sources inline (GCS URLs from Imagen/Veo)
+          const sourceUrls = (agentResult?.sources ?? [])
+            .filter((s) => s.url)
+            .map((s) => s.url as string)
+            .join(' ');
+          const allUrls = `${fullResponse} ${sourceUrls}`;
           try {
             const imageResults = await uploadImagesFromResponse(
               client,
               channelId,
               threadTs ?? message.ts,
-              fullResponse
+              allUrls
             );
             if (imageResults.length > 0) {
               logger.info({
