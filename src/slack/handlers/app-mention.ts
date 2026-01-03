@@ -35,6 +35,7 @@ import { runOrionAgent, type AgentResult } from '../../agent/orion.js';
 import { loadAgentPrompt } from '../../agent/loader.js';
 import { config } from '../../config/environment.js';
 import { getChannelName, getUserDisplayName } from '../identity.js';
+import { uploadImagesFromResponse } from '../utils/image-upload.js';
 import {
   setSummarizeToolContext,
   clearSummarizeToolContext,
@@ -424,6 +425,32 @@ export async function handleAppMention({
               });
             }
           }
+        }
+
+        // Upload any images from the response inline
+        try {
+          const imageResults = await uploadImagesFromResponse(
+            client,
+            channelId,
+            threadTs,
+            fullResponse
+          );
+          if (imageResults.length > 0) {
+            logger.info({
+              event: 'images_uploaded',
+              channelId,
+              threadTs,
+              total: imageResults.length,
+              successful: imageResults.filter((r) => r.success).length,
+              traceId: trace.id,
+            });
+          }
+        } catch (imageError) {
+          logger.warn({
+            event: 'image_upload_failed',
+            error: imageError instanceof Error ? imageError.message : String(imageError),
+            traceId: trace.id,
+          });
         }
 
         // Post feedback buttons as follow-up message (AC#7)

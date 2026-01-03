@@ -56,6 +56,7 @@ import {
   setSummarizeToolContext,
   clearSummarizeToolContext,
 } from '../../tools/summarize/index.js';
+import { uploadImagesFromResponse } from '../utils/image-upload.js';
 import {
   setMemoryToolContext,
   clearMemoryToolContext,
@@ -638,6 +639,32 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
                 },
               });
             }
+          }
+
+          // Upload any images from the response inline
+          try {
+            const imageResults = await uploadImagesFromResponse(
+              client,
+              channelId,
+              threadTs ?? message.ts,
+              fullResponse
+            );
+            if (imageResults.length > 0) {
+              logger.info({
+                event: 'images_uploaded',
+                channelId,
+                threadTs,
+                total: imageResults.length,
+                successful: imageResults.filter((r) => r.success).length,
+                traceId: trace.id,
+              });
+            }
+          } catch (imageError) {
+            logger.warn({
+              event: 'image_upload_failed',
+              error: imageError instanceof Error ? imageError.message : String(imageError),
+              traceId: trace.id,
+            });
           }
 
           // Send feedback buttons as follow-up message (Story 1.8)
