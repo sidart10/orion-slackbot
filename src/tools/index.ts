@@ -35,3 +35,19 @@ export {
 
 // MCP
 export * from './mcp/index.js';
+
+// Summarize Tool (Story 7.6)
+export {
+  registerSummarizeTool,
+  setSummarizeToolContext,
+  clearSummarizeToolContext,
+  SUMMARIZE_TOOL_NAME,
+} from './summarize/index.js';
+
+// Memory Tool (Story 5.1)
+export {
+  registerMemoryTool,
+  setMemoryToolContext,
+  clearMemoryToolContext,
+  MEMORY_TOOL_NAME,
+} from './memory/index.js';

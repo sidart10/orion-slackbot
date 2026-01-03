@@ -378,11 +378,12 @@ Add discovery, summarization, and UX polish features to complete the Slack exper
 **Stories:**
 | Story | Title | Status | Priority |
 |-------|-------|--------|----------|
-| 7.1 | Dynamic Suggested Prompts | ready-for-dev | P2 |
-| 7.2 | Thread Summarization | ready-for-dev | P2 |
-| 7.3 | Contextual Tool Feedback | ready-for-dev | P1 |
-| 7.4 | Response Completion Indicators | ready-for-dev | P2 |
-| 7.5 | Fix Duplicate Response Bug | ready-for-dev | P0 |
+| 7.1 | Dynamic Suggested Prompts | done | P2 |
+| 7.2 | ~~Thread Summarization~~ | cancelled | - |
+| 7.3 | Contextual Tool Feedback | done | P1 |
+| 7.4 | Response Completion Indicators | done | P2 |
+| 7.5 | Fix Duplicate Response Bug | done | P0 |
+| 7.6 | Conversation Summarization (All types incl. threads) | ready-for-dev | P1 |
 
 **Note:** Foundational UX (FR47-50) moved to Epic 1/2 for day-1 integration:
 - FR47 (dynamic status) → Story 2.2 ✓ (enhanced in 7.3)
@@ -392,11 +393,12 @@ Add discovery, summarization, and UX polish features to complete the Slack exper
 - Citations → Story 2.7
 
 **Stories (Updated 2026-01-02):**
-- 7.1: Dynamic Suggested Prompts (context-aware)
-- 7.2: Thread Summarization on Demand
-- 7.3: Contextual Tool Feedback — "Using Composio Exa to search 'SF restaurants'..."
-- 7.4: Response Completion Indicators — ✅ on answered messages
-- 7.5: Fix Duplicate Response Bug — P0 bug, response appearing twice
+- 7.1: Dynamic Suggested Prompts (context-aware) ✅
+- 7.2: ~~Thread Summarization~~ — Merged into 7.6
+- 7.3: Contextual Tool Feedback — "Using MSCI Reports: Search Reports — 'Hulu'..." ✅
+- 7.4: Response Completion Indicators — ✅ on answered messages ✅
+- 7.5: Fix Duplicate Response Bug — P0 bug, response appearing twice ✅
+- 7.6: Conversation Summarization — Channels, Group DMs, DMs, Threads (context-aware)
 
 ---
 
@@ -426,10 +428,10 @@ Enable Orion to write and execute code when pre-built integrations don't exist.
 | 4 | ~~Subagents~~ | 0 | REMOVED |
 | 5 | Persistent Memory | 3 | MVP |
 | 6 | Skills & Extensions Framework | 3 | MVP |
-| 7 | Slack Polish | 5 (7.1-7.5) | MVP |
+| 7 | Slack Polish | 6 (7.1-7.6) | MVP |
 | 8 | Code Generation & Execution | TBD | Phase 2 |
 
-**MVP Total:** ~30 stories across 6 epics (Epic 4 removed)
+**MVP Total:** ~31 stories across 6 epics (Epic 4 removed)
 **Updated:** 2026-01-02 (Story 3.5 added per MCP lifecycle course correction)
 **Phase 2:** Epic 8 (deferred)
 
@@ -449,11 +451,12 @@ Foundational UX moved into Epic 1/2 for day-1 quality:
 
 | Story | Title | FRs/Notes |
 |-------|-------|-----------|
-| 7.1 | Dynamic Suggested Prompts | FR16 |
-| 7.2 | Thread Summarization | FR18 |
-| 7.3 | Contextual Tool Feedback | FR47 enhanced - rich status messages |
-| 7.4 | Response Completion Indicators | UX - ✅ reaction on completion |
-| 7.5 | Fix Duplicate Response Bug | P0 Bug - response appearing twice |
+| 7.1 | Dynamic Suggested Prompts | FR16 ✅ |
+| 7.2 | ~~Thread Summarization~~ | Merged into 7.6 |
+| 7.3 | Contextual Tool Feedback | FR47 enhanced - rich status messages ✅ |
+| 7.4 | Response Completion Indicators | UX - ✅ reaction on completion ✅ |
+| 7.5 | Fix Duplicate Response Bug | P0 Bug - response appearing twice ✅ |
+| 7.6 | Conversation Summarization | FR18 - All types: Channels, MPIMs, DMs, Threads |
 
 ---
 

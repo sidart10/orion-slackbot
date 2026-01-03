@@ -177,13 +177,36 @@ function normalizeToolError(error: ToolError): ToolError {
   return normalized;
 }
 
+/**
+ * Check if MCP response has structured data beyond content blocks.
+ * These fields often contain URLs for source extraction.
+ */
+function hasStructuredResultData(data: Record<string, unknown>): boolean {
+  // Common URL-bearing fields in MCP/web search responses
+  const urlBearingFields = ['results', 'links', 'sources', 'items', 'hits', 'matches', 'data'];
+  for (const field of urlBearingFields) {
+    if (field in data && Array.isArray(data[field])) return true;
+  }
+  return false;
+}
+
 function toClaudeToolContent(data: unknown): string {
   if (typeof data === 'string') return data;
 
   if (data && typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+
+    // If there's structured data with potential URLs (e.g., search results),
+    // keep the full JSON so extractUrlSourcesFromResult can parse it.
+    // This is critical for source citations from web search, MCP tools, etc.
+    if (hasStructuredResultData(obj)) {
+      return JSON.stringify(data);
+    }
+
+    // For simple MCP responses with only content blocks, extract readable text.
     // Common MCP success shape: { content: [{ type: 'text', text: '...' }, ...] }
-    if ('content' in data && Array.isArray((data as { content?: unknown }).content)) {
-      const blocks = (data as { content: Array<{ text?: unknown }> }).content;
+    if ('content' in obj && Array.isArray(obj.content)) {
+      const blocks = obj.content as Array<{ text?: unknown }>;
       const texts = blocks
         .map((b) => (typeof b.text === 'string' ? b.text : ''))
         .filter((t) => t.length > 0);

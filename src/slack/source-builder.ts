@@ -129,7 +129,7 @@ export async function buildThreadSources(
 /**
  * Filter sources to only include displayable ones.
  * - Memory sources: always shown (implicit trust)
- * - Tool sources: always shown (no URLs, but user wants to know what was called)
+ * - Tool sources: only show if NO URL (Claude cites URLs inline in response)
  * - Thread/file sources: must have URLs to be clickable
  *
  * @param sources - Array of context sources
@@ -137,11 +137,11 @@ export async function buildThreadSources(
  */
 export function filterClickableSources(sources: ContextSource[]): ContextSource[] {
   return sources.filter((s) => {
-    // Memory sources don't need URLs (implicit trust)
+    // Memory sources: always show (implicit trust)
     if (s.type === 'memory') return true;
-    // Tool sources don't need URLs (user wants to see what was called)
-    if (s.type === 'tool') return true;
-    // Thread/file sources need URLs to be clickable
+    // Tool sources: only show if NO URL (Claude cites URLs inline)
+    if (s.type === 'tool') return !s.url;
+    // Thread/file sources: must have URL to be clickable
     return !!s.url;
   });
 }

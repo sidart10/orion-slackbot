@@ -70,7 +70,7 @@ function createMockMessageStream(params: {
 }
 
 // Import after mocks
-import { executeAgentLoop, type AgentLoopOptions } from './loop.js';
+import { executeAgentLoop, type AgentLoopOptions, extractMarkdownLinks, formatToolDisplayName, summarizeToolInput } from './loop.js';
 
 describe('executeAgentLoop', () => {
   const baseOptions: AgentLoopOptions = {
@@ -1155,6 +1155,314 @@ describe('executeAgentLoop', () => {
         })
       );
     });
+  });
+
+  // Story: Source Citations v2 - Markdown link extraction and tool source deduplication
+  describe('source citations v2', () => {
+    it('extracts markdown links from tool results and adds to sources', async () => {
+      // Tool returns markdown-formatted content with links
+      const executeTool = vi.fn(async () => ({
+        success: true,
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: 'Check out [Chatbot Arena](https://lmarena.ai) and [Polymarket](https://polymarket.com/markets) for more info.',
+            },
+          ],
+        },
+      }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: { type: 'tool_use', id: 'toolu_exa', name: 'exa__web_search', input: { query: 'AI benchmarks' } },
+              },
+              { type: 'content_block_stop', index: 0 },
+              { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { input_tokens: 10, output_tokens: 5 } },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Here are the results.' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 20, output_tokens: 10 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Search for AI benchmarks', { ...baseOptions, executeTool });
+      let result;
+      while (true) {
+        const next = await gen.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+      }
+
+      // Should have extracted markdown URLs as sources
+      const urlSources = result.sources.filter((s: { url?: string }) => s.url);
+      expect(urlSources.length).toBeGreaterThanOrEqual(2);
+      expect(urlSources.some((s: { url: string }) => s.url.includes('lmarena.ai'))).toBe(true);
+      expect(urlSources.some((s: { url: string }) => s.url.includes('polymarket.com'))).toBe(true);
+    });
+
+    it('deduplicates same tool with different queries as separate sources', async () => {
+      // Two tool calls with different queries should both appear
+      const executeTool = vi.fn(async () => ({ success: true, data: { results: [] } }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              // First tool call
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: { type: 'tool_use', id: 'toolu_1', name: 'audience-manager__search', input: { query: 'NFL fans' } },
+              },
+              { type: 'content_block_stop', index: 0 },
+              // Second tool call with different query
+              {
+                type: 'content_block_start',
+                index: 1,
+                content_block: { type: 'tool_use', id: 'toolu_2', name: 'audience-manager__search', input: { query: 'NBA fans' } },
+              },
+              { type: 'content_block_stop', index: 1 },
+              { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { input_tokens: 10, output_tokens: 10 } },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Found both audiences.' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 30, output_tokens: 10 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Find NFL and NBA fans', { ...baseOptions, executeTool });
+      let result;
+      while (true) {
+        const next = await gen.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+      }
+
+      // Both tool calls should appear as separate sources (different queries)
+      const toolSources = result.sources.filter((s: { type: string }) => s.type === 'tool');
+      expect(toolSources.length).toBe(2);
+      expect(toolSources.some((s: { toolContext?: string }) => s.toolContext?.includes('NFL'))).toBe(true);
+      expect(toolSources.some((s: { toolContext?: string }) => s.toolContext?.includes('NBA'))).toBe(true);
+    });
+
+    it('deduplicates same tool with same query as single source', async () => {
+      // Two identical tool calls should dedupe to one
+      const executeTool = vi.fn(async () => ({ success: true, data: { results: [] } }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: { type: 'tool_use', id: 'toolu_1', name: 'search_tool', input: { query: 'same query' } },
+              },
+              { type: 'content_block_stop', index: 0 },
+              {
+                type: 'content_block_start',
+                index: 1,
+                content_block: { type: 'tool_use', id: 'toolu_2', name: 'search_tool', input: { query: 'same query' } },
+              },
+              { type: 'content_block_stop', index: 1 },
+              { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { input_tokens: 10, output_tokens: 10 } },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Done' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 30, output_tokens: 5 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Search twice', { ...baseOptions, executeTool });
+      let result;
+      while (true) {
+        const next = await gen.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+      }
+
+      // Same query twice should dedupe to one source
+      const toolSources = result.sources.filter((s: { type: string }) => s.type === 'tool');
+      expect(toolSources.length).toBe(1);
+    });
+
+    it('shows "data lookup" fallback when tool has no extractable context', async () => {
+      // Tool with empty input object
+      const executeTool = vi.fn(async () => ({ success: true, data: { id: 123 } }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: { type: 'tool_use', id: 'toolu_empty', name: 'get_user_data', input: {} },
+              },
+              { type: 'content_block_stop', index: 0 },
+              { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { input_tokens: 10, output_tokens: 5 } },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Got the data.' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 20, output_tokens: 5 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Get my data', { ...baseOptions, executeTool });
+      let result;
+      while (true) {
+        const next = await gen.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+      }
+
+      // Tool source should show "data lookup" fallback
+      const toolSource = result.sources.find((s: { type: string }) => s.type === 'tool');
+      expect(toolSource).toBeDefined();
+      expect(toolSource.toolContext).toBe('data lookup');
+    });
+  });
+});
+
+// Unit tests for exported helper functions (Source Citations v2)
+describe('extractMarkdownLinks', () => {
+  it('extracts single markdown link', () => {
+    const text = 'Check out [Example](https://example.com) for more.';
+    const links = extractMarkdownLinks(text);
+    expect(links).toEqual([{ title: 'Example', url: 'https://example.com' }]);
+  });
+
+  it('extracts multiple markdown links', () => {
+    const text = 'Visit [Site A](https://a.com) and [Site B](http://b.com/path).';
+    const links = extractMarkdownLinks(text);
+    expect(links).toEqual([
+      { title: 'Site A', url: 'https://a.com' },
+      { title: 'Site B', url: 'http://b.com/path' },
+    ]);
+  });
+
+  it('returns empty array for text without links', () => {
+    const text = 'No links here, just plain text.';
+    const links = extractMarkdownLinks(text);
+    expect(links).toEqual([]);
+  });
+
+  it('handles malformed markdown (missing closing paren)', () => {
+    const text = 'Broken [link](https://example.com and more text.';
+    const links = extractMarkdownLinks(text);
+    expect(links).toEqual([]); // Should not match incomplete pattern
+  });
+
+  it('handles malformed markdown (missing title)', () => {
+    const text = 'Broken [](https://example.com) link.';
+    const links = extractMarkdownLinks(text);
+    expect(links).toEqual([]); // Empty title should not produce result
+  });
+
+  it('extracts links with complex URLs', () => {
+    const text = 'See [Docs](https://docs.example.com/api/v2?query=test&page=1#section).';
+    const links = extractMarkdownLinks(text);
+    expect(links).toEqual([
+      { title: 'Docs', url: 'https://docs.example.com/api/v2?query=test&page=1#section' },
+    ]);
+  });
+
+  it('handles multiple calls without state leakage (no regex lastIndex issues)', () => {
+    // Call twice to ensure stateless behavior
+    const text1 = '[A](https://a.com)';
+    const text2 = '[B](https://b.com)';
+
+    const links1 = extractMarkdownLinks(text1);
+    const links2 = extractMarkdownLinks(text2);
+
+    expect(links1).toEqual([{ title: 'A', url: 'https://a.com' }]);
+    expect(links2).toEqual([{ title: 'B', url: 'https://b.com' }]);
+  });
+});
+
+describe('formatToolDisplayName', () => {
+  it('formats MCP tool names (server__tool pattern)', () => {
+    expect(formatToolDisplayName('msci-reports__search_reports')).toBe('Msci Reports: Search Reports');
+  });
+
+  it('formats static tool names', () => {
+    expect(formatToolDisplayName('get_weather')).toBe('Get Weather');
+  });
+});
+
+describe('summarizeToolInput', () => {
+  it('extracts query parameter', () => {
+    expect(summarizeToolInput({ query: 'NFL fans' })).toBe('NFL fans');
+  });
+
+  it('extracts search_query parameter', () => {
+    expect(summarizeToolInput({ search_query: 'basketball' })).toBe('basketball');
+  });
+
+  it('returns empty string for empty object', () => {
+    expect(summarizeToolInput({})).toBe('');
+  });
+
+  it('returns empty string for null/undefined', () => {
+    expect(summarizeToolInput(null)).toBe('');
+    expect(summarizeToolInput(undefined)).toBe('');
+  });
+
+  it('truncates long queries with ellipsis', () => {
+    const longQuery = 'A'.repeat(100);
+    const result = summarizeToolInput({ query: longQuery });
+    expect(result.length).toBeLessThanOrEqual(61); // 60 chars + ellipsis
+    expect(result.endsWith('…')).toBe(true);
   });
 });
 

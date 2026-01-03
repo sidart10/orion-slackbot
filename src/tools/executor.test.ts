@@ -150,6 +150,58 @@ describe('executeTool', () => {
       expect(result.data).toBe(JSON.stringify(mcpResponse));
     }
   });
+
+  it('preserves structured data with URL-bearing fields for source extraction', async () => {
+    // Web search / MCP responses often have results arrays with URLs
+    const webSearchResponse = {
+      content: [
+        { type: 'text', text: 'Here are the search results...' },
+      ],
+      results: [
+        { url: 'https://example.com/page1', title: 'Page 1' },
+        { url: 'https://example.com/page2', title: 'Page 2' },
+      ],
+    };
+    const route = vi.fn().mockResolvedValue({ success: true, data: webSearchResponse } satisfies ToolResult);
+
+    const resultPromise = executeTool('web_search', 'id-8', {}, route, { traceId: 'trace-8' });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // Must preserve full JSON so extractUrlSourcesFromResult can parse URLs
+      expect(result.data).toBe(JSON.stringify(webSearchResponse));
+      // Verify the JSON is parseable and contains URL data
+      const parsed = JSON.parse(result.data);
+      expect(parsed.results).toHaveLength(2);
+      expect(parsed.results[0].url).toBe('https://example.com/page1');
+    }
+  });
+
+  it('preserves structured data with links array for source extraction', async () => {
+    // Alternative structure with 'links' field
+    const mcpResponseWithLinks = {
+      content: [
+        { type: 'text', text: 'Found some links' },
+      ],
+      links: [
+        { url: 'https://docs.example.com', title: 'Documentation' },
+      ],
+    };
+    const route = vi.fn().mockResolvedValue({ success: true, data: mcpResponseWithLinks } satisfies ToolResult);
+
+    const resultPromise = executeTool('search_tool', 'id-9', {}, route, { traceId: 'trace-9' });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const parsed = JSON.parse(result.data);
+      expect(parsed.links).toHaveLength(1);
+      expect(parsed.links[0].url).toBe('https://docs.example.com');
+    }
+  });
 });
 
 

@@ -1,6 +1,18 @@
 # Story 7.2: Thread Summarization on Demand
 
-Status: ready-for-dev
+Status: cancelled
+
+> **⚠️ MERGED INTO STORY 7-6**
+> 
+> This story has been merged into **Story 7-6: Conversation Summarization**.
+> 
+> Story 7-6 handles ALL conversation types (channels, MPIMs, DMs, AND threads) with context-aware detection. When a user is in a thread, 7-6 detects the `thread_ts` and uses `conversations.replies`.
+> 
+> See: `7-6-conversation-summarization.md`
+
+---
+
+## Original Story (Archived Below)
 
 ## Story
 

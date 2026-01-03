@@ -458,6 +458,131 @@ describe('Assistant User Message Handler', () => {
     );
   });
 
+  describe('Completion indicator (Story 7.4)', () => {
+    it('should add ✅ reaction on successful completion (AC1)', async () => {
+      const args = createAssistantArgs();
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+      };
+      client.reactions.add = vi.fn().mockResolvedValue(undefined);
+      client.reactions.remove = vi.fn().mockResolvedValue(undefined);
+
+      await handleAssistantUserMessage(args);
+
+      // Should add white_check_mark after successful completion
+      expect(client.reactions.add).toHaveBeenCalledWith({
+        channel: 'D123456',
+        timestamp: '1234567890.123456',
+        name: 'white_check_mark',
+      });
+    });
+
+    it('should NOT add ✅ reaction on error path (AC2)', async () => {
+      // Make runOrionAgent throw an error
+      runOrionAgent.mockImplementationOnce(function* () {
+        throw new Error('Agent error');
+      });
+
+      const args = createAssistantArgs();
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn> };
+      };
+      client.reactions.add = vi.fn().mockResolvedValue(undefined);
+
+      await expect(handleAssistantUserMessage(args)).rejects.toThrow('Agent error');
+
+      // Should NOT have called reactions.add with white_check_mark
+      const addCalls = client.reactions.add.mock.calls;
+      const checkmarkCalls = addCalls.filter(
+        (call: Array<{ name?: string }>) => call[0]?.name === 'white_check_mark'
+      );
+      expect(checkmarkCalls).toHaveLength(0);
+    });
+
+    it('should gracefully handle ✅ reaction failure (AC3)', async () => {
+      const args = createAssistantArgs();
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+      };
+
+      // Make white_check_mark reaction fail
+      client.reactions.add = vi.fn().mockImplementation(({ name }: { name: string }) => {
+        if (name === 'white_check_mark') {
+          return Promise.reject(new Error('already_reacted'));
+        }
+        return Promise.resolve(undefined);
+      });
+      client.reactions.remove = vi.fn().mockResolvedValue(undefined);
+
+      // Should NOT throw - handler completes successfully
+      await expect(handleAssistantUserMessage(args)).resolves.not.toThrow();
+
+      // Should have logged warning for failed reaction
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'completion_reaction_failed',
+        })
+      );
+    });
+
+    it('should add ✅ AFTER 👀 is removed (reaction order)', async () => {
+      const args = createAssistantArgs();
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+      };
+
+      const callOrder: string[] = [];
+      client.reactions.remove = vi.fn().mockImplementation(({ name }: { name: string }) => {
+        callOrder.push(`remove:${name}`);
+        return Promise.resolve(undefined);
+      });
+      client.reactions.add = vi.fn().mockImplementation(({ name }: { name: string }) => {
+        callOrder.push(`add:${name}`);
+        return Promise.resolve(undefined);
+      });
+
+      await handleAssistantUserMessage(args);
+
+      // Verify order: eyes removed, then checkmark added
+      const eyesRemoveIndex = callOrder.indexOf('remove:eyes');
+      const checkmarkAddIndex = callOrder.indexOf('add:white_check_mark');
+      expect(eyesRemoveIndex).toBeLessThan(checkmarkAddIndex);
+    });
+
+    it('should add ✅ AFTER feedback block is posted (AC1 full order)', async () => {
+      const args = createAssistantArgs();
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+        chat: { postMessage: ReturnType<typeof vi.fn> };
+      };
+
+      const callOrder: string[] = [];
+      
+      // Track postMessage calls for feedback block
+      client.chat.postMessage = vi.fn().mockImplementation((params: { metadata?: { event_type?: string } }) => {
+        if (params.metadata?.event_type === 'orion_response') {
+          callOrder.push('postMessage:feedback');
+        }
+        return Promise.resolve({ ts: '123.456' });
+      });
+
+      client.reactions.add = vi.fn().mockImplementation(({ name }: { name: string }) => {
+        callOrder.push(`add:${name}`);
+        return Promise.resolve(undefined);
+      });
+      client.reactions.remove = vi.fn().mockResolvedValue(undefined);
+
+      await handleAssistantUserMessage(args);
+
+      // AC1: ✅ must be added AFTER feedback block is posted
+      const feedbackIndex = callOrder.indexOf('postMessage:feedback');
+      const checkmarkIndex = callOrder.indexOf('add:white_check_mark');
+      expect(feedbackIndex).toBeGreaterThan(-1);
+      expect(checkmarkIndex).toBeGreaterThan(-1);
+      expect(feedbackIndex).toBeLessThan(checkmarkIndex);
+    });
+  });
+
   it('should add eyes emoji on message receipt', async () => {
     const mockReactionsAdd = vi.fn().mockResolvedValue(undefined);
     const args = createAssistantArgs();
@@ -796,6 +921,126 @@ describe('Assistant User Message Handler', () => {
       await handleAssistantUserMessage(args);
 
       expect(mockCompact).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Suggested Prompts (Story 7.1)', () => {
+    it('should set follow-up prompts after successful response (AC#2)', async () => {
+      const mockSetSuggestedPrompts = vi.fn().mockResolvedValue(undefined);
+      const args = createAssistantArgs();
+      (args as unknown as { setSuggestedPrompts: typeof mockSetSuggestedPrompts }).setSuggestedPrompts =
+        mockSetSuggestedPrompts;
+
+      await handleAssistantUserMessage(args);
+
+      // Should call setSuggestedPrompts with follow-up prompts
+      expect(mockSetSuggestedPrompts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'What next?',
+          prompts: expect.arrayContaining([
+            expect.objectContaining({
+              title: expect.any(String),
+              message: expect.any(String),
+            }),
+          ]),
+        })
+      );
+    });
+
+    it('should set research follow-up prompts when sources gathered (AC#2)', async () => {
+      // Mock agent to return sources (triggers 'research' lastResponseType)
+      runOrionAgent.mockImplementation(function* () {
+        yield 'Hello ';
+        yield 'from Orion!';
+        return {
+          inputTokens: 100,
+          outputTokens: 50,
+          durationMs: 1500,
+          nfr1Met: true,
+          sources: [
+            {
+              type: 'file',
+              title: 'Test Source',
+              url: 'https://example.com',
+              excerpt: 'Test',
+            },
+          ],
+        };
+      });
+
+      const mockSetSuggestedPrompts = vi.fn().mockResolvedValue(undefined);
+      const args = createAssistantArgs();
+      (args as unknown as { setSuggestedPrompts: typeof mockSetSuggestedPrompts }).setSuggestedPrompts =
+        mockSetSuggestedPrompts;
+
+      await handleAssistantUserMessage(args);
+
+      // Should call setSuggestedPrompts - research prompts expected when sources present
+      expect(mockSetSuggestedPrompts).toHaveBeenCalled();
+      const call = mockSetSuggestedPrompts.mock.calls[0]?.[0] as { prompts?: Array<{ title?: string }> };
+      expect(call.prompts).toBeDefined();
+      // Research follow-ups should include terms like "deeper", "compare", "sources", "summary"
+      const titles = call.prompts?.map((p) => p.title?.toLowerCase()) ?? [];
+      expect(
+        titles.some((t) => t?.includes('deep') || t?.includes('compare') || t?.includes('source') || t?.includes('summary'))
+      ).toBe(true);
+    });
+
+    it('should set error recovery prompts on agent error (AC#4)', async () => {
+      // Make runOrionAgent throw an error
+      runOrionAgent.mockImplementationOnce(function* () {
+        throw new Error('Agent error');
+      });
+
+      const mockSetSuggestedPrompts = vi.fn().mockResolvedValue(undefined);
+      const args = createAssistantArgs();
+      (args as unknown as { setSuggestedPrompts: typeof mockSetSuggestedPrompts }).setSuggestedPrompts =
+        mockSetSuggestedPrompts;
+
+      await expect(handleAssistantUserMessage(args)).rejects.toThrow('Agent error');
+
+      // Should still set error recovery prompts
+      expect(mockSetSuggestedPrompts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Try something else:',
+          prompts: expect.arrayContaining([
+            expect.objectContaining({
+              title: expect.any(String),
+              message: expect.any(String),
+            }),
+          ]),
+        })
+      );
+    });
+
+    it('should set max 4 prompts (AC#5)', async () => {
+      const mockSetSuggestedPrompts = vi.fn().mockResolvedValue(undefined);
+      const args = createAssistantArgs();
+      (args as unknown as { setSuggestedPrompts: typeof mockSetSuggestedPrompts }).setSuggestedPrompts =
+        mockSetSuggestedPrompts;
+
+      await handleAssistantUserMessage(args);
+
+      expect(mockSetSuggestedPrompts).toHaveBeenCalled();
+      const call = mockSetSuggestedPrompts.mock.calls[0]?.[0] as { prompts?: unknown[] };
+      expect(call.prompts?.length).toBeLessThanOrEqual(4);
+    });
+
+    it('should gracefully handle setSuggestedPrompts failure', async () => {
+      const mockSetSuggestedPrompts = vi.fn().mockRejectedValue(new Error('Prompts failed'));
+      const args = createAssistantArgs();
+      (args as unknown as { setSuggestedPrompts: typeof mockSetSuggestedPrompts }).setSuggestedPrompts =
+        mockSetSuggestedPrompts;
+
+      // Should NOT throw - handler completes successfully
+      await expect(handleAssistantUserMessage(args)).resolves.not.toThrow();
+
+      // Should have logged warning
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'follow_up_prompts_failed',
+        })
+      );
     });
   });
 });

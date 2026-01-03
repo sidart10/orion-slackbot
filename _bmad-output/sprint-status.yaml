@@ -111,17 +111,18 @@ development_status:
   # WORK ORDER (by priority):
   7-5-duplicate-response-bug: done               # ✅ P0 BUG: Fixed 2026-01-02 (race condition in SDK + loop reset)
   7-3-contextual-tool-feedback: done               # ✅ P1: Rich tool status messages - Code review passed 2026-01-02
-  7-4-response-completion-indicators: ready-for-dev  # P2: ✅ on answered messages
-  7-1-dynamic-suggested-prompts: ready-for-dev   # P2: Discovery prompts
-  7-2-thread-summarization: ready-for-dev        # P2: Thread summary
+  7-4-response-completion-indicators: done  # P2: ✅ on answered messages - Code review passed 2026-01-02; manual Slack verification pending
+  7-1-dynamic-suggested-prompts: done              # ✅ P2: Discovery prompts - Code review passed 2026-01-02
+  7-2-thread-summarization: cancelled            # Merged into 7-6 (conversation summarization handles threads too)
+  7-6-conversation-summarization: done    # ✅ P1: Code review fixes applied 2026-01-03 (61 tests passing); manual Slack verification pending
   epic-7-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 5: Persistent Memory ⏸️ BACKLOG - after Epic 7
+  # Epic 5: Persistent Memory 🔄 IN PROGRESS
   # ═══════════════════════════════════════════════════════════════════════════
-  epic-5: backlog
-  5-1-memory-tool-handler: ready-for-dev
-  5-2-memory-scopes-path-builders: ready-for-dev
+  epic-5: in-progress
+  5-1-memory-tool-handler: done              # ✅ Code review fixes applied 2026-01-03
+  5-2-memory-scopes-path-builders: review
   5-3-memory-auto-check: ready-for-dev
   epic-5-retrospective: optional
 

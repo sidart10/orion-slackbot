@@ -328,17 +328,34 @@ describe('filterClickableSources', () => {
     expect(result[1]?.type).toBe('tool');
   });
 
-  it('keeps all sources with URLs regardless of type', () => {
+  // Source Citations v2: Tool sources WITH URLs should be filtered out
+  // (Claude cites URLs inline in response)
+  it('filters out tool sources WITH URLs (v2 fix)', () => {
+    const sources: ContextSource[] = [
+      { type: 'tool', title: 'Exa Result', reference: 'exa', url: 'https://example.com' }, // Should be filtered
+      { type: 'tool', title: 'Audience Manager', reference: 'audience-manager' }, // Should pass (no URL)
+    ];
+
+    const result = filterClickableSources(sources);
+
+    // Only tool source WITHOUT URL should pass
+    expect(result).toHaveLength(1);
+    expect(result[0]?.title).toBe('Audience Manager');
+  });
+
+  it('keeps thread/file sources with URLs but not tool sources with URLs', () => {
     const sources: ContextSource[] = [
       { type: 'thread', title: 'Thread', reference: 'r1', url: 'https://slack.com/1' },
-      { type: 'tool', title: 'Tool result', reference: 'r2', url: 'https://docs.com/page' },
+      { type: 'tool', title: 'Tool with URL', reference: 'r2', url: 'https://docs.com/page' }, // Filtered out (v2)
       { type: 'file', title: 'File', reference: 'r3', url: 'https://confluence.com/doc' },
       { type: 'memory', title: 'Memory', reference: 'r4' }, // No URL but memory type
     ];
 
     const result = filterClickableSources(sources);
 
-    expect(result).toHaveLength(4);
+    // Tool with URL should be filtered out
+    expect(result).toHaveLength(3);
+    expect(result.map(s => s.type)).toEqual(['thread', 'file', 'memory']);
   });
 });
 

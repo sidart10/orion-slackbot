@@ -172,15 +172,34 @@ export function summarizeToolInput(input: unknown): string {
 }
 
 /**
+ * Extract URLs from markdown-formatted text.
+ * Handles patterns like: [Chatbot Arena](https://lmarena.ai)
+ *
+ * Exported for testing (Story: Source Citations v2).
+ */
+export function extractMarkdownLinks(text: string): Array<{ title: string; url: string }> {
+  const links: Array<{ title: string; url: string }> = [];
+  // Use matchAll for thread-safe, stateless regex matching
+  const matches = text.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g);
+  for (const match of matches) {
+    if (match[1] && match[2]) {
+      links.push({ title: match[1], url: match[2] });
+    }
+  }
+  return links;
+}
+
+/**
  * Extract URL sources from tool results.
  * Looks for common patterns in web search, MCP, and other tool responses.
+ * Also extracts markdown-formatted links from text content (e.g., Exa search results).
  */
 function extractUrlSourcesFromResult(
   toolName: string,
   result: unknown
 ): ContextSource[] {
   const sources: ContextSource[] = [];
-  if (!result || typeof result !== 'object') return sources;
+  if (!result) return sources;
 
   // Parse stringified JSON if needed
   let data = result;
@@ -188,9 +207,22 @@ function extractUrlSourcesFromResult(
     try {
       data = JSON.parse(result);
     } catch {
-      return sources;
+      // Not JSON - check if it contains markdown links directly
+      const mdLinks = extractMarkdownLinks(result);
+      for (const link of mdLinks) {
+        sources.push({
+          type: 'tool',
+          title: link.title.slice(0, 80),
+          reference: toolName,
+          url: link.url,
+        });
+      }
+      return sources.slice(0, 50);
     }
   }
+
+  // After parsing, check if we have an object to search
+  if (typeof data !== 'object' || data === null) return sources;
 
   // Recursively find objects with url/title patterns
   const seen = new Set<string>();
@@ -221,7 +253,39 @@ function extractUrlSourcesFromResult(
   };
 
   extract(data);
-  return sources.slice(0, 10); // Cap at 10 sources per tool
+
+  // Also extract markdown links from text content blocks (e.g., MCP responses)
+  const extractTextContent = (obj: unknown): void => {
+    if (!obj || typeof obj !== 'object') return;
+    const o = obj as Record<string, unknown>;
+    
+    // Check for MCP content blocks: { type: 'text', text: '...' }
+    if (o.type === 'text' && typeof o.text === 'string') {
+      const mdLinks = extractMarkdownLinks(o.text);
+      for (const link of mdLinks) {
+        if (!seen.has(link.url)) {
+          seen.add(link.url);
+          sources.push({
+            type: 'tool',
+            title: link.title.slice(0, 80),
+            reference: toolName,
+            url: link.url,
+          });
+        }
+      }
+    }
+    
+    // Recurse into arrays and objects
+    if (Array.isArray(obj)) {
+      for (const item of obj) extractTextContent(item);
+    } else {
+      for (const val of Object.values(o)) extractTextContent(val);
+    }
+  };
+  
+  extractTextContent(data);
+
+  return sources.slice(0, 50); // Cap at 50 sources per tool (increased for web search)
 }
 
 /**
@@ -429,6 +493,8 @@ export async function* executeAgentLoop(
         messages: attemptMessages,
         stream: true,
         ...(tools.length > 0 ? { tools } : {}),
+        // Story 5.1 AC#7: Enable memory tool auto-context
+        betas: ['context-management-2025-06-27'],
       } as unknown as Anthropic.MessageCreateParams)) as unknown as AsyncIterable<Anthropic.RawMessageStreamEvent>;
 
       let inputTokensThisCall = 0;
@@ -686,7 +752,11 @@ export async function* executeAgentLoop(
           });
           
           // Extract URL sources from tool results (e.g., web search results)
-          const urlSources = extractUrlSourcesFromResult(toolUse.name, result);
+          // Handle ToolResult wrapper: extract from data field if success
+          const resultData = result && typeof result === 'object' && 'success' in result && 'data' in result
+            ? (result as { success: boolean; data: unknown }).data
+            : result;
+          const urlSources = extractUrlSourcesFromResult(toolUse.name, resultData);
           
           logger.debug({
             event: 'tool.sources.extracted',
@@ -703,22 +773,42 @@ export async function* executeAgentLoop(
           }
           
           // If no URL sources found, track tool call itself as a source with context
-          if (urlSources.length === 0 && !toolSourcesMap.has(toolUse.name)) {
+          // Key by tool name + query context to allow multiple calls with different queries
+          if (urlSources.length === 0) {
             const displayName = formatToolDisplayName(toolUse.name);
-            const toolContext = summarizeToolInput(toolUse.input);
-            toolSourcesMap.set(toolUse.name, {
-              type: 'tool',
-              title: displayName,
-              reference: toolUse.name,
-              toolContext,
-            });
+            const toolContext = summarizeToolInput(toolUse.input) || 'data lookup';
+            const dedupKey = `${toolUse.name}::${toolContext.slice(0, 20)}`;
+            
+            if (!toolSourcesMap.has(dedupKey)) {
+              toolSourcesMap.set(dedupKey, {
+                type: 'tool',
+                title: displayName,
+                reference: toolUse.name,
+                toolContext,
+              });
+            }
+          }
+
+          // Extract actual content from ToolResult wrapper
+          // Claude should see the data directly, not {"success":true,"data":"..."}
+          let toolContent: string;
+          if (result && typeof result === 'object' && 'success' in result) {
+            const tr = result as { success: boolean; data?: unknown; error?: unknown };
+            if (tr.success && tr.data !== undefined) {
+              toolContent = typeof tr.data === 'string' ? tr.data : JSON.stringify(tr.data);
+            } else if (!tr.success && tr.error) {
+              toolContent = JSON.stringify(tr.error);
+            } else {
+              toolContent = JSON.stringify(result);
+            }
+          } else {
+            toolContent = typeof result === 'string' ? result : JSON.stringify(result);
           }
 
           return {
             type: 'tool_result',
             tool_use_id: toolUse.id,
-            content:
-              typeof result === 'string' ? result : JSON.stringify(result),
+            content: toolContent,
           };
         })
       );

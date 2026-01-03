@@ -29,7 +29,7 @@ import { formatSlackMrkdwn } from '../../utils/formatting.js';
 import { fetchThreadHistory } from '../thread-context.js';
 import { feedbackBlock } from '../feedback-block.js';
 import { createSourcesContextBlock, type SourceCitation } from '../sources-block.js';
-import { buildThreadSources, filterClickableSources } from '../source-builder.js';
+import { filterClickableSources } from '../source-builder.js';
 import { runOrionAgent, type AgentResult } from '../../agent/orion.js';
 import { detectUncitedClaims } from '../../agent/citations.js';
 import { getLangfuse } from '../../observability/langfuse.js';
@@ -51,6 +51,15 @@ import {
   getUserMessage,
 } from '../../utils/errors.js';
 import { isDuplicateEvent } from '../event-dedup.js';
+import { generateSuggestedPrompts, type PromptContext } from '../prompts/prompt-factory.js';
+import {
+  setSummarizeToolContext,
+  clearSummarizeToolContext,
+} from '../../tools/summarize/index.js';
+import {
+  setMemoryToolContext,
+  clearMemoryToolContext,
+} from '../../tools/memory/index.js';
 
 /**
  * Handles user messages in assistant threads (Assistant callback signature).
@@ -79,6 +88,7 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
     say,
     setTitle,
     setStatus,
+    setSuggestedPrompts,
     client,
     context,
   }) => {
@@ -256,16 +266,6 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             traceId: trace.id,
           });
 
-          // Build thread sources with permalinks (before stripping to anthropic format)
-          // This preserves rich metadata (user, ts, channel) for clickable citations
-          const threadSources = await buildThreadSources({
-            client,
-            channel: channelId,
-            threadTs: threadTs ?? '',
-            messages: threadHistory,
-            maxSources: 5,
-          });
-
           // Milestone: context gathered (FR47)
           void safeSetStatus({
             status: 'working...',
@@ -415,6 +415,18 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             input: { messageText, historyLength: historyForAgent.length },
           });
 
+          // Set summarize tool context (Story 7.6)
+          setSummarizeToolContext({
+            client,
+            traceId: trace.id ?? '',
+            channelId,
+            threadTs,
+            messageTs: message.ts,
+          });
+
+          // Set memory tool context (Story 5.1)
+          setMemoryToolContext(trace.id ?? '');
+
           const agentResponse = runOrionAgent(messageText, {
             context: {
               threadHistory: historyForAgent,
@@ -501,11 +513,12 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           // Stop streaming and get metrics
           const metrics = await streamer.stop();
 
-          // Story 2.7 + Source Citations Fix: Merge and filter sources
-          // Combine thread sources (built with permalinks) + any tool sources from agent
-          const allSources = [...threadSources, ...(agentResult?.sources ?? [])];
-          const clickableSources = filterClickableSources(allSources);
-          const sourcesGatheredCount = allSources.length;
+          // Story 2.7 + Source Citations Fix: Only use sources from tool results
+          // NOTE: Thread messages are NOT sources - they're the conversation context.
+          // Only tool results (web search, MCP, summarization) can provide sources.
+          const toolSources = agentResult?.sources ?? [];
+          const clickableSources = filterClickableSources(toolSources);
+          const sourcesGatheredCount = toolSources.length;
           const clickableCount = clickableSources.length;
           let sourcesBlockSent = false;
 
@@ -685,6 +698,63 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             // Ignore if already removed
           }
 
+          // Story 7.4: Add ✅ on successful completion (AC1)
+          try {
+            await client.reactions.add({
+              channel: channelId,
+              timestamp: message.ts,
+              name: 'white_check_mark',
+            });
+            logger.debug({
+              event: 'completion_reaction_added',
+              traceId: trace.id,
+            });
+          } catch (reactionError) {
+            logger.warn({
+              event: 'completion_reaction_failed',
+              error: reactionError instanceof Error ? reactionError.message : String(reactionError),
+              traceId: trace.id,
+            });
+          }
+
+          // Story 7.1: Set context-aware follow-up prompts (AC#2)
+          // Determine response type based on what happened
+          const lastResponseType: PromptContext['lastResponseType'] =
+            sourcesGatheredCount > 0 ? 'research' : undefined;
+
+          const channelType = isDm
+            ? 'im'
+            : channelId.startsWith('G')
+              ? 'group'
+              : 'channel';
+
+          try {
+            const followUpPrompts = generateSuggestedPrompts({
+              channelType,
+              userId: userId ?? 'unknown',
+              lastResponseType,
+            });
+
+            await setSuggestedPrompts({
+              title: 'What next?',
+              prompts: followUpPrompts,
+            });
+
+            logger.debug({
+              event: 'follow_up_prompts_set',
+              lastResponseType,
+              promptCount: followUpPrompts.length,
+              traceId: trace.id,
+            });
+          } catch (promptError) {
+            // Best-effort: don't fail the response if prompts fail
+            logger.warn({
+              event: 'follow_up_prompts_failed',
+              error: promptError instanceof Error ? promptError.message : String(promptError),
+              traceId: trace.id,
+            });
+          }
+
           // Update trace metadata with token counts (visible in Langfuse metadata tab)
           if (agentResult) {
             trace.update({
@@ -697,12 +767,22 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             });
           }
 
+          // Clear summarize tool context (Story 7.6)
+          clearSummarizeToolContext();
+          // Clear memory tool context (Story 5.1)
+          clearMemoryToolContext();
+
           // Return the full response as trace output (visible in Langfuse output tab)
           return fullResponse;
             })(),
             HARD_TIMEOUT_MS
           );
         } catch (error) {
+          // Clear summarize tool context on error (Story 7.6)
+          clearSummarizeToolContext();
+          // Clear memory tool context on error (Story 5.1)
+          clearMemoryToolContext();
+
           // Ensure stream is stopped even on error
           await streamer.stop().catch(() => {});
 
@@ -747,6 +827,29 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
               text: getUserMessage('UNKNOWN_ERROR'),
               thread_ts: threadTs,
             });
+          }
+
+          // Story 7.1: Set error recovery prompts (AC#4)
+          const errorChannelType = isDm
+            ? 'im'
+            : channelId.startsWith('G')
+              ? 'group'
+              : 'channel';
+
+          try {
+            const errorRecoveryPrompts = generateSuggestedPrompts({
+              channelType: errorChannelType,
+              userId: userId ?? 'unknown',
+              lastResponseType: 'error',
+              errorCode: isOrionError(error) ? error.code : undefined,
+            });
+
+            await setSuggestedPrompts({
+              title: 'Try something else:',
+              prompts: errorRecoveryPrompts,
+            });
+          } catch {
+            // Best-effort: don't fail if prompts fail
           }
 
           throw error;

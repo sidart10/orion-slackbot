@@ -194,4 +194,32 @@ describe('createSourcesContextBlock', () => {
       '📎 *Sources:*\n[1] <https://example.com|Web result>\n[2] 🔧 MSCI Reports — _Search query_\n[3] Your preferences'
     );
   });
+
+  // Source Citations v2: Tool sources with URLs should NOT appear in footer
+  // (Claude cites URLs inline in response)
+  it('excludes tool sources WITH URLs from footer (v2 fix)', () => {
+    const sources: SourceCitation[] = [
+      { id: 1, title: 'Exa Result', isTool: true, url: 'https://lmarena.ai' }, // Should be excluded
+      { id: 2, title: 'Audience Manager', isTool: true, toolContext: 'college football' }, // Should be included
+    ];
+
+    const result = createSourcesContextBlock(sources);
+
+    // Only the tool source WITHOUT URL should appear
+    expect(result?.elements[0]?.text).toBe(
+      '📎 *Sources:*\n[1] 🔧 Audience Manager — _college football_'
+    );
+  });
+
+  it('returns null when all tool sources have URLs (v2 fix)', () => {
+    const sources: SourceCitation[] = [
+      { id: 1, title: 'Exa Web Search', isTool: true, url: 'https://example.com/1' },
+      { id: 2, title: 'Another Tool', isTool: true, url: 'https://example.com/2' },
+    ];
+
+    const result = createSourcesContextBlock(sources);
+
+    // All filtered out since they have URLs
+    expect(result).toBeNull();
+  });
 });

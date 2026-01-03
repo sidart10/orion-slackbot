@@ -676,6 +676,129 @@ describe('App Mention Handler', () => {
     });
   });
 
+  describe('Completion indicator (Story 7.4)', () => {
+    it('should add ✅ reaction on successful completion (AC1)', async () => {
+      const args = createAppMentionEvent();
+      await handleAppMention(args);
+
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn> };
+      };
+
+      // Should add white_check_mark after successful completion
+      expect(client.reactions.add).toHaveBeenCalledWith({
+        channel: 'C123456',
+        timestamp: '1234567890.123456',
+        name: 'white_check_mark',
+      });
+    });
+
+    it('should NOT add ✅ reaction on error path (AC2)', async () => {
+      // Make runOrionAgent throw an error
+      const { runOrionAgent: mockAgent } = await import('../../agent/orion.js');
+      (mockAgent as ReturnType<typeof vi.fn>).mockImplementationOnce(function* () {
+        throw new Error('Agent error');
+      });
+
+      const args = createAppMentionEvent();
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn> };
+      };
+
+      await expect(handleAppMention(args)).rejects.toThrow('Agent error');
+
+      // Should NOT have called reactions.add with white_check_mark
+      const addCalls = client.reactions.add.mock.calls;
+      const checkmarkCalls = addCalls.filter(
+        (call: Array<{ name?: string }>) => call[0]?.name === 'white_check_mark'
+      );
+      expect(checkmarkCalls).toHaveLength(0);
+    });
+
+    it('should gracefully handle ✅ reaction failure (AC3)', async () => {
+      const args = createAppMentionEvent();
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+      };
+
+      // Make white_check_mark reaction fail (e.g., already reacted)
+      let addCallCount = 0;
+      client.reactions.add = vi.fn().mockImplementation(({ name }: { name: string }) => {
+        addCallCount++;
+        if (name === 'white_check_mark') {
+          return Promise.reject(new Error('already_reacted'));
+        }
+        return Promise.resolve(undefined);
+      });
+
+      // Should NOT throw - handler completes successfully
+      await expect(handleAppMention(args)).resolves.not.toThrow();
+
+      // Should have logged warning for failed reaction
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'completion_reaction_failed',
+        })
+      );
+    });
+
+    it('should add ✅ AFTER 👀 is removed (reaction order)', async () => {
+      const args = createAppMentionEvent();
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+      };
+
+      const callOrder: string[] = [];
+      client.reactions.remove = vi.fn().mockImplementation(({ name }: { name: string }) => {
+        callOrder.push(`remove:${name}`);
+        return Promise.resolve(undefined);
+      });
+      client.reactions.add = vi.fn().mockImplementation(({ name }: { name: string }) => {
+        callOrder.push(`add:${name}`);
+        return Promise.resolve(undefined);
+      });
+
+      await handleAppMention(args);
+
+      // Verify order: eyes added first, then eyes removed, then checkmark added
+      const eyesRemoveIndex = callOrder.indexOf('remove:eyes');
+      const checkmarkAddIndex = callOrder.indexOf('add:white_check_mark');
+      expect(eyesRemoveIndex).toBeLessThan(checkmarkAddIndex);
+    });
+
+    it('should add ✅ AFTER feedback block is posted (AC1 full order)', async () => {
+      const args = createAppMentionEvent();
+      const client = args.client as unknown as {
+        reactions: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+        chat: { postMessage: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> };
+      };
+
+      const callOrder: string[] = [];
+      
+      // Track postMessage calls (status, sources, feedback)
+      client.chat.postMessage = vi.fn().mockImplementation((params: { metadata?: { event_type?: string } }) => {
+        if (params.metadata?.event_type === 'orion_response') {
+          callOrder.push('postMessage:feedback');
+        }
+        return Promise.resolve({ ts: '123.456' });
+      });
+
+      client.reactions.add = vi.fn().mockImplementation(({ name }: { name: string }) => {
+        callOrder.push(`add:${name}`);
+        return Promise.resolve(undefined);
+      });
+
+      await handleAppMention(args);
+
+      // AC1: ✅ must be added AFTER feedback block is posted
+      const feedbackIndex = callOrder.indexOf('postMessage:feedback');
+      const checkmarkIndex = callOrder.indexOf('add:white_check_mark');
+      expect(feedbackIndex).toBeGreaterThan(-1);
+      expect(checkmarkIndex).toBeGreaterThan(-1);
+      expect(feedbackIndex).toBeLessThan(checkmarkIndex);
+    });
+  });
+
   describe('Sources block (Story 2.7)', () => {
     it('should post sources block when sources are gathered', async () => {
       // Mock agent to return sources

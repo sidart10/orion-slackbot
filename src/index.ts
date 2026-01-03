@@ -20,6 +20,8 @@ import { assistant } from './slack/assistant.js';
 import { handleAppMention } from './slack/handlers/app-mention.js';
 import { config } from './config/environment.js';
 import { logger } from './utils/logger.js';
+import { registerSummarizeTool } from './tools/summarize/index.js';
+import { registerMemoryTool } from './tools/memory/index.js';
 import { shutdown as shutdownLangfuse } from './observability/langfuse.js';
 
 /**
@@ -34,6 +36,10 @@ export async function startApp(): Promise<void> {
     event: 'orion_starting',
     nodeEnv: config.nodeEnv,
   });
+
+  // Register static tools before app start (Story 7.6, 5.1)
+  registerSummarizeTool();
+  registerMemoryTool();
 
   // Create and configure Slack app with ExpressReceiver
   const { app } = createSlackApp();

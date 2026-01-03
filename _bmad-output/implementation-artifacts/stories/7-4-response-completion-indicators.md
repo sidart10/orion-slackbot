@@ -10,7 +10,7 @@
 
 | Field | Value |
 |-------|-------|
-| Status | ready-for-dev |
+| Status | review |
 | Epic | 7 - Slack Polish |
 | Priority | P2 |
 | Estimate | 1 point |
@@ -27,20 +27,20 @@ In busy threads or channels, users want to:
 ## Acceptance Criteria
 
 ### AC1: Add Checkmark on Response Completion
-- [ ] Add ✅ (`white_check_mark`) reaction to user's original message when response is complete
-- [ ] Applies to both @mentions (app-mention handler) and DMs (user-message handler)
-- [ ] Reaction added AFTER streaming completes and feedback block is posted
+- [x] Add ✅ (`white_check_mark`) reaction to user's original message when response is complete
+- [x] Applies to both @mentions (app-mention handler) and DMs (user-message handler)
+- [x] Reaction added AFTER streaming completes and feedback block is posted
 
 ### AC2: Reaction Lifecycle
-- [ ] 👀 added on message receipt (existing behavior)
-- [ ] 👀 removed on completion (existing behavior)
-- [ ] ✅ added on successful completion (NEW)
-- [ ] No ✅ on error (error message is posted instead)
+- [x] 👀 added on message receipt (existing behavior)
+- [x] 👀 removed on completion (existing behavior)
+- [x] ✅ added on successful completion (NEW)
+- [x] No ✅ on error (error message is posted instead)
 
 ### AC3: Error Resilience
-- [ ] If reaction.add fails (e.g., already reacted), log and continue
-- [ ] Never throw/crash on reaction failures
-- [ ] Log at debug level for successful reactions, warn for failures
+- [x] If reaction.add fails (e.g., already reacted), log and continue
+- [x] Never throw/crash on reaction failures
+- [x] Log at debug level for successful reactions, warn for failures
 
 ## Technical Design
 
@@ -153,10 +153,66 @@ try {
 
 ## Definition of Done
 
-- [ ] App mention handler adds ✅ on completion
-- [ ] User message handler adds ✅ on completion  
-- [ ] Error paths do NOT add ✅
-- [ ] All reaction failures are gracefully handled
-- [ ] Unit tests pass
+- [x] App mention handler adds ✅ on completion
+- [x] User message handler adds ✅ on completion  
+- [x] Error paths do NOT add ✅
+- [x] All reaction failures are gracefully handled
+- [x] Unit tests pass
 - [ ] Manual verification in Slack shows ✅ on answered messages
+
+## Dev Agent Record
+
+### Implementation Plan (2026-01-02)
+- Add `white_check_mark` reaction after `eyes` removal in both handlers
+- Wrap in try/catch with debug/warn logging per AC3
+- Write unit tests validating reaction lifecycle and error resilience
+
+### Completion Notes (2026-01-02)
+- ✅ Implemented completion indicator in `app-mention.ts` (lines 484-498)
+- ✅ Implemented completion indicator in `user-message.ts` (lines 689-703)
+- ✅ Added 8 unit tests across both handlers covering AC1, AC2, AC3
+- ✅ All 304 slack/agent tests pass
+- ✅ No regressions introduced
+
+### Debug Log
+- No issues encountered during implementation
+
+### Senior Developer Review (AI) - 2026-01-02
+
+**Reviewer:** Amelia (Dev Agent)  
+**Outcome:** ✅ Approved with Notes
+
+**Verification Summary:**
+| AC | Status | Evidence |
+|----|--------|----------|
+| AC1: Add ✅ on completion | ✅ Verified | `app-mention.ts:484-501`, `user-message.ts:688-705` |
+| AC2: Reaction lifecycle | ✅ Verified | 👀 add/remove + ✅ on success, no ✅ on error |
+| AC3: Error resilience | ✅ Verified | try/catch with debug/warn logging |
+
+**Code Quality:** Clean implementation, follows existing patterns.
+
+**Tests:** 10 unit tests (5 per handler) covering all ACs + reaction order.
+
+**Issues Found & Actions:**
+- **[HIGH] DoD item unchecked:** `Manual verification in Slack` — Requires manual testing before marking done
+- **[MEDIUM] 👀 not removed on error in user-message.ts** — Documented as out-of-scope (line 123)
+- **[LOW] Test gap fixed:** Added 2 tests to verify AC1 full order (feedback block before ✅)
+
+**Recommendation:** Perform manual Slack verification, then mark done.
+
+## File List
+
+| File | Change |
+|------|--------|
+| `src/slack/handlers/app-mention.ts` | Added ✅ reaction on completion |
+| `src/slack/handlers/user-message.ts` | Added ✅ reaction on completion |
+| `src/slack/handlers/app-mention.test.ts` | Added 5 tests for completion indicator (4 original + 1 AC1 order test) |
+| `src/slack/handlers/user-message.test.ts` | Added 5 tests for completion indicator (4 original + 1 AC1 order test) |
+
+## Change Log
+
+| Date | Change |
+|------|--------|
+| 2026-01-02 | Story 7.4 implementation complete - ✅ reaction on completion |
+| 2026-01-02 | Code review: Added AC1 full order tests verifying ✅ comes after feedback block |
 

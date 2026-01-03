@@ -1,6 +1,6 @@
 # Story 5.2: Memory Scopes & Path Builders
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -24,36 +24,36 @@ So that memory paths are consistent and typo-proof across the codebase.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Create Branded MemoryPath Type** (AC: #4)
-  - [ ] Create `src/tools/memory/paths.ts`
-  - [ ] Define `MemoryPath` branded type (object pattern per architecture)
-  - [ ] Ensure raw strings can't be used as paths
-  - [ ] Export type for use in handlers
+- [x] **Task 1: Create Branded MemoryPath Type** (AC: #4)
+  - [x] Create `src/tools/memory/paths.ts`
+  - [x] Define `MemoryPath` branded type (object pattern per architecture)
+  - [x] Ensure raw strings can't be used as paths
+  - [x] Export type for use in handlers
 
-- [ ] **Task 2: Implement Path Builders** (AC: #1, #2, #3)
-  - [ ] Implement `Memory.global(file)` builder
-  - [ ] Implement `Memory.user(userId, file)` builder
-  - [ ] Implement `Memory.session(threadTs, file)` builder
-  - [ ] Implement `Memory.list.*` for directory listing
-  - [ ] All builders return `MemoryPath` type
+- [x] **Task 2: Implement Path Builders** (AC: #1, #2, #3)
+  - [x] Implement `Memory.global(file)` builder
+  - [x] Implement `Memory.user(userId, file)` builder
+  - [x] Implement `Memory.session(threadTs, file)` builder
+  - [x] Implement `Memory.list.*` for directory listing
+  - [x] All builders return `MemoryPath` type
 
-- [ ] **Task 3: Path Validation** (AC: #5)
-  - [ ] Implement `validateMemoryPath()` function
-  - [ ] Reject paths not starting with `/memories/`
-  - [ ] Reject paths containing `../`
-  - [ ] Validate file extensions (`.json`, `.md`, `.txt`, `.yaml` only)
-  - [ ] Enforce max file size constant (100KB)
+- [x] **Task 3: Path Validation** (AC: #5)
+  - [x] Implement `validateMemoryPath()` function
+  - [x] Reject paths not starting with `/memories/`
+  - [x] Reject paths containing `../`
+  - [x] Validate file extensions (`.json`, `.md`, `.txt`, `.yaml` only)
+  - [x] Enforce max file size constant (100KB)
 
-- [ ] **Task 4: Input Validation Helpers**
-  - [ ] Validate Slack user IDs: `/^[UW][A-Z0-9]+$/`
-  - [ ] Validate thread timestamps: `/^\d+\.\d+$/`
-  - [ ] Sanitize thread_ts for GCS paths
+- [x] **Task 4: Input Validation Helpers**
+  - [x] Validate Slack user IDs: `/^[UW][A-Z0-9]+$/`
+  - [x] Validate thread timestamps: `/^\d+\.\d+$/`
+  - [x] Sanitize thread_ts for GCS paths
 
-- [ ] **Task 5: Verification**
-  - [ ] Test path builders generate correct paths
-  - [ ] Test branded type prevents raw strings at compile time
-  - [ ] Test validation rejects malicious paths
-  - [ ] Test paths work with GCS handler
+- [x] **Task 5: Verification**
+  - [x] Test path builders generate correct paths
+  - [x] Test branded type prevents raw strings at compile time
+  - [x] Test validation rejects malicious paths
+  - [x] Test paths work with GCS handler
 
 ## Dev Notes
 
@@ -318,9 +318,35 @@ const listPath = Memory.list.user('U12345ABC');
 | Path validation accuracy | 100% (no path traversal) |
 | Developer ergonomics | Clean API, autocomplete works |
 
+## Dev Agent Record
+
+### Implementation Plan
+
+- Implemented `paths.ts` following the Dev Notes specification exactly
+- Used Object.freeze() for immutable MemoryPath objects
+- All validation functions are internal, exported builders are the public API
+- Updated `index.ts` to export all new types and functions
+
+### Completion Notes
+
+- ✅ All 5 tasks completed
+- ✅ 41 new tests in `paths.test.ts` all passing
+- ✅ All 71 tests in `src/tools/memory/` passing (including existing handler/storage/tool tests)
+- ✅ No linter errors
+- Pre-existing failures in `src/memory/*` are from missing `gray-matter` dependency (unrelated module)
+
+## File List
+
+| File | Action |
+|------|--------|
+| `src/tools/memory/paths.ts` | Created |
+| `src/tools/memory/paths.test.ts` | Created |
+| `src/tools/memory/index.ts` | Modified (added exports) |
+
 ## Change Log
 
 | Date | Change |
 |------|--------|
 | 2025-12-22 | Story created for Epic 5 |
 | 2025-12-22 | Aligned branded type with architecture (object pattern), added extension/size validation |
+| 2026-01-02 | Implemented all tasks: branded MemoryPath type, path builders, validation. 41 tests passing. |

@@ -40,3 +40,11 @@ mcp_servers:
     # Add ?tools=... to URL to enable more tools
     url: "https://mcp.exa.ai/mcp"
     headers: {}
+
+  rube:
+    type: http
+    enabled: true
+    description: "Rube by Composio - 500+ app integrations (Slack, GitHub, Notion, Google, etc.)"
+    url: "https://rube.app/mcp"
+    headers:
+      Authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiJ1c2VyXzAxS0RWRVFONkoyQkFQTU5IODM5V1BGNENQIiwib3JnSWQiOiJvcmdfMDFLRFZFUVFKVDAwUlhWWjFGTVM4WlBIWEMiLCJpYXQiOjE3Njc0MTM0NzB9.CnOGZgq5Hl2u4le4jV2i1HABjqi6c7-Qkn3CKsLocEc"

@@ -91,10 +91,15 @@ export function createSourcesContextBlock(
   sources: SourceCitation[]
 ): SourcesContextBlock | null {
   // Filter to displayable sources:
-  // - Sources with URLs (clickable)
-  // - Memory sources (implicit trust)
-  // - Tool sources (show what was used to generate response)
-  const displayable = sources.filter((s) => s.url || s.isMemory || s.isTool);
+  // - Memory sources: always show (implicit trust)
+  // - Tool sources: only show if they DON'T have URLs
+  //   (Claude cites URLs inline; footer is for "what tool was called" transparency)
+  // - Thread/file/other: only show if they have clickable URLs
+  const displayable = sources.filter((s) => {
+    if (s.isMemory) return true;
+    if (s.isTool) return !s.url;
+    return !!s.url;
+  });
 
   if (displayable.length === 0) return null;
 

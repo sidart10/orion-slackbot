@@ -13,7 +13,9 @@ export type ToolErrorCode =
   | 'TOOL_EXECUTION_FAILED'
   | 'RATE_LIMITED'
   | 'MCP_CONNECTION_FAILED'
-  | 'TOOL_NOT_FOUND';
+  | 'TOOL_NOT_FOUND'
+  | 'MEMORY_NOT_FOUND'
+  | 'MEMORY_WRITE_FAILED';
 
 export type ToolError = {
   code: ToolErrorCode;

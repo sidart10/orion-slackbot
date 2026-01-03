@@ -29,12 +29,20 @@ import { formatSlackMrkdwn } from '../../utils/formatting.js';
 import { fetchThreadHistory } from '../thread-context.js';
 import { feedbackBlock } from '../feedback-block.js';
 import { createSourcesContextBlock, type SourceCitation } from '../sources-block.js';
-import { buildThreadSources, filterClickableSources } from '../source-builder.js';
+import { filterClickableSources } from '../source-builder.js';
 import { buildLoadingMessages } from '../status-messages.js';
 import { runOrionAgent, type AgentResult } from '../../agent/orion.js';
 import { loadAgentPrompt } from '../../agent/loader.js';
 import { config } from '../../config/environment.js';
 import { getChannelName, getUserDisplayName } from '../identity.js';
+import {
+  setSummarizeToolContext,
+  clearSummarizeToolContext,
+} from '../../tools/summarize/index.js';
+import {
+  setMemoryToolContext,
+  clearMemoryToolContext,
+} from '../../tools/memory/index.js';
 
 /**
  * Extract message text by stripping the leading bot mention.
@@ -243,15 +251,6 @@ export async function handleAppMention({
           traceId: trace.id,
         });
 
-        // Build thread sources with permalinks (before stripping to anthropic format)
-        const threadSources = await buildThreadSources({
-          client,
-          channel: channelId,
-          threadTs,
-          messages: threadHistory,
-          maxSources: 5,
-        });
-
         // Convert thread history to Anthropic message format
         const anthropicHistory = threadHistory
           .filter((msg) => typeof msg.text === 'string' && msg.text.length > 0)
@@ -292,6 +291,18 @@ export async function handleAppMention({
         agentSpan = trace.startSpan('agent.orion', {
           input: { messageText, historyLength: anthropicHistory.length },
         });
+
+        // Set summarize tool context (Story 7.6)
+        setSummarizeToolContext({
+          client,
+          traceId: trace.id ?? '',
+          channelId,
+          threadTs,
+          messageTs: mentionEvent.ts,
+        });
+
+        // Set memory tool context (Story 5.1)
+        setMemoryToolContext(trace.id ?? '');
 
         const agentResponse = runOrionAgent(messageText, {
           context: {
@@ -374,9 +385,10 @@ export async function handleAppMention({
         // Story 3.4: Delete status message now that streaming is complete
         await deleteStatusMessage();
 
-        // Story 2.7 + Source Citations Fix: Merge and filter sources
-        const allSources = [...threadSources, ...(agentResult?.sources ?? [])];
-        const clickableSources = filterClickableSources(allSources);
+        // Story 2.7 + Source Citations Fix: Only use sources from tool results
+        // NOTE: Thread messages are NOT sources - they're the conversation context.
+        // Only tool results (web search, MCP, summarization) can provide sources.
+        const clickableSources = filterClickableSources(agentResult?.sources ?? []);
 
         if (clickableSources.length > 0) {
           const sourceCitations: SourceCitation[] = clickableSources.map((s, i) => ({
@@ -481,6 +493,25 @@ export async function handleAppMention({
           // Ignore if already removed
         }
 
+        // Story 7.4: Add ✅ on successful completion (AC1)
+        try {
+          await client.reactions.add({
+            channel: channelId,
+            timestamp: mentionEvent.ts,
+            name: 'white_check_mark',
+          });
+          logger.debug({
+            event: 'completion_reaction_added',
+            traceId: trace.id,
+          });
+        } catch (reactionError) {
+          logger.warn({
+            event: 'completion_reaction_failed',
+            error: reactionError instanceof Error ? reactionError.message : String(reactionError),
+            traceId: trace.id,
+          });
+        }
+
         // Update trace metadata with token counts
         if (agentResult) {
           trace.update({
@@ -493,8 +524,18 @@ export async function handleAppMention({
           });
         }
 
+        // Clear summarize tool context (Story 7.6)
+        clearSummarizeToolContext();
+        // Clear memory tool context (Story 5.1)
+        clearMemoryToolContext();
+
         return fullResponse;
       } catch (error) {
+        // Clear summarize tool context on error (Story 7.6)
+        clearSummarizeToolContext();
+        // Clear memory tool context on error (Story 5.1)
+        clearMemoryToolContext();
+
         // Story 3.4: Clean up status message on error
         await deleteStatusMessage();
 

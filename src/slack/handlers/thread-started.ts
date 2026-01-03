@@ -4,6 +4,8 @@
  * Handles assistant_thread_started events when a user opens
  * a new thread with Orion.
  *
+ * @see Story 1.4 - Assistant Class Thread Handling
+ * @see Story 7.1 - Dynamic Suggested Prompts
  * @see AC#1 - threadStarted events handled
  * @see AC#5 - Handler wrapped in Langfuse trace
  * @see AR11 - All handlers wrapped in Langfuse traces
@@ -12,6 +14,7 @@
 import type { AssistantThreadStartedMiddleware } from '@slack/bolt';
 import { startActiveObservation } from '../../observability/tracing.js';
 import { logger } from '../../utils/logger.js';
+import { generateSuggestedPrompts } from '../prompts/prompt-factory.js';
 
 /**
  * Handle assistant_thread_started event.
@@ -56,23 +59,22 @@ export const handleThreadStarted: AssistantThreadStartedMiddleware = async ({
         "Hello! I'm Orion, your AI assistant. How can I help you today?"
       );
 
-      // Set suggested prompts to help users discover capabilities
+      // Story 7.1: Set context-aware suggested prompts (AC#1)
+      // Determine channel type from channel ID prefix
+      const channelType = channelId?.startsWith('D')
+        ? 'im'
+        : channelId?.startsWith('G')
+          ? 'group'
+          : 'channel';
+
+      const prompts = generateSuggestedPrompts({
+        channelType,
+        userId: userId ?? 'unknown',
+      });
+
       await setSuggestedPrompts({
         title: 'Try asking me to:',
-        prompts: [
-          {
-            title: 'Research a topic',
-            message: 'Research the latest developments in...',
-          },
-          {
-            title: 'Summarize a thread',
-            message: 'Summarize the conversation in #channel',
-          },
-          {
-            title: 'Answer a question',
-            message: 'What is our policy on...',
-          },
-        ],
+        prompts,
       });
 
       // Save initial thread context
