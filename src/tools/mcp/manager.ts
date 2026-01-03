@@ -139,7 +139,9 @@ export class McpClientManager {
     logger.info({
       event: 'mcp.manager.client.creating',
       serverName,
-      hasAuth: !!config.bearerToken,
+      hasAuth: !!config.bearerToken || !!config.authType,
+      authType: config.authType,
+      requestTimeoutMs: config.requestTimeoutMs,
       traceId,
     });
 

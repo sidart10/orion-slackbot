@@ -19,6 +19,7 @@ import type { ContextSource } from './gather.js';
 import { randomUUID } from 'node:crypto';
 import { executeTool as executeToolWithPolicies } from '../tools/executor.js';
 import { executeToolCall } from '../tools/router.js';
+import { getMcpServerConfigs } from '../config/mcp-servers.js';
 
 /**
  * Context for agent execution.
@@ -133,12 +134,22 @@ export async function* runOrionAgent(
         });
       }
 
+      // Look up server-specific timeout for MCP tools (e.g., video generation needs 180s)
+      let timeoutMs: number | undefined;
+      if (name.includes('__')) {
+        const serverName = name.split('__')[0];
+        const serverConfig = getMcpServerConfigs().find((s) => s.name === serverName);
+        if (serverConfig?.requestTimeoutMs) {
+          timeoutMs = serverConfig.requestTimeoutMs;
+        }
+      }
+
       const result = await executeToolWithPolicies(
         name,
         toolUseId,
         args,
         executeToolCall,
-        { traceId: effectiveTraceId }
+        { traceId: effectiveTraceId, timeoutMs }
       );
 
       // The agent loop expects tool_result.content to always be a string.
