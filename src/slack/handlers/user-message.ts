@@ -29,6 +29,7 @@ import { formatSlackMrkdwn } from '../../utils/formatting.js';
 import { fetchThreadHistory } from '../thread-context.js';
 import { feedbackBlock } from '../feedback-block.js';
 import { createSourcesContextBlock, type SourceCitation } from '../sources-block.js';
+import { buildThreadSources, filterClickableSources } from '../source-builder.js';
 import { runOrionAgent, type AgentResult } from '../../agent/orion.js';
 import { detectUncitedClaims } from '../../agent/citations.js';
 import { getLangfuse } from '../../observability/langfuse.js';
@@ -49,6 +50,7 @@ import {
   isOrionError,
   getUserMessage,
 } from '../../utils/errors.js';
+import { isDuplicateEvent } from '../event-dedup.js';
 
 /**
  * Handles user messages in assistant threads (Assistant callback signature).
@@ -91,11 +93,21 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
     const threadTs = 'thread_ts' in message ? message.thread_ts : message.ts;
     const isDm = channelId.startsWith('D');
 
-    // Avoid duplicate responses when Slack routes the same channel @mention into BOTH:
-    // - app.event('app_mention') handler
-    // - Assistant userMessage handler
-    //
-    // We only skip channel messages that are clearly leading bot mentions.
+    // Story 7.5: Event deduplication to prevent duplicate responses
+    // Check if this message was already processed by another handler (e.g., app_mention)
+    // Note: traceId not available yet at this point; dedup happens before trace starts
+    if (isDuplicateEvent(channelId, message.ts, 'assistant')) {
+      logger.debug({
+        event: 'event_dedup.skipped',
+        handler: 'assistant',
+        channelId,
+        messageTs: message.ts,
+      });
+      return;
+    }
+
+    // Legacy duplicate prevention: Skip channel messages with leading bot mentions.
+    // Kept as a backup when event deduplication hasn't registered the event yet.
     // Channel follow-up replies without a bot mention must be handled here to satisfy FR15/FR17.
     const botUserId = (context as unknown as { botUserId?: string }).botUserId;
     const leadingMentionMatch = messageText.match(/^<@([A-Z0-9]+)>\s*/);
@@ -242,6 +254,16 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             maxTokens: threadHistoryMaxTokens,
             keepLastN: DEFAULT_THREAD_HISTORY_KEEP_LAST_N,
             traceId: trace.id,
+          });
+
+          // Build thread sources with permalinks (before stripping to anthropic format)
+          // This preserves rich metadata (user, ts, channel) for clickable citations
+          const threadSources = await buildThreadSources({
+            client,
+            channel: channelId,
+            threadTs: threadTs ?? '',
+            messages: threadHistory,
+            maxSources: 5,
           });
 
           // Milestone: context gathered (FR47)
@@ -403,10 +425,11 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             systemPrompt,
             // Pass the underlying span for the agent loop to create nested observations
             trace: trace._span,
-            setStatus: ({ toolName }) =>
+            // Story 7.3: Enhanced status with tool context (AC1-AC5)
+          setStatus: ({ phase, toolName, toolInput, allTools }) =>
               safeSetStatus({
                 status: 'working...',
-                loading_messages: buildLoadingMessages({ toolName: toolName ?? undefined }),
+                loading_messages: buildLoadingMessages({ phase, toolName, toolInput, allTools }),
               }),
           });
 
@@ -478,16 +501,22 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           // Stop streaming and get metrics
           const metrics = await streamer.stop();
 
-          // Story 2.7: Post sources block if sources were gathered
-          const sourcesGathered = agentResult?.sources ?? [];
-          const sourcesGatheredCount = sourcesGathered.length;
+          // Story 2.7 + Source Citations Fix: Merge and filter sources
+          // Combine thread sources (built with permalinks) + any tool sources from agent
+          const allSources = [...threadSources, ...(agentResult?.sources ?? [])];
+          const clickableSources = filterClickableSources(allSources);
+          const sourcesGatheredCount = allSources.length;
+          const clickableCount = clickableSources.length;
           let sourcesBlockSent = false;
 
-          if (sourcesGatheredCount > 0) {
-            const sourceCitations: SourceCitation[] = sourcesGathered.map((s, i) => ({
+          if (clickableCount > 0) {
+            const sourceCitations: SourceCitation[] = clickableSources.map((s, i) => ({
               id: i + 1,
               title: s.title,
               url: s.url,
+              isMemory: s.type === 'memory',
+              isTool: s.type === 'tool',
+              toolContext: s.toolContext,
             }));
 
             const sourcesBlock = createSourcesContextBlock(sourceCitations);
@@ -520,7 +549,7 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           // Story 2.7 AC#3: Track citation metrics in Langfuse
           // - eligible_response: sourcesGatheredCount > 0
           // - cited_response: eligible_response AND sourcesBlockSent === true
-          const citationsForDetection = sourcesGathered.map((s, i) => ({
+          const citationsForDetection = clickableSources.map((s, i) => ({
             id: i + 1,
             type: s.type,
             title: s.title,
@@ -535,30 +564,31 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
               metadata: {
                 traceId: trace.id,
                 sourcesGatheredCount,
-                sourcesCitedCount: sourcesBlockSent ? sourcesGatheredCount : 0,
+                clickableSourcesCount: clickableCount,
+                sourcesCitedCount: sourcesBlockSent ? clickableCount : 0,
                 sourcesBlockSent,
                 inlineCitationMarkerCount: uncitedResult.citationCount,
-                isEligibleResponse: sourcesGatheredCount > 0,
-                isCitedResponse: sourcesGatheredCount > 0 && sourcesBlockSent,
+                isEligibleResponse: clickableCount > 0,
+                isCitedResponse: clickableCount > 0 && sourcesBlockSent,
               },
             });
 
-            // Story 2.7 AC#4: Emit warning if sources gathered but not cited
-            if (sourcesGatheredCount > 0 && !sourcesBlockSent) {
+            // Story 2.7 AC#4: Emit warning if clickable sources gathered but not cited
+            if (clickableCount > 0 && !sourcesBlockSent) {
               langfuseClient.event({
                 name: 'citation_warning',
                 metadata: {
                   traceId: trace.id,
                   reason: 'sources_gathered_but_not_cited',
-                  sourcesGatheredCount,
+                  clickableSourcesCount: clickableCount,
                 },
               });
             }
 
             // Story 2.7: Rolling citation rate warning (in-memory best-effort).
             const window = recordCitationOutcome({
-              eligible: sourcesGatheredCount > 0,
-              cited: sourcesGatheredCount > 0 && sourcesBlockSent,
+              eligible: clickableCount > 0,
+              cited: clickableCount > 0 && sourcesBlockSent,
             });
             if (window.belowTarget && window.rate !== null) {
               langfuseClient.event({

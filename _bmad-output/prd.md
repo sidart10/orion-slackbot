@@ -14,24 +14,24 @@ lastStep: 11
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-17'
-last_updated: '2025-12-22'
-course_correction: 'Claude Agent SDK → Direct Anthropic API migration'
-prd_version: '1.2'
+last_updated: '2025-12-31'
+course_correction: 'Claude Agent SDK → Direct Anthropic API migration; Epic 4 (Subagents) removed in favor of native parallel tool_use'
+prd_version: '1.3'
 ---
 
 # Product Requirements Document - 2025-12 orion-slack-agent
 
 **Author:** Sid
 **Date:** 2025-12-17
-**Last Updated:** 2025-12-22 (v1.2: Slack AI App features - FR47-50 for feedback buttons, dynamic status, feedback logging)
+**Last Updated:** 2025-12-31 (v1.3: Removed subagent pattern; FR3/FR4 reworded for native parallel tool_use)
 
 ## Executive Summary
 
-Orion is an enterprise agentic AI system that transforms Slack into an intelligent execution layer for the organization. Built on a **pluggable LLM provider layer** (Anthropic API with tool_use, orchestrated via MCP tools), Orion implements the core agent loop—*gather context, take action, verify work*—with composable tool connectivity, parallel subagent execution, and first-class observability.
+Orion is an enterprise agentic AI system that transforms Slack into an intelligent execution layer for the organization. Built on a **pluggable LLM provider layer** (Anthropic API with tool_use, orchestrated via MCP tools), Orion implements the core agent loop—*gather context, take action, verify work*—with composable tool connectivity, native parallel tool execution, and first-class observability.
 
 Unlike conversational AI assistants that answer questions, Orion *executes work*: conducting deep research with automatic synthesis, generating and running code in sandboxed environments, managing workflows across enterprise systems, and maintaining context across long-running conversations through intelligent compaction.
 
-The architecture is designed for **composability at every layer**—tools, skills, commands, and subagents can be combined to solve problems that no single integration could handle alone.
+The architecture is designed for **composability at every layer**—tools, skills, and commands can be combined to solve problems that no single integration could handle alone.
 
 ### What Makes This Special
 
@@ -41,11 +41,11 @@ The differentiator is not any single feature, but how four architectural princip
 
 2. **Code Generation Fills the Gaps** — When an MCP server or pre-built integration doesn't exist, Orion generates precise, executable code on-the-fly. There is no integration ceiling—the agent writes its way through.
 
-3. **Subagents with Context Isolation** — Complex tasks spawn specialized subagents (research, search, summarize) as parallel `messages.create()` calls with isolated context windows. Executed via `Promise.all()`, only relevant results bubble up to the orchestrator—no context dumps, no pollution.
+3. **Native Parallel Tool Execution** — Complex tasks trigger multiple tool calls in a single agent turn. Claude returns multiple `tool_use` blocks when parallel execution is beneficial, executed via `Promise.all()`. Results are synthesized by Claude natively—no separate orchestration layer needed.
 
 4. **File-Based Agent Definitions** — Inspired by BMAD methodology, all agent personas, workflows, and prompts live in version-controlled `.orion/` files. This separates concerns, enables composability, and makes the system maintainable as it grows.
 
-These principles reinforce each other: the agent loop needs subagents for parallelism, subagents need code generation to fill tool gaps, code generation needs verification to ensure safety, and file-based definitions make the entire system evolvable.
+These principles reinforce each other: the agent loop uses parallel tool execution for efficiency, code generation fills tool gaps, verification ensures safety, and file-based definitions make the entire system evolvable.
 
 ## Project Classification
 
@@ -129,7 +129,7 @@ Orion's responses must be accurate, grounded, and verified before delivery.
 | **Slack Integration** | Bolt with Assistant class, streaming, thread management, suggested prompts |
 | **LLM Runtime (pluggable)** | Anthropic API `messages.create()` with tool_use for agent loop; model/provider selected via config |
 | **Agent Loop** | Complete Gather → Act → Verify cycle with iterative refinement |
-| **Subagents** | Parallel execution with isolated context (research, search, summarize) |
+| **Parallel Tools** | Native Claude tool_use pattern with `Promise.all()` execution |
 | **Unified Tool Layer** | Generic MCP client (HTTP streamable), code generation—all tools invoked via Claude tool_use |
 | **Code Generation** | On-the-fly integrations, data processing, API calls |
 | **Skills Framework** | Infrastructure for `.claude/skills/` packages |
@@ -139,7 +139,7 @@ Orion's responses must be accurate, grounded, and verified before delivery.
 | **Cloud Run Deployment** | HTTP mode, auto-scaling, secrets management |
 
 **MVP Workflows:**
-- Deep Research (multi-step with subagent parallelization, synthesis, source citation)
+- Deep Research (multi-step with parallel tool execution, synthesis, source citation)
 - Summarization (Slack threads, documents, conversations)
 - Q&A (grounded responses with verification)
 
@@ -158,7 +158,7 @@ Orion's responses must be accurate, grounded, and verified before delivery.
 | Agent Loop (`src/agent/loop.ts`) | 1 day | P0 |
 | Generic MCP Client (`src/tools/mcp/client.ts`) | 1 day | P0 |
 | Tool Registry (`src/tools/registry.ts`) | 0.5 day | P0 |
-| Subagent Spawner (`src/agent/subagents.ts`) | 0.5 day | P0 |
+| Parallel Tool Executor (in `src/agent/loop.ts`) | Included in Agent Loop | P0 |
 | Response Generator (replace placeholder) | 0.5 day | P0 |
 | Dockerfile + Cloud Run config | 0.5 day | P0 |
 | CI/CD Pipeline | 0.5 day | P1 |
@@ -217,11 +217,11 @@ Alex is a Product Manager at SambaTV preparing for a cross-functional planning m
 
 Normally, this would take 45 minutes of hunting—opening tabs, searching Slack, scrolling through old threads, piecing together fragments. Instead, Alex opens Orion in Slack and types: "What do we know about [Competitor X]'s product announcement in October and how does it affect our Q1 priorities?"
 
-Orion spawns three parallel research subagents. One searches Slack history, another queries Confluence, and a third synthesizes the analyst report from the shared drive. Within 90 seconds, Alex receives a structured summary: the competitor announcement, internal reactions from engineering and sales, the strategic implications documented by the product team, and links to source materials.
+Orion executes three parallel tool calls. One searches Slack history, another queries Confluence, and a third retrieves the analyst report from the shared drive. Within 90 seconds, Alex receives a structured summary: the competitor announcement, internal reactions from engineering and sales, the strategic implications documented by the product team, and links to source materials.
 
 The meeting starts in 5 minutes. Alex walks in prepared, cites specific internal discussions, and leads a focused conversation. Her colleagues ask, "How did you pull that together so fast?"
 
-**Requirements revealed:** Multi-source search, parallel subagent execution, source citation, Slack/Confluence integration, synthesis capability.
+**Requirements revealed:** Multi-source search, parallel tool execution, source citation, Slack/Confluence integration, synthesis capability.
 
 ---
 
@@ -285,7 +285,7 @@ By end of week, ticket volume is down 30%. Sam's team can finally focus on infra
 
 | Journey | Key Capabilities Required |
 |---------|---------------------------|
-| **Alex (Research)** | Multi-source search, parallel subagents, source citation, Slack/Confluence integration |
+| **Alex (Research)** | Multi-source search, parallel tool execution, source citation, Slack/Confluence integration |
 | **Marcus (Consultant)** | Custom MCP servers, internal data access, structured recommendations, exact ID matching |
 | **Priya (Sales)** | Web research, prospect dossiers, cross-reference internal data, actionable insights |
 | **Jordan (New Hire)** | Onboarding docs, troubleshooting, recent issue discovery, documentation linking |
@@ -331,7 +331,7 @@ Orion's approach: generate code on-the-fly. When a user needs data from a system
 
 Traditional AI assistants have a fixed set of capabilities decided at build time. Adding new features requires code changes and redeployment.
 
-Orion's approach: everything is a tool call—MCP servers, vector DBs, code generation, subagents, skills, commands. The agent selects the right tool for each task. New capabilities are added by dropping files into `.orion/` or `.claude/` directories.
+Orion's approach: everything is a tool call—MCP servers, vector DBs, code generation, skills, commands. The agent selects the right tool for each task. New capabilities are added by dropping files into `.orion/` or `.skills/` directories.
 
 **Implications:**
 - Capabilities grow without code changes
@@ -472,7 +472,7 @@ Orion connects to enterprise systems through a unified tool layer:
 │  │  ORION CONTAINER                                        │ │
 │  │  ├── Slack Bolt (HTTP mode)                             │ │
 │  │  ├── Agent Loop (Anthropic messages.create + tool_use) │ │
-│  │  ├── Subagent Spawner (parallel API calls)              │ │
+│  │  ├── Parallel Tool Executor (Promise.all on tool_use)   │ │
 │  │  ├── Generic MCP Client (HTTP streamable transport)     │ │
 │  │  └── Langfuse SDK (tracing)                             │ │
 │  └────────────────────────────────────────────────────────┘ │
@@ -491,7 +491,7 @@ Orion connects to enterprise systems through a unified tool layer:
 - Direct Anthropic API replaces Agent SDK (eliminates sandbox spin-up latency)
 - Cloud Run deployment replaces Vercel (supports 300s+ timeouts for agent loops)
 - Generic MCP client connects to any HTTP streamable MCP server at runtime
-- Subagents are parallel `messages.create()` calls with isolated context
+- Parallel tool execution via native Claude `tool_use` pattern with `Promise.all()`
 
 ## Functional Requirements
 
@@ -500,8 +500,8 @@ Orion connects to enterprise systems through a unified tool layer:
 - FR1: System executes the agent loop (Gather Context → Take Action → Verify Work) for every user interaction
 - FR2: System verifies responses before delivery and iterates until verification passes
   - *Verification approach:* Verification prompts in system prompt instruct Claude to check tool results for errors, validate factual claims against sources, and confirm task completion before responding. Implementation details in tech spec.
-- FR3: System spawns subagents for parallel task execution with isolated context windows
-- FR4: System aggregates only relevant results from subagents into the orchestrator response
+- FR3: System executes multiple tool calls in parallel when beneficial (via native Claude tool_use pattern)
+- FR4: System synthesizes results from multiple tool calls into coherent responses (handled by Claude natively)
 - FR5: System manages conversation context across long-running threads via compaction
 - FR6: System cites sources for factual claims in responses
 
@@ -588,7 +588,7 @@ Orion connects to enterprise systems through a unified tool layer:
 | **Tool-augmented response** | 3-10 seconds | Time from user message to complete response with tool calls |
 | **Deep research workflow** | <5 minutes | Time for multi-source research with synthesis |
 | **Streaming start** | <500ms | Time from message receipt to first streamed token |
-| **Subagent parallelization** | 3 concurrent max | Parallel subagents per request |
+| **Parallel tool calls** | No hard limit | Claude manages parallel tool_use blocks natively |
 
 ### Security
 

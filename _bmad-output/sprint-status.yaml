@@ -31,15 +31,16 @@
 
 # CURRENT FOCUS:
 # ==============
-# 🎯 EPIC 2 ONLY - Complete all stories before moving to Epic 3
+# 🎯 EPIC 7: SLACK POLISH - UX improvements prioritized
 #
 # PRIORITY ORDER (work in sequence):
-#   1. 2-2-agent-loop-implementation → ✅ DONE
-#   2. 2-8-app-mention-handler → IN PROGRESS - actively being worked
-#   3. 2-5-thread-context-history → READY - pick up after 2-8 done
-#   4. 2-6-context-compaction → READY - pick up after 2-5 done
-#   5. 2-7-source-citations → DONE - code review fixes applied; tests passing
-#   6. epic-2-retrospective → After all stories done
+#   1. 7-5-duplicate-response-bug → P0 BUG - fix first
+#   2. 7-3-contextual-tool-feedback → P1 - biggest UX impact
+#   3. 7-4-response-completion-indicators → P2 - quick win
+#   4. 7-1-dynamic-suggested-prompts → P2
+#   5. 7-2-thread-summarization → P2
+#
+# NEXT: Epic 5 (Memory), Epic 6 (Skills)
 
 generated: 2025-12-23
 project: 2025-12 orion-slack-agent
@@ -63,39 +64,60 @@ development_status:
   epic-1-retrospective: done
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 2: Agent Core Loop 🎯 CURRENT FOCUS
+  # Epic 2: Agent Core Loop ✅ COMPLETE
   # ═══════════════════════════════════════════════════════════════════════════
-  epic-2: in-progress
+  epic-2: done
   2-1-anthropic-api-integration: done
   2-2-agent-loop-implementation: done          # ✅ Code review passed
   2-3-response-verification-retry: done
   2-4-orion-error-graceful-degradation: done   # Fixed: was 'complete'
   2-5-thread-context-history: done             # ✅ Code review fixes applied; tests passing
-  2-6-context-compaction: done        # Code review fixes applied; tests passing
+  2-6-context-compaction: done                 # Code review fixes applied; tests passing
   2-7-source-citations: done                   # ✅ Code review fixes applied; tests passing
-  2-8-app-mention-handler: in-progress         # 🔨 ACTIVELY WORKING
+  2-8-app-mention-handler: done                # ✅ Code review fixes applied 2025-12-31
+  2-9-streaming-input-accumulation: done     # ✅ Code review passed 2025-01-02
   epic-2-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 3: Tool Connectivity (MCP) ⏸️ BLOCKED - waiting for Epic 2
+  # Epic 3: Tool Connectivity (MCP) ✅ COMPLETE
   # ═══════════════════════════════════════════════════════════════════════════
-  epic-3: backlog
-  3-1-generic-mcp-client: done
-  3-2-tool-discovery-registration: done
-  3-3-tool-execution-error-handling: done
+  # Completed 2026-01-02: All stories including 3.5 (MCP lifecycle) done
+  epic-3: done
+  3-1-generic-mcp-client: done                  # ✅ Code review passed 2025-01-02
+  3-2-tool-discovery-registration: done         # ✅ Code review passed 2025-01-02
+  3-3-tool-execution-error-handling: done       # ✅ Code review passed 2025-01-02
+  3-4-channel-tool-feedback: done               # ✅ Code review fixes applied 2025-01-02
+  3-5-mcp-session-lifecycle: done               # ✅ Code review fixes applied; tests passing
   epic-3-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 4: Subagents & Parallel Execution ⏸️ BLOCKED - waiting for Epic 2+3
+  # Epic 4: Subagents — REMOVED (2025-12-31)
   # ═══════════════════════════════════════════════════════════════════════════
-  epic-4: backlog
-  4-1-subagent-spawner: ready-for-dev
-  4-2-result-aggregation: ready-for-dev
-  4-3-deep-research-workflow: ready-for-dev
-  epic-4-retrospective: optional
+  # Reason: Over-engineering. Claude's native parallel tool_use pattern achieves
+  # the same outcome without a separate orchestration layer.
+  # See: sprint-change-proposal-2025-12-31-epic4-removal.md
+  #
+  # epic-4: removed
+  # 4-1-subagent-spawner: removed
+  # 4-2-result-aggregation: removed
+  # 4-3-deep-research-workflow: removed
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 5: Persistent Memory ⏸️ BLOCKED - waiting for Epic 2
+  # Epic 7: Slack Polish 🔄 IN PROGRESS — CURRENT PRIORITY
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Started 2026-01-02: UX improvements for tool feedback and response handling
+  # Prioritized over Epic 5/6 due to user-facing bugs and UX friction
+  epic-7: in-progress
+  # WORK ORDER (by priority):
+  7-5-duplicate-response-bug: done               # ✅ P0 BUG: Fixed 2026-01-02 (race condition in SDK + loop reset)
+  7-3-contextual-tool-feedback: done               # ✅ P1: Rich tool status messages - Code review passed 2026-01-02
+  7-4-response-completion-indicators: ready-for-dev  # P2: ✅ on answered messages
+  7-1-dynamic-suggested-prompts: ready-for-dev   # P2: Discovery prompts
+  7-2-thread-summarization: ready-for-dev        # P2: Thread summary
+  epic-7-retrospective: optional
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Epic 5: Persistent Memory ⏸️ BACKLOG - after Epic 7
   # ═══════════════════════════════════════════════════════════════════════════
   epic-5: backlog
   5-1-memory-tool-handler: ready-for-dev
@@ -104,20 +126,12 @@ development_status:
   epic-5-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 6: Skills & Extensions Framework ⏸️ BLOCKED - waiting for Epic 2+3
+  # Epic 6: Skills & Extensions Framework ⏸️ BACKLOG - after Epic 5
   # ═══════════════════════════════════════════════════════════════════════════
   epic-6: backlog
   6-1-agent-skills-loader: ready-for-dev
   6-2-commands-framework: ready-for-dev
   epic-6-retrospective: optional
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 7: Slack Polish ⏸️ BLOCKED - waiting for Epic 2
-  # ═══════════════════════════════════════════════════════════════════════════
-  epic-7: backlog
-  7-1-dynamic-suggested-prompts: ready-for-dev
-  7-2-thread-summarization: ready-for-dev
-  epic-7-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Epic 8: Code Generation & Execution (Phase 2 - Deferred)

@@ -1,11 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { toolRegistry } from './registry.js';
+import { resetMcpClientManager } from './mcp/manager.js';
 
 const callToolMock = vi.fn();
 
 vi.mock('./mcp/client.js', () => ({
   McpClient: vi.fn(() => ({
     callTool: callToolMock,
+    getServerName: () => 'rube',
+    getSessionId: () => 'session-mock',
+    getState: () => ({}),
+    listTools: vi.fn().mockResolvedValue({ success: true, data: [] }),
   })),
 }));
 
@@ -22,10 +27,30 @@ vi.mock('../config/mcp-servers.js', () => ({
   ],
 }));
 
+/**
+ * Helper to register an MCP tool in the registry (mimics what discovery does).
+ */
+function registerMcpTool(serverName: string, toolName: string) {
+  toolRegistry.registerMcpTools(serverName, [
+    {
+      originalName: toolName,
+      claudeTool: {
+        name: `${serverName}__${toolName}`,
+        input_schema: { type: 'object', properties: {} },
+      },
+    },
+  ]);
+}
+
 describe('executeToolCall (router)', () => {
   beforeEach(() => {
     toolRegistry.__resetForTests();
+    resetMcpClientManager(); // Reset client manager between tests
     callToolMock.mockReset();
+  });
+
+  afterEach(() => {
+    resetMcpClientManager();
   });
 
   it('returns TOOL_NOT_FOUND for unknown tools', async () => {
@@ -47,6 +72,9 @@ describe('executeToolCall (router)', () => {
 
   it('routes MCP tool names (server__tool) to McpClient.callTool and passes AbortSignal', async () => {
     const { executeToolCall } = await import('./router.js');
+
+    // Register the tool first - this is what discovery does
+    registerMcpTool('rube', 'search');
 
     callToolMock.mockResolvedValueOnce({
       success: true,
@@ -75,6 +103,9 @@ describe('executeToolCall (router)', () => {
 
   it('converts MCP { isError: true } payloads into ToolResult error (no throw)', async () => {
     const { executeToolCall } = await import('./router.js');
+
+    // Register the tool first
+    registerMcpTool('rube', 'search');
 
     callToolMock.mockResolvedValueOnce({
       success: true,
@@ -118,6 +149,42 @@ describe('executeToolCall (router)', () => {
       expect(result.data).toEqual({ echoed: { a: 1 } });
     }
   });
+
+  it('reuses cached client for multiple tool calls to same server (AC-C2)', async () => {
+    const { McpClient } = await import('./mcp/client.js');
+    const { executeToolCall } = await import('./router.js');
+
+    // Register the tool first
+    registerMcpTool('rube', 'search');
+
+    // Clear mock call counts for this specific test
+    vi.mocked(McpClient).mockClear();
+
+    callToolMock.mockResolvedValue({
+      success: true,
+      data: { content: [{ type: 'text', text: 'ok' }] },
+    });
+
+    // Make multiple calls
+    await executeToolCall({
+      toolName: 'rube__search',
+      toolUseId: 'toolu_a',
+      args: { query: 'first' },
+      traceId: 'trace-a',
+      signal: new AbortController().signal,
+    });
+
+    await executeToolCall({
+      toolName: 'rube__search',
+      toolUseId: 'toolu_b',
+      args: { query: 'second' },
+      traceId: 'trace-b',
+      signal: new AbortController().signal,
+    });
+
+    // McpClient should only be constructed once (same client reused)
+    expect(McpClient).toHaveBeenCalledTimes(1);
+    // But callTool should be called twice
+    expect(callToolMock).toHaveBeenCalledTimes(2);
+  });
 });
-
-

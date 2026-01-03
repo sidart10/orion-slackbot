@@ -7,7 +7,7 @@ inputDocuments:
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-last_updated: '2025-12-22'
+last_updated: '2025-12-31'
 starterTemplate: 'Custom Structure (Direct API + Agent Skills) - no external template'
 ---
 
@@ -24,8 +24,8 @@ This document provides the complete epic and story breakdown for 2025-12 orion-s
 **Agent Core Execution (FR1-6):**
 FR1: System executes the agent loop (Gather Context → Take Action → Verify Work) for every user interaction
 FR2: System verifies responses before delivery and iterates until verification passes (via prompt-based verification instructions)
-FR3: System spawns subagents for parallel task execution with isolated context windows
-FR4: System aggregates only relevant results from subagents into the orchestrator response
+FR3: System executes multiple tool calls in parallel when beneficial (via native Claude tool_use pattern)
+FR4: System synthesizes results from multiple tool calls into coherent responses (handled by Claude natively)
 FR5: System manages conversation context across long-running threads via compaction
 FR6: System cites sources for factual claims in responses
 
@@ -98,7 +98,7 @@ NFR1: Simple query response time 1-3 seconds
 NFR2: Tool-augmented response time 3-10 seconds
 NFR3: Deep research workflow <5 minutes
 NFR4: Streaming start <500ms from message receipt
-NFR5: Maximum 3 concurrent subagents per request
+NFR5: Parallel tool calls managed natively by Claude (no hard limit)
 
 **Security (NFR6-11):**
 NFR6: All API keys and tokens stored in GCP Secret Manager
@@ -202,7 +202,7 @@ NFR39: Alert on unusual usage patterns
 Epic 1 (Foundation):     Infrastructure + FR48, FR49 (feedback buttons)
 Epic 2 (Agent Loop):     FR1, FR2, FR5, FR6, FR47, FR50 (dynamic status, error templates)
 Epic 3 (MCP/Tools):      FR26, FR27, FR28, FR29, FR39
-Epic 4 (Subagents):      FR3, FR4, FR10
+Epic 4 (REMOVED):        FR3, FR4 reworded; FR10 via native pattern
 Epic 5 (Memory):         FR44, FR45, FR46
 Epic 6 (Skills):         FR24, FR25
 Epic 7 (Slack Polish):   FR16, FR18 (suggested prompts, summarization)
@@ -292,32 +292,25 @@ Connect Orion to external tools via the Model Context Protocol.
 **Stories:**
 | Story | Title | Status |
 |-------|-------|--------|
-| 3.1 | Generic MCP Client | ready-for-dev |
-| 3.2 | Tool Discovery & Registration | ready-for-dev |
-| 3.3 | Tool Execution & Error Handling | ready-for-dev |
+| 3.1 | Generic MCP Client | done |
+| 3.2 | Tool Discovery & Registration | done |
+| 3.3 | Tool Execution & Error Handling | done |
+| 3.4 | Channel @Mention Tool Feedback | done |
+| 3.5 | MCP Session Lifecycle | ready-for-dev |
 
 ---
 
-### Epic 4: Subagents & Parallel Execution
-Enable complex tasks to spawn parallel workers for faster execution.
+### ~~Epic 4: Subagents & Parallel Execution~~ — REMOVED
 
-**User Outcome:** Research and complex tasks run in parallel, returning synthesized results faster.
+**Removed:** 2025-12-31  
+**Reason:** Over-engineering. Claude's native parallel `tool_use` pattern achieves the same outcome without a separate orchestration layer. Parallel tool execution is already supported by Epic 2 (Agent Loop) + Epic 3 (MCP Tools).
 
-**Scope:**
-- Subagent spawner (parallel `messages.create()` calls)
-- Context isolation (subagents don't pollute parent context)
-- Result aggregation (only relevant results bubble up)
-- `Promise.all()` orchestration with error handling
+**Original FRs (FR3, FR4):** Reworded to reflect native pattern.  
+**FR10 (Deep Research):** Achieved via prompting + parallel MCP tool execution.
 
-**FRs:** FR3, FR4, FR10
-**NFRs:** NFR3, NFR5
+**See:** `sprint-change-proposal-2025-12-31-epic4-removal.md`
 
-**Stories:**
-| Story | Title | Status |
-|-------|-------|--------|
-| 4.1 | Subagent Spawner | ready-for-dev |
-| 4.2 | Result Aggregation | ready-for-dev |
-| 4.3 | Deep Research Workflow | ready-for-dev |
+**Archived Stories:** `_archived/4-1-*.md`, `_archived/4-2-*.md`, `_archived/4-3-*.md`
 
 ---
 
@@ -368,33 +361,42 @@ Enable developers to add new capabilities via file-based definitions.
 ---
 
 ### Epic 7: Slack Polish
-Add discovery and summarization features to complete the Slack experience.
+Add discovery, summarization, and UX polish features to complete the Slack experience.
 
-**User Outcome:** Users discover Orion's capabilities through intelligent prompts and can summarize threads on demand.
+**User Outcome:** Users discover Orion's capabilities through intelligent prompts, see exactly what Orion is doing during tool calls, and have clear visual feedback when questions are answered.
 
 **Scope:**
 - Dynamic suggested prompts (context-aware, evolve based on user behavior)
 - Thread summarization command/capability
+- Contextual tool feedback (show which tools and what queries)
+- Response completion indicators (✅ on answered messages)
+- Bug fixes for response handling
 
-**FRs:** FR16, FR18
+**FRs:** FR16, FR18, FR47 (enhanced)
 **NFRs:** NFR22
 
 **Stories:**
-| Story | Title | Status |
-|-------|-------|--------|
-| 7.1 | Dynamic Suggested Prompts | ready-for-dev |
-| 7.2 | Thread Summarization | ready-for-dev |
+| Story | Title | Status | Priority |
+|-------|-------|--------|----------|
+| 7.1 | Dynamic Suggested Prompts | ready-for-dev | P2 |
+| 7.2 | Thread Summarization | ready-for-dev | P2 |
+| 7.3 | Contextual Tool Feedback | ready-for-dev | P1 |
+| 7.4 | Response Completion Indicators | ready-for-dev | P2 |
+| 7.5 | Fix Duplicate Response Bug | ready-for-dev | P0 |
 
 **Note:** Foundational UX (FR47-50) moved to Epic 1/2 for day-1 integration:
-- FR47 (dynamic status) → Story 2.2 ✓
+- FR47 (dynamic status) → Story 2.2 ✓ (enhanced in 7.3)
 - FR48/49 (feedback) → Story 1.8
 - FR50 (error templates) → Story 2.4
 - Response templates → Story 2.1
 - Citations → Story 2.7
 
-**Stories:**
+**Stories (Updated 2026-01-02):**
 - 7.1: Dynamic Suggested Prompts (context-aware)
 - 7.2: Thread Summarization on Demand
+- 7.3: Contextual Tool Feedback — "Using Composio Exa to search 'SF restaurants'..."
+- 7.4: Response Completion Indicators — ✅ on answered messages
+- 7.5: Fix Duplicate Response Bug — P0 bug, response appearing twice
 
 ---
 
@@ -419,15 +421,16 @@ Enable Orion to write and execute code when pre-built integrations don't exist.
 | Epic | Title | Stories | Phase |
 |------|-------|---------|-------|
 | 1 | Foundation & Deployment | 8 (1.1-1.8) | MVP |
-| 2 | Agent Core Loop | 7 (2.1-2.7) | MVP |
-| 3 | Tool Connectivity (MCP) | 5 | MVP |
-| 4 | Subagents & Parallel Execution | 3 | MVP |
+| 2 | Agent Core Loop | 9 (2.1-2.9) | MVP |
+| 3 | Tool Connectivity (MCP) | 5 (3.1-3.5) | MVP |
+| 4 | ~~Subagents~~ | 0 | REMOVED |
 | 5 | Persistent Memory | 3 | MVP |
 | 6 | Skills & Extensions Framework | 3 | MVP |
-| 7 | Slack Polish | 2 | MVP |
+| 7 | Slack Polish | 5 (7.1-7.5) | MVP |
 | 8 | Code Generation & Execution | TBD | Phase 2 |
 
-**MVP Total:** ~31 stories across 7 epics
+**MVP Total:** ~30 stories across 6 epics (Epic 4 removed)
+**Updated:** 2026-01-02 (Story 3.5 added per MCP lifecycle course correction)
 **Phase 2:** Epic 8 (deferred)
 
 ### UX Integration (Hybrid Approach)
@@ -442,12 +445,15 @@ Foundational UX moved into Epic 1/2 for day-1 quality:
 | 2.4 | Error Response Template | FR50 |
 | 2.7 | Block Kit Citation Context | UX spec |
 
-### Epic 7 (Slack Polish) — Reduced Scope
+### Epic 7 (Slack Polish) — Expanded Scope (2026-01-02)
 
-| Story | Title | FRs |
-|-------|-------|-----|
+| Story | Title | FRs/Notes |
+|-------|-------|-----------|
 | 7.1 | Dynamic Suggested Prompts | FR16 |
 | 7.2 | Thread Summarization | FR18 |
+| 7.3 | Contextual Tool Feedback | FR47 enhanced - rich status messages |
+| 7.4 | Response Completion Indicators | UX - ✅ reaction on completion |
+| 7.5 | Fix Duplicate Response Bug | P0 Bug - response appearing twice |
 
 ---
 
@@ -457,7 +463,7 @@ These are enabled by the platform, not separate work:
 
 | Use Case | Enabled By | Notes |
 |----------|------------|-------|
-| **Deep Research** | Epic 2 + 3 + 4 | Agent loop + MCP tools + subagent parallelization |
+| **Deep Research** | Epic 2 + 3 | Agent loop + MCP tools (parallel via native tool_use) |
 | **Q&A** | Epic 2 + 3 | Agent loop + MCP tools for knowledge search |
 | **Summarization** | Epic 2 | Just prompting—Claude summarizes content |
 | **Prospect Dossiers** | Epic 2 + 3 | Agent loop + web search MCP |

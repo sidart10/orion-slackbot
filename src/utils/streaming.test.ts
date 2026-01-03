@@ -388,5 +388,99 @@ describe('Streaming Safety (AC#7, AC#8, AC#9)', () => {
       await streamer.stop();
     });
   });
+
+  /**
+   * H2: Race Condition Test - flushInProgress lock
+   * @see Story 7.5 - Duplicate Response Bug
+   * @see tech-spec-duplicate-response-fix.md - Race condition analysis
+   */
+  describe('flushInProgress race condition (Story 7.5)', () => {
+    it('should wait for in-progress flush before calling SDK stop()', async () => {
+      // Simulate slow append that takes 500ms
+      let appendResolve: () => void;
+      const appendPromise = new Promise<void>((resolve) => {
+        appendResolve = resolve;
+      });
+      mockStreamer.append.mockImplementation(async () => {
+        await appendPromise;
+      });
+
+      const streamer = new SlackStreamer(config);
+      await streamer.start();
+
+      // Append content - schedules debounce
+      streamer.append('Content');
+
+      // Fire debounce timer - this starts flushPendingContent
+      // which calls appendWithRetry (now in-progress, waiting on appendPromise)
+      await vi.advanceTimersByTimeAsync(250);
+
+      // At this point: pendingContent is empty, but flushInProgress is set
+      // Verify append was called (flush started)
+      expect(mockStreamer.append).toHaveBeenCalledTimes(1);
+
+      // Call stop() BEFORE append completes
+      // This is the race condition scenario
+      const stopPromise = streamer.stop();
+
+      // stop() should NOT have called SDK stop yet (waiting for flushInProgress)
+      expect(mockStreamer.stop).not.toHaveBeenCalled();
+
+      // Now resolve the append
+      appendResolve!();
+
+      // Wait for stop to complete
+      await stopPromise;
+
+      // Now SDK stop should have been called AFTER append completed
+      expect(mockStreamer.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('should serialize concurrent flush calls via flushInProgress lock', async () => {
+      // Track order of operations
+      const callOrder: string[] = [];
+
+      let firstAppendResolve: () => void;
+      const firstAppendPromise = new Promise<void>((resolve) => {
+        firstAppendResolve = resolve;
+      });
+
+      mockStreamer.append.mockImplementation(async () => {
+        const callNum = mockStreamer.append.mock.calls.length;
+        callOrder.push(`append-start-${callNum}`);
+        if (callNum === 1) {
+          await firstAppendPromise;
+        }
+        callOrder.push(`append-end-${callNum}`);
+      });
+
+      const streamer = new SlackStreamer(config);
+      await streamer.start();
+
+      // First append - schedules debounce
+      streamer.append('First');
+      await vi.advanceTimersByTimeAsync(250);
+
+      // Second append while first is in progress - schedules new debounce
+      streamer.append('Second');
+      await vi.advanceTimersByTimeAsync(250);
+
+      // First append should have started, second should be waiting
+      expect(callOrder).toContain('append-start-1');
+      expect(callOrder).not.toContain('append-start-2');
+
+      // Complete first append
+      firstAppendResolve!();
+      await vi.advanceTimersByTimeAsync(0); // Allow microtasks
+
+      // Now stop to let everything complete
+      await streamer.stop();
+
+      // Verify serialized order: first must complete before second starts
+      const firstEndIdx = callOrder.indexOf('append-end-1');
+      const secondStartIdx = callOrder.indexOf('append-start-2');
+      expect(firstEndIdx).toBeLessThan(secondStartIdx);
+    });
+  });
 });
 

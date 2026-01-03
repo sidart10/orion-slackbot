@@ -83,8 +83,17 @@ export interface AgentLoopOptions {
   /**
    * Optional status updater hook.
    * The Slack handler can provide an implementation that calls `setStatus({ status, loading_messages })`.
+   *
+   * @see Story 7.3 - Contextual Tool Feedback (AC1-AC5)
    */
-  setStatus?: (params: { phase: 'gather' | 'act' | 'tool' | 'verify' | 'final'; toolName?: string | null }) => void | Promise<void>;
+  setStatus?: (params: {
+    phase: 'gather' | 'act' | 'tool' | 'verify' | 'final';
+    toolName?: string | null;
+    /** Tool input for query extraction (Story 7.3 AC1) */
+    toolInput?: Record<string, unknown>;
+    /** All tools when parallel execution (Story 7.3 AC4) */
+    allTools?: Array<{ name: string; input: Record<string, unknown> }>;
+  }) => void | Promise<void>;
   /**
    * Optional tool executor. If omitted, tool calls return TOOL_NOT_IMPLEMENTED.
    * (Tool execution is expanded in Epic 3.)
@@ -105,6 +114,134 @@ const anthropic = new Anthropic({
 });
 
 const DEFAULT_MAX_TOOL_LOOPS = 10;
+
+/**
+ * Format tool name for display.
+ * "msci-reports__search_reports" -> "MSCI Reports: Search Reports"
+ * "local_tool" -> "Local Tool"
+ *
+ * @see Story 7.3 - Contextual Tool Feedback (exported for status-messages.ts)
+ */
+export function formatToolDisplayName(toolName: string): string {
+  // MCP tools have format: serverName__toolName
+  if (toolName.includes('__')) {
+    const [server, tool] = toolName.split('__', 2);
+    const formatPart = (s: string): string =>
+      s
+        .replace(/[-_]/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+    return `${formatPart(server ?? '')}: ${formatPart(tool ?? '')}`;
+  }
+  // Static tools: just format nicely
+  return toolName
+    .replace(/[-_]/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Summarize tool input for source context display.
+ * Extracts the most relevant parameter (e.g., query, search term, name).
+ *
+ * @see Story 7.3 - Contextual Tool Feedback (exported for status-messages.ts)
+ */
+export function summarizeToolInput(input: unknown): string {
+  if (!input || typeof input !== 'object') return '';
+  
+  const obj = input as Record<string, unknown>;
+  
+  // Common search/query parameters to look for
+  const queryKeys = ['query', 'search_query', 'search', 'name', 'term', 'q', 'keyword', 'filter'];
+  
+  for (const key of queryKeys) {
+    const val = obj[key];
+    if (typeof val === 'string' && val.trim()) {
+      const summary = val.trim().slice(0, 60);
+      return summary.length < val.trim().length ? `${summary}…` : summary;
+    }
+  }
+  
+  // Fallback: stringify first string value found
+  for (const val of Object.values(obj)) {
+    if (typeof val === 'string' && val.trim()) {
+      const summary = val.trim().slice(0, 40);
+      return summary.length < val.trim().length ? `${summary}…` : summary;
+    }
+  }
+  
+  return '';
+}
+
+/**
+ * Extract URL sources from tool results.
+ * Looks for common patterns in web search, MCP, and other tool responses.
+ */
+function extractUrlSourcesFromResult(
+  toolName: string,
+  result: unknown
+): ContextSource[] {
+  const sources: ContextSource[] = [];
+  if (!result || typeof result !== 'object') return sources;
+
+  // Parse stringified JSON if needed
+  let data = result;
+  if (typeof result === 'string') {
+    try {
+      data = JSON.parse(result);
+    } catch {
+      return sources;
+    }
+  }
+
+  // Recursively find objects with url/title patterns
+  const seen = new Set<string>();
+  const extract = (obj: unknown, depth = 0): void => {
+    if (depth > 5 || !obj || typeof obj !== 'object') return;
+    
+    // Check if this object looks like a source (has url and title/name)
+    const o = obj as Record<string, unknown>;
+    const url = o.url ?? o.link ?? o.href;
+    const title = o.title ?? o.name ?? o.headline ?? o.description;
+    
+    if (typeof url === 'string' && url.startsWith('http') && !seen.has(url)) {
+      seen.add(url);
+      sources.push({
+        type: 'tool',
+        title: typeof title === 'string' ? title.slice(0, 80) : new URL(url).hostname,
+        reference: toolName,
+        url,
+      });
+    }
+
+    // Recurse into arrays and objects
+    if (Array.isArray(obj)) {
+      for (const item of obj) extract(item, depth + 1);
+    } else {
+      for (const val of Object.values(o)) extract(val, depth + 1);
+    }
+  };
+
+  extract(data);
+  return sources.slice(0, 10); // Cap at 10 sources per tool
+}
+
+/**
+ * Story 2.9: Maximum buffer size for streaming tool input accumulation.
+ * Prevents memory exhaustion from extremely large tool inputs.
+ */
+const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB limit per tool input
+
+/**
+ * Story 2.9: Tool use with index tracking for streaming accumulation.
+ * The _index correlates with content_block events for proper accumulation.
+ * The _skipExecution flag marks tools that should be skipped due to parse errors.
+ */
+type StreamingToolUse = {
+  id: string;
+  name: string;
+  input: unknown;
+  _index: number;
+  _skipExecution?: boolean;
+};
 
 /**
  * Execute the canonical agent loop and stream text deltas to the caller.
@@ -212,6 +349,9 @@ export async function* executeAgentLoop(
   let lastStopReason: string | null | undefined;
   let toolCount = 0;
   let maxToolLoopsReached = false;
+  
+  // Track tools called for source attribution
+  const toolSourcesMap = new Map<string, ContextSource>();
 
   // Story 2.3: Verification retry state
   let verificationAttempts = 0;
@@ -258,6 +398,23 @@ export async function* executeAgentLoop(
 
     // Inner tool loop for this verification attempt
     for (let iteration = 0; iteration < MAX_TOOL_LOOPS; iteration++) {
+      // Story 7.5 Fix: Reset attemptResponse for each LLM iteration.
+      // Only the FINAL iteration's text (after all tools complete) should be delivered.
+      // Previous iterations may output "thinking" text before tool_use that shouldn't be shown.
+      const previousAttemptResponse = attemptResponse;
+      attemptResponse = '';
+
+      // Debug log for duplicate detection (Story 7.5)
+      if (previousAttemptResponse.length > 0) {
+        logger.debug({
+          event: 'agent.loop.reset_attempt_response',
+          iteration,
+          previousLength: previousAttemptResponse.length,
+          previousPreview: previousAttemptResponse.slice(0, 100),
+          traceId: context.traceId,
+        });
+      }
+
       // Create a span for this LLM call (per-call visibility)
       const llmSpan = createAgentSpan(trace, `llm.anthropic.${iteration}`, {
         model: config.anthropicModel,
@@ -278,7 +435,10 @@ export async function* executeAgentLoop(
       let outputTokensThisCall = 0;
       let stopReasonThisCall: string | null | undefined;
       let modelThisCall: string | undefined;
-      const toolUsesThisCall: Array<{ id: string; name: string; input: unknown }> = [];
+      // Story 2.9: Use StreamingToolUse type with _index for accumulation correlation
+      const toolUsesThisCall: StreamingToolUse[] = [];
+      // Story 2.9: Buffer for accumulating streamed tool inputs (index → partial JSON)
+      const toolInputBuffers = new Map<number, string>();
 
       for await (const event of stream) {
         if (event.type === 'message_start') {
@@ -288,20 +448,87 @@ export async function* executeAgentLoop(
 
         if (event.type === 'content_block_start') {
           if (event.content_block?.type === 'tool_use') {
+            // Story 2.9: Capture index for streaming accumulation correlation
+            // M3 fix: Defensive type check for index field
+            const rawIndex = (event as Record<string, unknown>).index;
+            const blockIndex = typeof rawIndex === 'number' ? rawIndex : -1;
             toolUsesThisCall.push({
               id: event.content_block.id,
               name: event.content_block.name,
               input: event.content_block.input,
+              _index: blockIndex,
             });
+            // Initialize buffer for potential streamed input
+            toolInputBuffers.set(blockIndex, '');
           }
           continue;
         }
 
         if (event.type === 'content_block_delta') {
-          if (event.delta?.type === 'text_delta') {
-            const text = event.delta.text ?? '';
+          const deltaEvent = event as { index?: unknown; delta?: { type?: string; text?: string; partial_json?: string } };
+          if (deltaEvent.delta?.type === 'text_delta') {
+            const text = deltaEvent.delta.text ?? '';
             // Story 2.3: Buffer instead of yielding immediately (AC#2)
             attemptResponse += text;
+          } else if (deltaEvent.delta?.type === 'input_json_delta') {
+            // Story 2.9: Accumulate streamed tool input JSON
+            // M3 fix: Defensive type check for index field
+            const blockIndex = typeof deltaEvent.index === 'number' ? deltaEvent.index : -1;
+            const partialJson = deltaEvent.delta.partial_json ?? '';
+            const currentBuffer = toolInputBuffers.get(blockIndex) ?? '';
+            const newBuffer = currentBuffer + partialJson;
+
+            // Enforce buffer size limit (AC#6)
+            if (newBuffer.length > MAX_BUFFER_SIZE) {
+              logger.error({
+                event: 'tool.input.too_large',
+                index: blockIndex,
+                bufferSize: newBuffer.length,
+                traceId: context.traceId,
+              });
+              // Abandon accumulation - will fall back to initial input
+              toolInputBuffers.delete(blockIndex);
+            } else {
+              toolInputBuffers.set(blockIndex, newBuffer);
+            }
+          }
+          continue;
+        }
+
+        // Story 2.9: Handle content_block_stop to finalize accumulated input
+        if (event.type === 'content_block_stop') {
+          // M3 fix: Defensive type check for index field
+          const rawIndex = (event as Record<string, unknown>).index;
+          const blockIndex = typeof rawIndex === 'number' ? rawIndex : -1;
+          const accumulated = toolInputBuffers.get(blockIndex);
+
+          if (accumulated !== undefined && accumulated.length > 0) {
+            const tool = toolUsesThisCall.find((t) => t._index === blockIndex);
+            if (tool) {
+              try {
+                // Accumulated JSON takes precedence over initial input (Anthropic spec)
+                tool.input = JSON.parse(accumulated);
+                logger.info({
+                  event: 'tool.input.accumulated',
+                  toolName: tool.name,
+                  bytes: accumulated.length,
+                  success: true,
+                  traceId: context.traceId,
+                });
+              } catch (e) {
+                // AC#4: Log error and mark tool to be skipped
+                logger.error({
+                  event: 'tool.input.parse_failed',
+                  index: blockIndex,
+                  toolName: tool.name,
+                  bytes: accumulated.length,
+                  error: e instanceof Error ? e.message : String(e),
+                  traceId: context.traceId,
+                });
+                tool._skipExecution = true;
+              }
+            }
+            toolInputBuffers.delete(blockIndex);
           }
           continue;
         }
@@ -337,6 +564,18 @@ export async function* executeAgentLoop(
       const wantsToolUse =
         stopReasonThisCall === 'tool_use' || toolUsesThisCall.length > 0;
 
+      // Debug: Log what each iteration produced (Story 7.5 duplicate detection)
+      logger.debug({
+        event: 'agent.loop.iteration_complete',
+        iteration,
+        stopReason: stopReasonThisCall,
+        wantsToolUse,
+        attemptResponseLength: attemptResponse.length,
+        attemptResponsePreview: attemptResponse.slice(0, 200),
+        toolCount: toolUsesThisCall.length,
+        traceId: context.traceId,
+      });
+
       if (!wantsToolUse) {
         break;
       }
@@ -356,21 +595,67 @@ export async function* executeAgentLoop(
       }
 
       toolCount += toolUsesThisCall.length;
-      void options.setStatus?.({ phase: 'tool', toolName: toolUsesThisCall[0]?.name ?? null });
+      // Story 7.3: Pass tool context for rich status messages (AC1, AC4)
+      void options.setStatus?.({
+        phase: 'tool',
+        toolName: toolUsesThisCall[0]?.name ?? null,
+        toolInput: toolUsesThisCall[0]?.input as Record<string, unknown> | undefined,
+        allTools: toolUsesThisCall.map((t) => ({
+          name: t.name,
+          input: t.input as Record<string, unknown>,
+        })),
+      });
 
-      // Append assistant message containing tool_use blocks.
-      attemptMessages.push({
-        role: 'assistant',
-        content: toolUsesThisCall.map((t) => ({
-          type: 'tool_use',
+      // Append assistant message containing text (if any) + tool_use blocks.
+      // Fix: Include text block to match Anthropic's conversation format.
+      // This ensures Claude remembers what it said before the tool call.
+      const assistantContent: Anthropic.ContentBlockParam[] = [];
+
+      // Include any text that came before tool_use (e.g., "I'll search for that...")
+      if (attemptResponse.trim().length > 0) {
+        assistantContent.push({ type: 'text', text: attemptResponse });
+      }
+
+      // Include tool_use blocks
+      assistantContent.push(
+        ...toolUsesThisCall.map((t) => ({
+          type: 'tool_use' as const,
           id: t.id,
           name: t.name,
-          input: t.input,
-        })),
+          input: t.input as Record<string, unknown>,
+        }))
+      );
+
+      attemptMessages.push({
+        role: 'assistant',
+        content: assistantContent,
       });
 
       const toolResults = await Promise.all(
         toolUsesThisCall.map(async (toolUse) => {
+          // Story 2.9 AC#4: Skip tools with parse failures
+          if (toolUse._skipExecution) {
+            logger.warn({
+              event: 'tool.execution.skipped',
+              toolName: toolUse.name,
+              toolUseId: toolUse.id,
+              reason: 'input_parse_failed',
+              traceId: context.traceId,
+            });
+            return {
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: JSON.stringify({
+                success: false,
+                error: {
+                  code: 'TOOL_INPUT_PARSE_FAILED',
+                  message: `Tool '${toolUse.name}' input could not be parsed from streamed JSON`,
+                  retryable: false,
+                },
+              }),
+            };
+          }
+
           // Create a span for this tool call (full input/output visibility)
           const toolSpan = createAgentSpan(trace, `tool.${toolUse.name}`, {
             toolName: toolUse.name,
@@ -399,6 +684,35 @@ export async function* executeAgentLoop(
             output: result,
             durationMs: Date.now() - startMs,
           });
+          
+          // Extract URL sources from tool results (e.g., web search results)
+          const urlSources = extractUrlSourcesFromResult(toolUse.name, result);
+          
+          logger.debug({
+            event: 'tool.sources.extracted',
+            toolName: toolUse.name,
+            urlSourcesCount: urlSources.length,
+            urlSources: urlSources.slice(0, 3).map(s => ({ title: s.title, url: s.url })),
+            traceId: context.traceId,
+          });
+          
+          for (const src of urlSources) {
+            if (!toolSourcesMap.has(src.url ?? src.reference)) {
+              toolSourcesMap.set(src.url ?? src.reference, src);
+            }
+          }
+          
+          // If no URL sources found, track tool call itself as a source with context
+          if (urlSources.length === 0 && !toolSourcesMap.has(toolUse.name)) {
+            const displayName = formatToolDisplayName(toolUse.name);
+            const toolContext = summarizeToolInput(toolUse.input);
+            toolSourcesMap.set(toolUse.name, {
+              type: 'tool',
+              title: displayName,
+              reference: toolUse.name,
+              toolContext,
+            });
+          }
 
           return {
             type: 'tool_result',
@@ -534,6 +848,14 @@ export async function* executeAgentLoop(
 
   // Story 2.3: Yield verified content OR graceful failure (AC#2, AC#4)
   if (verification.passed) {
+    // Debug log for duplicate detection (Story 7.5)
+    logger.debug({
+      event: 'agent.loop.yielding_response',
+      responseLength: verifiedResponse.length,
+      responsePreview: verifiedResponse.slice(0, 200),
+      traceId: context.traceId,
+    });
+
     // Yield the verified response to the caller (chunked for Slack streaming)
     const chunks = chunkVerifiedOutput(verifiedResponse);
     const pacingMs =
@@ -604,12 +926,17 @@ export async function* executeAgentLoop(
   });
 
   void options.setStatus?.({ phase: 'final' });
+  
+  // Merge gather sources with tool sources
+  const toolSources = Array.from(toolSourcesMap.values());
+  const allSources = [...sources, ...toolSources];
+  
   return {
     inputTokens: totalInputTokens,
     outputTokens: totalOutputTokens,
     durationMs,
     nfr1Met,
-    sources,
+    sources: allSources,
     verification,
     toolCount,
     verificationAttempts,

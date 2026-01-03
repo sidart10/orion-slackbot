@@ -592,6 +592,7 @@ describe('executeTool', () => {
 | 2025-12-24 | Dev: Completed Task 3 (error normalization + Claude formatting + tests); `pnpm test` passing |
 | 2025-12-24 | Dev: Completed Task 4 (tool observability helpers + retry logging); `pnpm test` passing |
 | 2025-12-27 | Dev: Completed Task 5-7 (router + executor wiring into agent loop); `pnpm test` passing |
+| 2025-12-31 | Confirmed DONE during course correction. No changes needed — execution logic remains valid. Stories 3.1/3.2 session updates will flow through unchanged. |
 | 2025-12-27 | Code Review: Fixed M1 (added MCP content extraction tests), M2 (documented trace hierarchy), M3 (documented rate-limit redundancy); 699 tests passing |
 
 ## Dev Agent Record
@@ -638,6 +639,8 @@ Files created:
 - `src/tools/observability.test.ts`
 - `src/tools/router.ts`
 - `src/tools/router.test.ts`
+- `src/tools/executor.ts`
+- `src/tools/executor.test.ts`
 
 Files modified:
 - `src/utils/tool-result.ts`

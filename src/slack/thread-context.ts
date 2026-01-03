@@ -19,6 +19,10 @@ export interface ThreadMessage {
   text: string;
   ts: string;
   isBot: boolean;
+  /** Channel ID for permalink generation (optional) */
+  channelId?: string;
+  /** Human-readable display name (optional) */
+  userName?: string;
 }
 
 /**
@@ -121,6 +125,7 @@ export async function fetchThreadHistory({
           text,
           ts: msg.ts || '',
           isBot: !!msg.bot_id,
+          channelId: channel,
         });
       }
 

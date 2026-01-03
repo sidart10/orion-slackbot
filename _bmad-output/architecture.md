@@ -13,7 +13,7 @@ completedAt: '2025-12-22'
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22)'
+course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22); MCP SDK adoption (2025-12-31)'
 hasProjectContext: false
 ---
 
@@ -31,7 +31,7 @@ Orion's 43 functional requirements span 7 architectural domains:
 
 | Domain | FR Range | Core Capability |
 |--------|----------|-----------------|
-| Agent Core | FR1-6 | Agent loop execution, verification, subagents, context management |
+| Agent Core | FR1-6 | Agent loop execution, verification, parallel tools, context management |
 | Research | FR7-12 | Multi-source search, synthesis, parallel information gathering |
 | Communication | FR13-18 | Slack integration, streaming, thread context, suggested prompts |
 | Code Execution | FR19-23 | On-the-fly code generation, sandboxed execution, API calls *(Phase 2)* |
@@ -47,7 +47,7 @@ Orion's 43 functional requirements span 7 architectural domains:
 |----------|--------|---------------------|
 | Response time (simple) | 1-3 seconds | Async streaming, no blocking |
 | Response time (tools) | 3-10 seconds | Parallel tool execution |
-| Deep research | <5 minutes | Subagent parallelization |
+| Deep research | <5 minutes | Parallel tool execution |
 | Request timeout | 300 seconds | Cloud Run long-running support |
 | Uptime | >99.5% | min instances = 1, health checks |
 | Tool success rate | >98% | Retry logic, graceful degradation |
@@ -79,7 +79,7 @@ Orion's 43 functional requirements span 7 architectural domains:
 2. **Error Handling** — Graceful degradation when tools fail, verification retry loops
 3. **Streaming** — All user-facing responses streamed for perceived performance
 4. **Tool Abstraction** — MCP, code gen, agentic search unified under single interface
-5. **Context Management** — Thread compaction, subagent isolation, prompt caching
+5. **Context Management** — Thread compaction, prompt caching
 6. **Security** — Secrets in GCP Secret Manager, request signature verification, sandboxed code
 
 ## Starter Template Evaluation
@@ -104,7 +104,7 @@ Orion's 43 functional requirements span 7 architectural domains:
 |-------------|-------------------|
 | `query()` function | Custom agent loop: `while (stop_reason === 'tool_use')` |
 | MCP server config | Generic MCP client (HTTP streamable transport) |
-| Subagent orchestration | Parallel `messages.create()` calls + `Promise.all()` |
+| Parallel tool execution | Native Claude tool_use (multiple tools per turn) + `Promise.all()` on execution |
 | Skill loading | Custom skill loader reading `SKILL.md` files |
 | Context compaction | Sliding window on messages array |
 
@@ -145,7 +145,7 @@ orion-slack-agent/
 │   ├── agent/                      # 🆕 To build
 │   │   ├── loop.ts                 # while (stop_reason === 'tool_use')
 │   │   ├── orion.ts                # Anthropic messages.create wrapper
-│   │   ├── subagents.ts            # Parallel spawner
+│   │   # Parallel execution via native tool_use (no subagents.ts needed)
 │   │   └── prompts/
 │   │       └── system.ts
 │   ├── skills/                     # 🆕 Agent Skills loader
@@ -190,7 +190,9 @@ orion-slack-agent/
 }
 ```
 
-**Note:** Use `@anthropic-ai/sdk` (base SDK), NOT `@anthropic-ai/claude-agent-sdk`.
+**Notes:**
+- Use `@anthropic-ai/sdk` (base SDK), NOT `@anthropic-ai/claude-agent-sdk`
+- MCP session management via native HTTP headers (ADR-2025-12-31, revised 2025-01-02)
 
 ### Architectural Decisions Established by Starter
 
@@ -205,6 +207,94 @@ orion-slack-agent/
 | **Deployment** | Google Cloud Run | 300s timeout, Docker support |
 | **Agent Framework** | Direct Anthropic API | Full control, no SDK latency |
 | **Skills** | Agent Skills (SKILL.md) | Open standard, file-based |
+
+## MCP Session Management Decision (ADR-2025-12-31, Updated 2026-01-02)
+
+### Context
+
+During Epic 3 testing, session-based MCP servers (Samba internal MCPs) returned HTTP 400 "Invalid request parameters" errors. Investigation revealed the custom `McpClient` implementation was missing the mandatory MCP lifecycle handshake.
+
+**Root Cause:** MCP specification (2025-06-18) requires:
+1. `initialize` request as the FIRST interaction
+2. `notifications/initialized` notification BEFORE other requests
+3. `MCP-Protocol-Version` header on all subsequent requests
+
+The Story 3.1 Phase 2 implementation only captured session IDs from response headers but did NOT perform the initialization handshake.
+
+### Decision
+
+**Implement full MCP lifecycle compliance** via Story 3.5:
+
+1. **Initialize Handshake:** Send `initialize` → receive `InitializeResult` → send `notifications/initialized`
+2. **Session State Machine:** Track DISCONNECTED → INITIALIZING → CONNECTED → FAILED
+3. **Protocol Version Header:** Include `MCP-Protocol-Version` on all requests after init
+4. **Proper 404 Recovery:** Re-handshake (not just clear session ID) on session expiry
+
+### Rationale
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **Full lifecycle (selected)** ✅ | Spec-compliant, works with stateful servers | More complex than header-only |
+| **Header-only (previous)** | Simple | Violates spec, breaks stateful servers |
+
+### Implementation (Story 3.5)
+
+**Session State Machine:**
+
+```typescript
+enum SessionState {
+  DISCONNECTED = 'DISCONNECTED',
+  INITIALIZING = 'INITIALIZING',
+  CONNECTED = 'CONNECTED',
+  FAILED = 'FAILED',
+}
+
+// ensureInitialized() called before listTools() and callTool()
+async ensureInitialized(): Promise<void> {
+  if (this.sessionState === SessionState.CONNECTED) return;
+  
+  // Mutex: concurrent calls wait for single init
+  if (this.initializationPromise) {
+    return this.initializationPromise;
+  }
+  
+  this.initializationPromise = this.doInitialize();
+  // ... initialization logic
+}
+```
+
+**Lifecycle Flow:**
+
+```
+Client → initialize { protocolVersion, capabilities, clientInfo }
+Server → InitializeResult + Mcp-Session-Id header
+Client → notifications/initialized (one-way notification)
+Client → tools/list (with Mcp-Session-Id + MCP-Protocol-Version headers)
+```
+
+**Required Headers (after initialization):**
+- `Mcp-Session-Id`: Session identifier from server (if stateful)
+- `MCP-Protocol-Version: 2025-06-18` (required by spec)
+
+### Cloud Run Compatibility
+
+| Concern | Mitigation |
+|---------|------------|
+| Stateless containers | Each container gets its own session (OK for MCP) |
+| Cold starts | Lazy init on first tool call |
+| Container restarts | Re-initialize session automatically |
+| Concurrency | Mutex in `ensureInitialized()` prevents race conditions |
+
+**No Redis needed** — MCP sessions are server-side state; each container can have independent sessions.
+
+### Status
+
+- **Decision Date:** 2025-12-31 (original), 2026-01-02 (revised for full lifecycle)
+- **Status:** In Progress
+- **Implementation:** Story 3.5 — MCP Session Lifecycle
+- **Reference:** `docs/mcp-enterprise-upgrade-proposal.md`, MCP Spec 2025-06-18
+
+---
 
 ## Memory Architecture (Step 4)
 
@@ -520,7 +610,7 @@ export const ERROR_CODES = [
   'MEMORY_WRITE_FAILED',
   'RATE_LIMITED',
   'CONTEXT_TOO_LONG',
-  'SUBAGENT_FAILED',
+  'TOOL_TIMEOUT',
   'MCP_CONNECTION_FAILED',
 ] as const;
 
@@ -544,7 +634,7 @@ export type ToolResult<T = unknown> =
 ```
 Pattern: {component}.{operation}
 
-Components: agent | tool | slack | memory | mcp | subagent
+Components: agent | tool | slack | memory | mcp
 Operations: lowercase, dot-separated for sub-ops
 
 Examples:
@@ -554,7 +644,6 @@ Examples:
   tool.memory.create
   slack.message.send
   mcp.rube.search
-  subagent.research
 ```
 
 **Logging Context:**
@@ -617,14 +706,17 @@ function formatResponse(content: string, suggestedPrompts?: string[]): SlackBloc
 }
 ```
 
-**Subagent Context:**
+**Parallel Tool Execution:**
 ```typescript
-// Parent explicitly defines what subagent receives
-interface SubagentContext {
-  task: string;              // What to accomplish
-  relevantHistory?: string;  // Parent-curated context
-  constraints?: string[];    // Boundaries
-  outputFormat?: string;     // Expected structure
+// Tools execute in parallel when Claude returns multiple tool_use blocks in a single response
+// Implementation: Promise.all() on tool handlers when multiple tool_use blocks received
+// Claude natively manages context and result synthesis
+// See: ADR Epic 4 Removal (sprint-change-proposal-2025-12-31-epic4-removal.md)
+
+async function executeTools(toolBlocks: ToolUseBlock[]): Promise<ToolResult[]> {
+  return Promise.all(toolBlocks.map(block => 
+    toolHandlers[block.name](block.input)
+  ));
 }
 ```
 
@@ -676,7 +768,7 @@ tests/
 | **Epic 1** | Slack Integration | `src/slack/` | MVP |
 | **Epic 2** | Agent Loop | `src/agent/` | MVP |
 | **Epic 3** | MCP Integration | `src/tools/mcp/` | MVP |
-| **Epic 4** | Subagents & Research | `src/agent/subagents/` | MVP |
+| **Epic 4** | ~~Subagents~~ REMOVED | N/A | Removed 2025-12-31 |
 | **Epic 5** | Skills & Extensions | `.orion/` + `src/skills/` | MVP |
 | **Epic 6** | UX & Polish | `src/slack/` (suggested prompts) | MVP |
 | **Epic 7** | Knowledge & Q&A | `src/tools/` (search tools) | MVP |
@@ -746,11 +838,8 @@ orion-slack-agent/
 │   │   ├── verification.test.ts
 │   │   ├── compaction.ts                  # Sliding window compaction
 │   │   ├── compaction.test.ts
-│   │   └── subagents/                     # Epic 4: Parallel subagents
-│   │       ├── spawner.ts                 # spawnSubagent()
-│   │       ├── spawner.test.ts
-│   │       ├── aggregator.ts              # Result aggregation
-│   │       └── aggregator.test.ts
+│   │   # Parallel execution: Native Claude tool_use + Promise.all()
+│   │   # No separate subagents layer needed (ADR 2025-12-31)
 │   │
 │   ├── tools/                             # Epic 3, 4, 8: Tool layer
 │   │   ├── registry.ts                    # TOOL_NAMES, handlers
@@ -762,10 +851,11 @@ orion-slack-agent/
 │   │   │   └── paths.ts                   # Type-safe path builders
 │   │   │
 │   │   ├── mcp/                           # Epic 3: MCP Client
-│   │   │   ├── client.ts                  # Generic MCP client
-│   │   │   ├── client.test.ts
-│   │   │   ├── discovery.ts               # Tool discovery
-│   │   │   └── rube.ts                    # Rube-specific config
+│   │   │   ├── manager.ts                 # McpClientManager singleton (SDK wrapper)
+│   │   │   ├── manager.test.ts
+│   │   │   ├── discovery.ts               # Tool discovery (uses manager)
+│   │   │   ├── discovery.test.ts
+│   │   │   └── servers.ts                 # MCP server configurations
 │   │   │
 │   │   ├── sandbox/                       # Epic 9: Code execution (Phase 2)
 │   │   │   ├── executor.ts                # Rube workbench wrapper
@@ -837,7 +927,7 @@ orion-slack-agent/
 External:
   Slack Events API → src/slack/ → Agent Loop
   Anthropic API ← src/agent/loop.ts
-  MCP Servers ← src/tools/mcp/client.ts
+  MCP Servers ← src/tools/mcp/client.ts (native session management via HTTP headers)
   GCS ← src/tools/memory/handler.ts
 
 Internal:
@@ -854,12 +944,12 @@ Internal:
                               │
 ┌─────────────────────────────▼───────────────────────────────┐
 │                        Agent Layer                          │
-│  (Loop, verification, subagents, context compaction)        │
+│  (Loop, verification, context compaction)                   │
 └─────────────────────────────┬───────────────────────────────┘
                               │
 ┌─────────────────────────────▼───────────────────────────────┐
 │                        Tool Layer                           │
-│  (Memory, MCP, sandbox, search — all via registry)          │
+│  (Memory, MCP via SDK, sandbox, search — all via registry)  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -879,12 +969,12 @@ Internal:
 | Requirement | File(s) |
 |-------------|---------|
 | FR1-2 (Agent loop, verification) | `src/agent/loop.ts`, `src/agent/verification.ts` |
-| FR3-4 (Subagents) | `src/agent/subagents/spawner.ts`, `aggregator.ts` |
+| FR3-4 (Parallel tools) | Native Claude tool_use + Promise.all() execution |
 | FR5 (Context compaction) | `src/agent/compaction.ts` |
 | FR13-18 (Slack) | `src/slack/*` |
 | FR19-23 (Code gen) | `src/tools/sandbox/executor.ts` *(Phase 2)* |
 | FR24-29 (Extensions) | `.orion/skills/`, `src/skills/loader.ts` |
-| FR26-28 (MCP) | `src/tools/mcp/client.ts` |
+| FR26-28 (MCP) | `src/tools/mcp/client.ts` (native session management) |
 | FR35-40 (Observability) | `src/observability/langfuse.ts` |
 | AR29-31 (Memory) | `src/tools/memory/handler.ts` |
 | FR47-50 (Slack AI) | `src/slack/handlers/*.ts`, `src/slack/feedback.ts` |
@@ -1010,6 +1100,7 @@ All technology choices work together without conflicts:
 | TypeScript 5.x | @anthropic-ai/sdk 0.71.x | ✅ |
 | Node.js 20 LTS | All dependencies | ✅ |
 | Direct Anthropic API | Agent Skills (SKILL.md) | ✅ |
+| Native MCP session mgmt | Cloud Run, MCP sessions | ✅ |
 | Cloud Run (300s) | Long agent loops | ✅ |
 | GCS + Memory Tool | Cloud Run stateless | ✅ |
 | Langfuse | OpenTelemetry | ✅ |
@@ -1040,7 +1131,7 @@ Project structure supports all decisions with clear boundaries.
 | Epic 1 | Slack Integration | ✅ `src/slack/` |
 | Epic 2 | Agent Loop | ✅ `src/agent/` |
 | Epic 3 | MCP Integration | ✅ `src/tools/mcp/` |
-| Epic 4 | Subagents & Research | ✅ `src/agent/subagents/` |
+| Epic 4 | ~~Subagents~~ | ❌ Removed 2025-12-31 |
 | Epic 5 | Skills & Extensions | ✅ `.orion/` + `src/skills/` |
 | Epic 6 | UX & Polish | ✅ `src/slack/suggested-prompts.ts` |
 | Epic 7 | Slack AI App (FR47-50) | ✅ `src/slack/feedback.ts`, handlers |
@@ -1195,3 +1286,5 @@ pnpm install
 **Next Phase:** Begin implementation using the architectural decisions and patterns documented herein.
 
 **Document Maintenance:** Update this architecture when major technical decisions are made during implementation.
+
+**Last Updated:** 2025-12-31 — Added ADR for MCP SDK adoption; removed subagent references per Epic 4 removal.

@@ -39,11 +39,15 @@ describe('gatherContext', () => {
       orionContextRoot: 'orion-context',
     });
 
-    expect(res.sources.some((s) => s.type === 'thread')).toBe(true);
+    // Thread sources are now built at handler level via buildThreadSources()
+    // which has access to rich metadata for clickable permalinks.
+    // gatherContext only returns context text for thread snippets, not sources.
+    // See Tech-Spec: Source Citations Fix.
+    expect(res.sources.some((s) => s.type === 'thread')).toBe(false);
     expect(res.contextText).toContain('anthropic');
   });
 
-  it('should scan a bounded subset of orion-context files and return ranked excerpts', async () => {
+  it('should scan orion-context files for LLM context (sources not exposed)', async () => {
     // Root has one file + one directory
     fsMocks.readdir
       .mockResolvedValueOnce([
@@ -81,8 +85,11 @@ describe('gatherContext', () => {
       maxExcerpts: 5,
     });
 
+    // File sources are NOT exposed (users can't click to verify local files)
+    // See Tech-Spec: Source Citations Fix - "clickable sources only" policy
     const fileSources = res.sources.filter((s) => s.type === 'file');
-    expect(fileSources.length).toBeGreaterThan(0);
+    expect(fileSources.length).toBe(0);
+    // But context text IS still populated for LLM use
     expect(res.contextText).toContain('config.yaml');
   });
 });

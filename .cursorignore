@@ -1,6 +1,4 @@
-# BMAD reference files (loaded on-demand via @rules, not needed for indexing)
-_bmad/
-_bmad-output/
+
 
 # Build artifacts
 dist/

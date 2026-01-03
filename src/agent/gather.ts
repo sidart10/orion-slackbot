@@ -8,10 +8,10 @@
  */
 
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { resolve, relative, join, basename } from 'node:path';
+import { resolve, relative, join } from 'node:path';
 
 export interface ContextSource {
-  type: 'thread' | 'file';
+  type: 'thread' | 'file' | 'tool' | 'memory';
   /** Human-readable source title (shown to users) */
   title: string;
   /** Stable reference (debuggable, not necessarily user-friendly) */
@@ -19,6 +19,8 @@ export interface ContextSource {
   /** URL for clickable link (optional) */
   url?: string;
   excerpt?: string;
+  /** Brief context about tool usage (e.g., search query) */
+  toolContext?: string;
 }
 
 export interface GatherResult {
@@ -100,11 +102,20 @@ function scoreOverlap(queryTokens: Set<string>, candidateText: string): number {
   return score;
 }
 
+/**
+ * Build thread context text for LLM from thread history.
+ *
+ * NOTE: Thread sources are now built at the handler level via buildThreadSources()
+ * which has access to rich metadata (user names, timestamps) for clickable permalinks.
+ * This function only returns context text for the LLM, not sources.
+ *
+ * @see Tech-Spec: Source Citations Fix
+ */
 function buildThreadContext(params: {
   userMessage: string;
   threadHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
   maxThreadSnippets: number;
-}): { text: string; sources: ContextSource[] } {
+}): { text: string } {
   const queryTokens = new Set(tokenize(params.userMessage));
   const scored = params.threadHistory
     .map((m, idx) => ({
@@ -118,23 +129,16 @@ function buildThreadContext(params: {
     .slice(0, params.maxThreadSnippets);
 
   if (scored.length === 0) {
-    return { text: '', sources: [] };
+    return { text: '' };
   }
 
   const lines: string[] = ['Thread context (most relevant):'];
-  const sources: ContextSource[] = [];
   for (const m of scored) {
     const excerpt = m.content.length > 500 ? `${m.content.slice(0, 500)}…` : m.content;
     lines.push(`- (${m.role}) ${excerpt}`);
-    sources.push({
-      type: 'thread',
-      title: `Thread message #${m.idx + 1}`,
-      reference: `threadHistory[${m.idx}]`,
-      excerpt,
-    });
   }
 
-  return { text: lines.join('\n'), sources };
+  return { text: lines.join('\n') };
 }
 
 const ALLOWED_EXTENSIONS = new Set(['.md', '.txt', '.yaml', '.yml', '.json']);
@@ -245,21 +249,17 @@ async function scanOrionContext(params: {
   results.sort((a, b) => b.score - a.score);
   const top = results.slice(0, params.maxExcerpts);
 
+  // Build context text for LLM (files are context-only, not cited)
   const lines: string[] = ['Local context (most relevant):'];
-  const sources: ContextSource[] = [];
   for (const r of top) {
     const ref = relative(process.cwd(), r.filePath);
-    const fileTitle = basename(ref);
     lines.push(`- ${ref}\n  ${r.excerpt.replace(/\n+/g, ' ').trim()}`);
-    sources.push({
-      type: 'file',
-      title: fileTitle,
-      reference: ref,
-      excerpt: r.excerpt,
-    });
   }
 
-  return { text: lines.join('\n'), sources };
+  // NOTE: File sources from orion-context are NOT returned as citations.
+  // Users cannot click to verify local files, so we only use them as
+  // internal context for the LLM. See Tech-Spec: Source Citations Fix.
+  return { text: lines.join('\n'), sources: [] };
 }
 
 export async function gatherContext(params: GatherContextParams): Promise<GatherResult> {
@@ -292,9 +292,14 @@ export async function gatherContext(params: GatherContextParams): Promise<Gather
   const parts = [thread.text, local.text].filter((p) => p.trim().length > 0);
   const contextText = parts.join('\n\n');
 
+  // NOTE: Sources are now built at handler level via buildThreadSources()
+  // which has access to rich metadata for clickable permalinks.
+  // This function only returns context text; local file sources are also excluded
+  // since users cannot click to verify local files.
+  // See Tech-Spec: Source Citations Fix.
   return {
     contextText,
-    sources: [...thread.sources, ...local.sources],
+    sources: [...local.sources],
   };
 }
 

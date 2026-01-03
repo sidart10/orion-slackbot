@@ -5,6 +5,7 @@
  * as the Assistant handler (runOrionAgent, tool calling).
  *
  * @see Story 2.8 - App Mention Handler for Channel Conversations
+ * @see Story 3.4 - Channel @Mention Tool Feedback
  * @see AC#1 - Orion responds in a thread under the original message
  * @see AC#2 - Orion adds 👀 reaction to acknowledge receipt
  * @see AC#4 - Thread replies get full thread context
@@ -22,10 +23,14 @@ import {
   type TraceWrapper,
 } from '../../observability/tracing.js';
 import { logger } from '../../utils/logger.js';
+import { createStreamer } from '../../utils/streaming.js';
+import { isDuplicateEvent } from '../event-dedup.js';
 import { formatSlackMrkdwn } from '../../utils/formatting.js';
 import { fetchThreadHistory } from '../thread-context.js';
 import { feedbackBlock } from '../feedback-block.js';
 import { createSourcesContextBlock, type SourceCitation } from '../sources-block.js';
+import { buildThreadSources, filterClickableSources } from '../source-builder.js';
+import { buildLoadingMessages } from '../status-messages.js';
 import { runOrionAgent, type AgentResult } from '../../agent/orion.js';
 import { loadAgentPrompt } from '../../agent/loader.js';
 import { config } from '../../config/environment.js';
@@ -74,6 +79,19 @@ export async function handleAppMention({
   const threadTs = mentionEvent.thread_ts ?? mentionEvent.ts;
   const messageReceiptTime = Date.now();
 
+  // Story 7.5: Event deduplication to prevent duplicate responses
+  // Check if this message was already processed by another handler
+  // Note: traceId not available yet at this point; dedup happens before trace starts
+  if (isDuplicateEvent(channelId, mentionEvent.ts, 'app_mention')) {
+    logger.debug({
+      event: 'event_dedup.skipped',
+      handler: 'app_mention',
+      channelId,
+      messageTs: mentionEvent.ts,
+    });
+    return;
+  }
+
   // Add 👀 reaction to acknowledge message receipt (AC#2)
   try {
     await client.reactions.add({
@@ -117,29 +135,101 @@ export async function handleAppMention({
         traceId: trace.id,
       });
 
-      // Post a "thinking" message immediately (AC#1 - respond in thread)
-      let thinkingMessageTs: string | undefined;
+      // CRITICAL: Initialize streamer within 500ms of message receipt (NFR4/AC#3)
+      // Uses same streaming infrastructure as Assistant handler
+      const streamer = createStreamer({
+        client,
+        channel: channelId,
+        threadTs,
+        userId: userId ?? '',
+        teamId: context.teamId ?? '',
+      });
+
+      await streamer.start();
+
+      const timeToStreamStart = Date.now() - messageReceiptTime;
+      logger.info({
+        event: 'stream_initialized',
+        timeToStreamStart,
+        nfr4Met: timeToStreamStart < 500,
+        traceId: trace.id,
+      });
+
+      // Story 3.4: Post initial status message for tool feedback
+      let statusMessageTs: string | undefined;
+      let lastStatusUpdate = 0;
+      const STATUS_DEBOUNCE_MS = 300;
+
       try {
-        const thinkingMsg = await client.chat.postMessage({
+        const statusMsg = await client.chat.postMessage({
           channel: channelId,
           thread_ts: threadTs,
-          text: '_Thinking..._',
+          text: 'Thinking…',
         });
-        thinkingMessageTs = thinkingMsg.ts;
-      } catch (err) {
+        statusMessageTs = statusMsg.ts;
+      } catch (statusError) {
         logger.warn({
-          event: 'thinking_message_failed',
-          error: err instanceof Error ? err.message : String(err),
+          event: 'status_message_post_failed',
+          error: statusError instanceof Error ? statusError.message : String(statusError),
           traceId: trace.id,
         });
       }
 
-      const timeToFirstResponse = Date.now() - messageReceiptTime;
-      logger.info({
-        event: 'thinking_message_posted',
-        timeToFirstResponse,
-        traceId: trace.id,
-      });
+      /**
+       * Update the status message with tool-specific text.
+       * Debounced to avoid Slack rate limits (300ms minimum between updates).
+       *
+       * @see Story 7.3 - Contextual Tool Feedback (AC1-AC5)
+       */
+      const updateStatusMessage = async (params: {
+        phase?: 'gather' | 'act' | 'tool' | 'verify' | 'final';
+        toolName?: string | null;
+        toolInput?: Record<string, unknown>;
+        allTools?: Array<{ name: string; input: Record<string, unknown> }>;
+      }): Promise<void> => {
+        if (!statusMessageTs) return;
+
+        const now = Date.now();
+        if (now - lastStatusUpdate < STATUS_DEBOUNCE_MS) return;
+        lastStatusUpdate = now;
+
+        const messages = buildLoadingMessages(params);
+        // Final phase returns empty array - skip update
+        if (messages.length === 0) return;
+
+        try {
+          await client.chat.update({
+            channel: channelId,
+            ts: statusMessageTs,
+            text: messages[0] ?? 'Working…',
+          });
+        } catch (updateError) {
+          logger.debug({
+            event: 'status_message_update_failed',
+            error: updateError instanceof Error ? updateError.message : String(updateError),
+            traceId: trace.id,
+          });
+        }
+      };
+
+      /**
+       * Delete the status message (cleanup after completion or error).
+       */
+      const deleteStatusMessage = async (): Promise<void> => {
+        if (!statusMessageTs) return;
+        try {
+          await client.chat.delete({
+            channel: channelId,
+            ts: statusMessageTs,
+          });
+        } catch (deleteError) {
+          logger.debug({
+            event: 'status_message_delete_failed',
+            error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+            traceId: trace.id,
+          });
+        }
+      };
 
       let agentSpan: ReturnType<typeof trace.startSpan> | null = null;
 
@@ -151,6 +241,15 @@ export async function handleAppMention({
           threadTs,
           limit: 20,
           traceId: trace.id,
+        });
+
+        // Build thread sources with permalinks (before stripping to anthropic format)
+        const threadSources = await buildThreadSources({
+          client,
+          channel: channelId,
+          threadTs,
+          messages: threadHistory,
+          maxSources: 5,
         });
 
         // Convert thread history to Anthropic message format
@@ -203,17 +302,23 @@ export async function handleAppMention({
           },
           systemPrompt,
           trace: trace._span,
-          setStatus: ({ toolName }) =>
-            void logger.debug({
+          // Story 7.3: Enhanced status with tool context (AC1-AC5)
+          setStatus: ({ phase, toolName, toolInput, allTools }) => {
+            logger.debug({
               event: 'agent_status_update',
+              phase,
               toolName,
+              toolCount: allTools?.length,
               traceId: trace.id,
-            }),
+            });
+            void updateStatusMessage({ phase, toolName, toolInput, allTools });
+          },
         });
 
-        // Collect full response from agent
+        // Stream response chunks (AC#3 - real-time streaming)
         let fullResponse = '';
         let agentResult: AgentResult | undefined;
+        let lastYieldToEventLoop = Date.now();
 
         while (true) {
           const next = await agentResponse.next();
@@ -221,11 +326,20 @@ export async function handleAppMention({
             agentResult = next.value;
             break;
           }
-          fullResponse += next.value;
-        }
 
-        // Format for Slack
-        const formattedResponse = formatSlackMrkdwn(fullResponse);
+          const chunk = next.value;
+          // Format chunk for Slack mrkdwn
+          const formattedChunk = formatSlackMrkdwn(chunk);
+          // append() is sync with internal debounce; yield to event loop periodically
+          streamer.append(formattedChunk);
+          fullResponse += chunk; // Store raw for logging
+
+          const now = Date.now();
+          if (now - lastYieldToEventLoop >= 50) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            lastYieldToEventLoop = Date.now();
+          }
+        }
 
         agentSpan.update({
           output: {
@@ -254,28 +368,24 @@ export async function handleAppMention({
         });
         generation.end();
 
-        // Update the "thinking" message with the actual response
-        if (thinkingMessageTs) {
-          await client.chat.update({
-            channel: channelId,
-            ts: thinkingMessageTs,
-            text: formattedResponse,
-          });
-        } else {
-          // Fallback: post a new message if we couldn't update
-          await client.chat.postMessage({
-            channel: channelId,
-            thread_ts: threadTs,
-            text: formattedResponse,
-          });
-        }
+        // Stop streaming and get metrics
+        const streamMetrics = await streamer.stop();
 
-        // Story 2.7: Post sources block if sources were gathered
-        if (agentResult?.sources && agentResult.sources.length > 0) {
-          const sourceCitations: SourceCitation[] = agentResult.sources.map((s, i) => ({
+        // Story 3.4: Delete status message now that streaming is complete
+        await deleteStatusMessage();
+
+        // Story 2.7 + Source Citations Fix: Merge and filter sources
+        const allSources = [...threadSources, ...(agentResult?.sources ?? [])];
+        const clickableSources = filterClickableSources(allSources);
+
+        if (clickableSources.length > 0) {
+          const sourceCitations: SourceCitation[] = clickableSources.map((s, i) => ({
             id: i + 1,
-            title: s.reference,
-            url: undefined,
+            title: s.title,
+            url: s.url,
+            isMemory: s.type === 'memory',
+            isTool: s.type === 'tool',
+            toolContext: s.toolContext,
           }));
 
           const sourcesBlock = createSourcesContextBlock(sourceCitations);
@@ -337,8 +447,9 @@ export async function handleAppMention({
         trace.update({
           output: {
             response: fullResponse.slice(0, 500),
+            streamDuration: streamMetrics.totalDuration,
             totalDuration,
-            timeToFirstResponse,
+            timeToStreamStart,
             contextMessages: threadHistory.length,
             nfr1Met: totalDuration < 3000,
             ...(agentResult && {
@@ -351,9 +462,10 @@ export async function handleAppMention({
         logger.info({
           event: 'app_mention_handled',
           userId,
+          streamDuration: streamMetrics.totalDuration,
           totalDuration,
           responseLength: fullResponse.length,
-          timeToFirstResponse,
+          timeToStreamStart,
           nfr1Met: totalDuration < 3000,
           traceId: trace.id,
         });
@@ -383,6 +495,12 @@ export async function handleAppMention({
 
         return fullResponse;
       } catch (error) {
+        // Story 3.4: Clean up status message on error
+        await deleteStatusMessage();
+
+        // Ensure stream is stopped even on error
+        await streamer.stop().catch(() => {});
+
         // End agentSpan if it was created
         if (agentSpan) {
           agentSpan.update({
@@ -409,21 +527,13 @@ export async function handleAppMention({
           // Ignore
         }
 
-        // Update error message or post new one
+        // Post error message to thread
         const errorText = 'Sorry, I encountered an error processing your message.';
-        if (thinkingMessageTs) {
-          await client.chat.update({
-            channel: channelId,
-            ts: thinkingMessageTs,
-            text: errorText,
-          });
-        } else {
-          await client.chat.postMessage({
-            channel: channelId,
-            thread_ts: threadTs,
-            text: errorText,
-          });
-        }
+        await client.chat.postMessage({
+          channel: channelId,
+          thread_ts: threadTs,
+          text: errorText,
+        });
 
         throw error;
       }

@@ -10,6 +10,9 @@
 // MCP Client (Story 3.1)
 export { McpClient } from './client.js';
 
+// MCP Client Manager (Story 3.2 Phase 2 - Client Caching)
+export { McpClientManager, resetMcpClientManager } from './manager.js';
+
 // Schema Conversion (Story 3.1)
 export { mcpToolToClaude, parseClaudeToolName } from './schema-converter.js';
 export type { AnthropicTool, AnthropicSchemaProperty } from './schema-converter.js';

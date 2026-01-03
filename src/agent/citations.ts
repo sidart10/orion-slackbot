@@ -10,9 +10,9 @@
 
 /**
  * Source type for citations.
- * Extends gather.ts ContextSource types with additional source types.
+ * Must align with ContextSource.type in gather.ts.
  */
-export type CitationType = 'thread' | 'file' | 'web' | 'confluence' | 'slack';
+export type CitationType = 'thread' | 'file' | 'tool' | 'memory' | 'web' | 'confluence' | 'slack';
 
 /**
  * Citation for a source used in a response.

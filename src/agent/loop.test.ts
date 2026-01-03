@@ -586,5 +586,575 @@ describe('executeAgentLoop', () => {
       );
     });
   });
+
+  // Story 2.9: Streaming Tool Input Accumulation
+  describe('streaming tool input accumulation (Story 2.9)', () => {
+    it('small_input_immediate — input fits in start event (AC#1)', async () => {
+      // Tool input is complete in content_block_start, no deltas needed
+      const executeTool = vi.fn(async () => ({ ok: true }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: {
+                  type: 'tool_use',
+                  id: 'toolu_small',
+                  name: 'get_weather',
+                  input: { city: 'Seattle' }, // Complete input in start event
+                },
+              },
+              { type: 'content_block_stop', index: 0 },
+              {
+                type: 'message_delta',
+                delta: { stop_reason: 'tool_use' },
+                usage: { input_tokens: 10, output_tokens: 5 },
+              },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Weather is sunny' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 20, output_tokens: 10 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Hi', { ...baseOptions, executeTool });
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // Tool should be called with complete input from start event
+      expect(executeTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'get_weather',
+          input: { city: 'Seattle' },
+        })
+      );
+    });
+
+    it('large_input_accumulated — 5 delta chunks joined correctly (AC#2)', async () => {
+      // Tool input streamed via input_json_delta events
+      const executeTool = vi.fn(async () => ({ analyzed: true }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: {
+                  type: 'tool_use',
+                  id: 'toolu_large',
+                  name: 'analyze_code',
+                  input: {}, // Empty - input will come via deltas
+                },
+              },
+              // 5 delta chunks forming valid JSON
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"code": "' } },
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: 'function foo() {' } },
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: ' return 42;' } },
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: ' }' } },
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"}' } },
+              { type: 'content_block_stop', index: 0 },
+              {
+                type: 'message_delta',
+                delta: { stop_reason: 'tool_use' },
+                usage: { input_tokens: 10, output_tokens: 20 },
+              },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Code analyzed' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 30, output_tokens: 5 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Analyze this code', { ...baseOptions, executeTool });
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // Tool should be called with accumulated input from all 5 chunks
+      expect(executeTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'analyze_code',
+          input: { code: 'function foo() { return 42; }' },
+        })
+      );
+    });
+
+    it('accumulation_success_logged — success log includes tool name, bytes, traceId (AC#5)', async () => {
+      // M2 fix: Verify success-path accumulation logging
+      const executeTool = vi.fn(async () => ({ ok: true }));
+      const loggerModule = await import('../utils/logger.js');
+      const infoMock = loggerModule.logger.info as unknown as ReturnType<typeof vi.fn>;
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: { type: 'tool_use', id: 'toolu_log', name: 'logged_tool', input: {} },
+              },
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"data":"test"}' } },
+              { type: 'content_block_stop', index: 0 },
+              {
+                type: 'message_delta',
+                delta: { stop_reason: 'tool_use' },
+                usage: { input_tokens: 10, output_tokens: 5 },
+              },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Done' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 20, output_tokens: 3 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Test logging', { ...baseOptions, executeTool });
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // Verify success accumulation log includes all required fields per AC#5
+      expect(infoMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'tool.input.accumulated',
+          toolName: 'logged_tool',
+          bytes: 15, // '{"data":"test"}'.length
+          success: true,
+          traceId: 'trace-abc',
+        })
+      );
+    });
+
+    it('concurrent_tools_isolated — 3 tools streaming simultaneously (AC#3)', async () => {
+      // 3 tools with interleaved delta events
+      const executeTool = vi.fn(async ({ name }: { name: string }) => ({ tool: name }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              // Tool 0
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: { type: 'tool_use', id: 'tool_0', name: 'tool_a', input: {} },
+              },
+              // Tool 1
+              {
+                type: 'content_block_start',
+                index: 1,
+                content_block: { type: 'tool_use', id: 'tool_1', name: 'tool_b', input: {} },
+              },
+              // Tool 2
+              {
+                type: 'content_block_start',
+                index: 2,
+                content_block: { type: 'tool_use', id: 'tool_2', name: 'tool_c', input: {} },
+              },
+              // Interleaved deltas
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"val":' } },
+              { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"val":' } },
+              { type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"val":' } },
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"A"}' } },
+              { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '"B"}' } },
+              { type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '"C"}' } },
+              // Stop in different order
+              { type: 'content_block_stop', index: 1 },
+              { type: 'content_block_stop', index: 0 },
+              { type: 'content_block_stop', index: 2 },
+              {
+                type: 'message_delta',
+                delta: { stop_reason: 'tool_use' },
+                usage: { input_tokens: 10, output_tokens: 30 },
+              },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'All done' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 50, output_tokens: 5 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Run all tools', { ...baseOptions, executeTool });
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // Each tool should have received its isolated input
+      expect(executeTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'tool_a', input: { val: 'A' } }));
+      expect(executeTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'tool_b', input: { val: 'B' } }));
+      expect(executeTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'tool_c', input: { val: 'C' } }));
+    });
+
+    it('malformed_json_handled — parse error logged, tool skipped (AC#4)', async () => {
+      const executeTool = vi.fn(async () => ({ ok: true }));
+      const loggerModule = await import('../utils/logger.js');
+      const errorMock = loggerModule.logger.error as unknown as ReturnType<typeof vi.fn>;
+      const warnMock = loggerModule.logger.warn as unknown as ReturnType<typeof vi.fn>;
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: { type: 'tool_use', id: 'toolu_bad', name: 'bad_tool', input: {} },
+              },
+              // Invalid JSON (missing closing brace)
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"invalid": true' } },
+              { type: 'content_block_stop', index: 0 },
+              {
+                type: 'message_delta',
+                delta: { stop_reason: 'tool_use' },
+                usage: { input_tokens: 10, output_tokens: 5 },
+              },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Handled gracefully' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 20, output_tokens: 5 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Call bad tool', { ...baseOptions, executeTool });
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // Tool should NOT be called due to parse failure
+      expect(executeTool).not.toHaveBeenCalled();
+
+      // Error should be logged with parse failure event AND traceId (AC#4, AC#5)
+      expect(errorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'tool.input.parse_failed',
+          toolName: 'bad_tool',
+          traceId: 'trace-abc',
+        })
+      );
+
+      // Tool execution skipped should be logged (L3 fix)
+      expect(warnMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'tool.execution.skipped',
+          toolName: 'bad_tool',
+          reason: 'input_parse_failed',
+          traceId: 'trace-abc',
+        })
+      );
+    });
+
+    it('empty_delta_ignored — no crash on empty partial_json (AC#2)', async () => {
+      const executeTool = vi.fn(async () => ({ ok: true }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: { type: 'tool_use', id: 'toolu_empty', name: 'empty_delta_tool', input: {} },
+              },
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"key":' } },
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '' } }, // Empty delta
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"value"}' } },
+              { type: 'content_block_stop', index: 0 },
+              {
+                type: 'message_delta',
+                delta: { stop_reason: 'tool_use' },
+                usage: { input_tokens: 10, output_tokens: 5 },
+              },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Done' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 20, output_tokens: 3 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Test empty delta', { ...baseOptions, executeTool });
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // Tool should be called with correctly accumulated input (empty delta ignored)
+      expect(executeTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'empty_delta_tool',
+          input: { key: 'value' },
+        })
+      );
+    });
+
+    it('mixed_text_and_tool — text + tool in same response (AC#1, AC#2)', async () => {
+      const executeTool = vi.fn(async () => ({ result: 'success' }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              // Text block first
+              { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+              { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Let me search for that. ' } },
+              { type: 'content_block_stop', index: 0 },
+              // Tool block second
+              {
+                type: 'content_block_start',
+                index: 1,
+                content_block: { type: 'tool_use', id: 'toolu_mixed', name: 'search', input: {} },
+              },
+              { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"query":"test"}' } },
+              { type: 'content_block_stop', index: 1 },
+              {
+                type: 'message_delta',
+                delta: { stop_reason: 'tool_use' },
+                usage: { input_tokens: 10, output_tokens: 15 },
+              },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Found it' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 30, output_tokens: 5 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Search for something', { ...baseOptions, executeTool });
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // Tool should be called with accumulated input
+      expect(executeTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'search',
+          input: { query: 'test' },
+        })
+      );
+    });
+
+    it('text_block_stop_handled — content_block_stop for non-tool blocks is graceful (L1 fix)', async () => {
+      // L1 fix: Verify content_block_stop for text blocks doesn't cause issues
+      messagesCreateMock.mockImplementationOnce(async () =>
+        createMockMessageStream({
+          events: [
+            { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+            // Text block only - no tool
+            { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Just plain text' } },
+            { type: 'content_block_stop', index: 0 }, // Stop for text block - should be handled gracefully
+            { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 10, output_tokens: 5 } },
+            { type: 'message_stop' },
+          ],
+        })
+      );
+
+      const chunks: string[] = [];
+      const gen = executeAgentLoop('Say something', baseOptions);
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+        chunks.push(next.value);
+      }
+
+      // Should complete without error and yield the text
+      expect(chunks.join('')).toContain('Just plain text');
+    });
+
+    it('buffer_exceeds_limit — buffer cleared, error logged (AC#6)', async () => {
+      const executeTool = vi.fn(async () => ({ ok: true }));
+      const loggerModule = await import('../utils/logger.js');
+      const errorMock = loggerModule.logger.error as unknown as ReturnType<typeof vi.fn>;
+
+      // Create a string that will exceed 1MB when accumulated
+      const hugeChunk = 'x'.repeat(600 * 1024); // 600KB per chunk
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: { type: 'tool_use', id: 'toolu_huge', name: 'huge_tool', input: { fallback: true } },
+              },
+              // Two chunks that together exceed 1MB
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: hugeChunk } },
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: hugeChunk } },
+              { type: 'content_block_stop', index: 0 },
+              {
+                type: 'message_delta',
+                delta: { stop_reason: 'tool_use' },
+                usage: { input_tokens: 10, output_tokens: 5 },
+              },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Handled with fallback' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 20, output_tokens: 5 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Test huge input', { ...baseOptions, executeTool });
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // Tool should be called with initial input (fallback) since buffer was cleared
+      expect(executeTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'huge_tool',
+          input: { fallback: true },
+        })
+      );
+
+      // Error should be logged with buffer overflow details AND traceId + index (AC#6)
+      expect(errorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'tool.input.too_large',
+          index: 0,
+          traceId: 'trace-abc',
+        })
+      );
+    });
+
+    it('initial_input_overridden — accumulated JSON takes precedence (AC#2)', async () => {
+      const executeTool = vi.fn(async () => ({ ok: true }));
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              {
+                type: 'content_block_start',
+                index: 0,
+                content_block: {
+                  type: 'tool_use',
+                  id: 'toolu_override',
+                  name: 'override_tool',
+                  input: { initial: 'value' }, // Initial input that should be overridden
+                },
+              },
+              // Delta provides different input
+              { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"final":"winner"}' } },
+              { type: 'content_block_stop', index: 0 },
+              {
+                type: 'message_delta',
+                delta: { stop_reason: 'tool_use' },
+                usage: { input_tokens: 10, output_tokens: 10 },
+              },
+              { type: 'message_stop' },
+            ],
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Done' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 20, output_tokens: 3 } },
+              { type: 'message_stop' },
+            ],
+          })
+        );
+
+      const gen = executeAgentLoop('Override test', { ...baseOptions, executeTool });
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // Accumulated JSON should override initial input
+      expect(executeTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'override_tool',
+          input: { final: 'winner' }, // NOT { initial: 'value' }
+        })
+      );
+    });
+  });
 });
 

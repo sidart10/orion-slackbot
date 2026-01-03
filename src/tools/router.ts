@@ -14,8 +14,8 @@
 import type { ToolResult } from '../utils/tool-result.js';
 import { getMcpServerConfigs } from '../config/mcp-servers.js';
 import { toToolError } from './errors.js';
-import { McpClient } from './mcp/client.js';
-import { parseMcpToolName, toolRegistry } from './registry.js';
+import { McpClientManager } from './mcp/manager.js';
+import { toolRegistry } from './registry.js';
 
 export async function executeToolCall(params: {
   toolName: string;
@@ -25,21 +25,35 @@ export async function executeToolCall(params: {
   signal: AbortSignal;
 }): Promise<ToolResult<unknown>> {
   try {
-    const mcp = parseMcpToolName(params.toolName);
-    if (mcp) {
-      const server = getMcpServerConfigs().find((s) => s.name === mcp.serverName);
+    // 1. Check static tools first
+    const staticTool = toolRegistry.getStaticTool(params.toolName);
+    if (staticTool) {
+      try {
+        const data = await staticTool.handler(params.args);
+        return { success: true, data };
+      } catch (e) {
+        return { success: false, error: toToolError(e) };
+      }
+    }
+
+    // 2. Check MCP tools - the registry is the source of truth
+    //    If it's registered, the name is valid. No re-parsing/validation needed.
+    const mcpTool = toolRegistry.getMcpTool(params.toolName);
+    if (mcpTool) {
+      const server = getMcpServerConfigs().find((s) => s.name === mcpTool.serverName);
       if (!server || !server.enabled || !server.url) {
         return {
           success: false,
           error: {
             code: 'TOOL_NOT_FOUND',
-            message: `Tool "${params.toolName}" is not available (server "${mcp.serverName}" not configured)`,
+            message: `Tool "${params.toolName}" is not available (server "${mcpTool.serverName}" not configured)`,
             retryable: false,
           },
         };
       }
 
-      const client = new McpClient(server.name, {
+      // Get cached client from manager (maintains session state - AC-C2, AC-C9)
+      const client = await McpClientManager.getInstance().getClient(server.name, {
         url: server.url,
         bearerToken: server.bearerToken,
         connectionTimeoutMs: server.connectionTimeoutMs,
@@ -47,7 +61,7 @@ export async function executeToolCall(params: {
       });
 
       const result = await client.callTool(
-        mcp.toolName,
+        mcpTool.originalName, // Use the original tool name (without server prefix)
         params.args,
         params.traceId,
         undefined,
@@ -68,16 +82,7 @@ export async function executeToolCall(params: {
       return { success: true, data: result.data };
     }
 
-    const staticTool = toolRegistry.getStaticTool(params.toolName);
-    if (staticTool) {
-      try {
-        const data = await staticTool.handler(params.args);
-        return { success: true, data };
-      } catch (e) {
-        return { success: false, error: toToolError(e) };
-      }
-    }
-
+    // 3. Tool not found in either registry
     return {
       success: false,
       error: {

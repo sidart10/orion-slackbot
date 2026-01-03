@@ -17,6 +17,19 @@ so that I can select the right tool for each task without knowing which server p
 6. **Given** a platform admin, **When** they disable an MCP server, **Then** its tools are removed from registry on next refresh.
 7. **Given** any tool operation in this story, **When** it fails, **Then** it returns `ToolResult<T>` with an appropriate error code (no throws).
 
+## Additional Acceptance Criteria (Added 2025-12-31 — Client Caching)
+
+> **Context:** MCP clients should be cached per server to maintain session state. Creating new clients per call breaks session persistence.
+> See: `sprint-change-proposal-2025-12-31.md`
+
+8. **AC-C1:** **Given** multiple tool calls to the same MCP server, **When** the `McpClientManager` is used, **Then** it returns the same cached SDK Client instance (not a new client per call).
+
+9. **AC-C2:** **Given** tool calls to the same server within a session, **When** executed, **Then** all calls reuse the cached client and maintain session state.
+
+10. **AC-C3:** **Given** tool calls to different MCP servers, **When** executed, **Then** each server maintains its own independent session (no cross-server session bleeding).
+
+11. **AC-C4:** **Given** concurrent tool calls to the same server, **When** executed via `Promise.all()`, **Then** they do not race on session initialization (mutex/lock on init).
+
 ## Tasks / Subtasks
 
 - [x] **Task 0: Align Error Codes with Current Repo Reality** (AC: #5, #7)
@@ -86,6 +99,34 @@ so that I can select the right tool for each task without knowing which server p
     - [x] disable server removes tools
     - [x] discovery failure retains cached tools and returns ToolResult failure
 
+### Phase 2: Client Caching (2025-12-31 — COMPLETE)
+
+- [x] **Task 7: Create McpClientManager Singleton** (AC: #8, #9)
+  - [x] Create `src/tools/mcp/manager.ts`
+  - [x] Implement singleton pattern (one manager per process)
+  - [x] Cache SDK Client instances per server name
+  - [x] Lazy initialization on first call to each server
+
+- [x] **Task 8: Implement Concurrency Safety** (AC: #11)
+  - [x] Add mutex/lock for session initialization
+  - [x] Prevent race conditions on concurrent first calls
+  - [x] Ensure only one initialize request per server
+
+- [x] **Task 9: Update Discovery to Use Manager** (AC: #8, #10)
+  - [x] Update `src/tools/mcp/discovery.ts` to get clients from manager
+  - [x] Ensure each server has independent session
+  - [x] Remove per-call client instantiation
+
+- [x] **Task 10: Update Router to Use Manager** (AC: #9)
+  - [x] Update `src/tools/router.ts` to get clients from manager
+  - [x] Ensure tool calls reuse cached clients
+
+- [x] **Task 11: Client Caching Tests** (AC: #8-11)
+  - [x] Test: `same_client_returned_for_same_server`
+  - [x] Test: `different_clients_for_different_servers`
+  - [x] Test: `concurrent_calls_no_race_condition`
+  - [x] Test: `lazy_initialization_on_first_call`
+
 ## Dev Notes
 
 ### Scope / Boundaries
@@ -141,7 +182,7 @@ so that I can select the right tool for each task without knowing which server p
 
 ### File Locations (target state after this story)
 
-Create new tool-layer structure **without breaking the current agent entry points**:
+Tool-layer structure **without breaking the current agent entry points**:
 
 ```
 src/
@@ -151,13 +192,18 @@ src/
 │   └── mcp-servers.ts           # Enabled servers + URLs + auth (env-driven)
 └── tools/
     ├── registry.ts              # Unified registry (static + MCP)
+    ├── router.ts                # Tool routing (static + MCP dispatch)
+    ├── errors.ts                # Error normalization (toToolError)
     └── mcp/
         ├── discovery.ts         # Multi-server discovery + TTL caching
-        └── types.ts             # MCP tool schema types (minimal for discovery)
+        ├── client.ts            # MCP HTTP client (Story 3.1)
+        ├── schema-converter.ts  # MCP → Anthropic tool format
+        └── types.ts             # MCP tool schema types
 ```
 
 Notes:
-- `src/tools/` does not exist yet in the repo — **create it** and keep `src/agent/tools.ts` as the stable adapter.
+- `src/tools/` created in Phase 1 — contains registry, router, MCP clients, and supporting modules.
+- `src/agent/tools.ts` remains the stable adapter for agent loop.
 - Any new filenames must be `kebab-case.ts` (repo lint rule).
 
 ### Data Structures (recommended)
@@ -247,6 +293,11 @@ Claude (Cursor)
 - ✅ Task 4: Added lazy MCP discovery with per-server 5m TTL caching + failure-retains-cache behavior (unit tests)
 - ✅ Task 5: Wired agent entry points to refresh MCP tools (lazy+TTL) and pass registry tools into Anthropic calls (tests updated)
 - ✅ Task 6: Added unit tests for TTL, prefix/conflict policy, stable ordering, disable-removal, and failure-retains-cache
+- ✅ Task 7: Created `McpClientManager` singleton with client caching per server name, lazy initialization
+- ✅ Task 8: Implemented concurrency safety via `pendingInit` Map (mutex pattern prevents race on concurrent first calls)
+- ✅ Task 9: Updated `discovery.ts` to use `McpClientManager.getInstance().getClient()` instead of `new McpClient()`
+- ✅ Task 10: Updated `router.ts` to use `McpClientManager.getInstance().getClient()` instead of `new McpClient()`
+- ✅ Task 11: Added 14 unit tests for client caching (AC-C1 through AC-C4), plus integration test in router.test.ts verifying reuse
 
 ### File List
 
@@ -255,10 +306,16 @@ Claude (Cursor)
 - `src/config/mcp-servers.ts`
 - `src/tools/registry.ts`
 - `src/tools/registry.test.ts`
+- `src/tools/router.ts` (Tool routing, uses registry for lookup)
+- `src/tools/router.test.ts`
+- `src/tools/errors.ts` (Error normalization)
+- `src/tools/errors.test.ts`
 - `src/tools/mcp/discovery.ts`
 - `src/tools/mcp/discovery.test.ts`
 - `src/tools/mcp/client.ts` (Story 3.1 - MCP HTTP client)
 - `src/tools/mcp/client.test.ts`
+- `src/tools/mcp/manager.ts` (NEW - McpClientManager singleton for client caching)
+- `src/tools/mcp/manager.test.ts` (NEW - 13 tests for client caching AC-C1 through AC-C4)
 - `src/tools/mcp/schema-converter.ts` (MCP → Anthropic tool format)
 - `src/tools/mcp/schema-converter.test.ts`
 - `src/tools/mcp/types.ts`
@@ -266,7 +323,7 @@ Claude (Cursor)
 - `src/tools/mcp/health.test.ts`
 - `src/tools/mcp/config.ts`
 - `src/tools/mcp/config.test.ts`
-- `src/tools/mcp/index.ts`
+- `src/tools/mcp/index.ts` (UPDATED - exports McpClientManager)
 - `src/agent/tools.ts`
 - `src/agent/tools.test.ts`
 - `src/agent/loop.ts`
@@ -284,5 +341,10 @@ Claude (Cursor)
 | 2025-12-23 | Task 4 complete: lazy discovery + TTL caching + tests |
 | 2025-12-23 | Task 5 complete: agent tools adapter + loop refresh wiring |
 | 2025-12-23 | Code review: Fixed parent task checkboxes (Tasks 1-6), updated File List with all MCP files, clarified 3.1 dependency as complete |
+| 2025-12-31 | **Client caching gap identified:** Creating new MCP client per call breaks session persistence. Need `McpClientManager` singleton to cache clients per server. |
+| 2025-12-31 | **Reopened for Phase 2:** Added AC-C1 through AC-C4 and Tasks 7-11 for client caching. See: `sprint-change-proposal-2025-12-31.md` |
+| 2026-01-02 | **SM validation:** Phase 1 verified complete. Updated File List (added router.ts, errors.ts). Updated Dev Notes to reflect current state. Phase 2 tasks correctly scoped. |
+| 2026-01-02 | **Phase 2 complete:** Tasks 7-11 implemented. McpClientManager singleton caches clients per server. Discovery + router updated to use manager. 14 unit tests pass. All 133 tools tests pass. |
+| 2026-01-02 | **Code Review:** Fixed test count (14 not 13). Staged untracked manager.ts files. Noted M2 as future improvement (config URL validation on cached client). Story ready for done. |
 
 

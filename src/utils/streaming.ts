@@ -80,6 +80,21 @@ export class SlackStreamer {
   // Heartbeat state (AC#8)
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
+  /**
+   * Lock to serialize SDK append calls and prevent race conditions.
+   *
+   * The Slack SDK's chatStream has a race condition: if a second append() is called
+   * before the first startStream API call returns, the SDK creates TWO separate
+   * messages with the same content.
+   *
+   * This promise is set when a flush begins and cleared when it completes.
+   * All subsequent flushes (and stop()) must await this before proceeding.
+   *
+   * @see Story 7.5 - Duplicate Response Bug
+   * @see tech-spec-duplicate-response-fix.md - Race condition analysis
+   */
+  private flushInProgress: Promise<void> | null = null;
+
   constructor(config: StreamerConfig) {
     this.client = config.client;
     this.channel = config.channel;
@@ -165,6 +180,7 @@ export class SlackStreamer {
 
   /**
    * Flush pending content to Slack with 429 retry (AC#9)
+   * Serializes SDK calls to prevent race condition that causes duplicate messages.
    */
   private async flushPendingContent(): Promise<void> {
     if (!this.pendingContent || !this.streamer) return;
@@ -173,7 +189,18 @@ export class SlackStreamer {
     this.pendingContent = '';
     this.debounceTimer = null;
 
-    await this.appendWithRetry(content);
+    // Wait for any in-progress flush to complete before starting a new one.
+    // This prevents the SDK race condition where multiple startStream calls
+    // are made before the first one returns (causing duplicate messages).
+    if (this.flushInProgress) {
+      await this.flushInProgress;
+    }
+
+    // Create a new promise for this flush operation
+    this.flushInProgress = this.appendWithRetry(content);
+    await this.flushInProgress;
+    this.flushInProgress = null;
+
     this.lastUpdateTime = Date.now();
   }
 
@@ -181,6 +208,16 @@ export class SlackStreamer {
    * Append with exponential backoff retry for 429 errors (AC#9)
    */
   private async appendWithRetry(text: string, attempt = 1): Promise<void> {
+    // Debug log for duplicate detection (Story 7.5)
+    logger.debug({
+      event: 'stream_append_call',
+      channel: this.channel,
+      threadTs: this.threadTs,
+      textLength: text.length,
+      textPreview: text.slice(0, 100),
+      totalCharsSoFar: this.totalChars,
+    });
+
     try {
       await this.streamer!.append({ markdown_text: text });
     } catch (error: unknown) {
@@ -231,10 +268,36 @@ export class SlackStreamer {
       this.heartbeatTimer = null;
     }
 
-    // Flush any pending content before stop
+    // H1 FIX: Wait for any in-progress flush FIRST, regardless of pendingContent.
+    // Race condition: debounce timer fires → flushPendingContent() clears pendingContent
+    // and starts appendWithRetry(). If stop() is called before appendWithRetry() completes,
+    // we must wait for it to finish before calling SDK stop().
+    if (this.flushInProgress) {
+      logger.debug({
+        event: 'stream_stop_awaiting_flush',
+        channel: this.channel,
+        threadTs: this.threadTs,
+      });
+      await this.flushInProgress;
+    }
+
+    // Then flush any remaining pending content
     if (this.pendingContent) {
+      logger.debug({
+        event: 'stream_stop_flushing_pending',
+        channel: this.channel,
+        threadTs: this.threadTs,
+        pendingLength: this.pendingContent.length,
+      });
       await this.flushPendingContent();
     }
+
+    logger.debug({
+      event: 'stream_stop_calling',
+      channel: this.channel,
+      threadTs: this.threadTs,
+      totalChars: this.totalChars,
+    });
 
     await this.streamer.stop();
 

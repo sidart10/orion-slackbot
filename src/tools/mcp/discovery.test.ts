@@ -1,16 +1,27 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolResult } from '../../utils/tool-result.js';
 import { toolRegistry } from '../registry.js';
 import { discoverAllTools } from './discovery.js';
 import { McpClient } from './client.js';
+import { clearMcpConfigCache } from './config.js';
+import { __setSkipFileConfigForTests } from '../../config/mcp-servers.js';
+import { resetMcpClientManager } from './manager.js';
 
 describe('discoverAllTools', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     toolRegistry.__resetForTests();
+    clearMcpConfigCache(); // Clear file-based config cache
+    resetMcpClientManager(); // Reset client manager between tests
+    __setSkipFileConfigForTests(true); // Skip .orion/config.yaml in tests
     delete process.env.RUBE_MCP_ENABLED;
     delete process.env.RUBE_MCP_URL;
     delete process.env.RUBE_API_KEY;
+  });
+
+  afterEach(() => {
+    __setSkipFileConfigForTests(false); // Restore
+    resetMcpClientManager();
   });
 
   it('returns TOOL_INVALID_INPUT for enabled server missing URL (Task 0 mapping)', async () => {

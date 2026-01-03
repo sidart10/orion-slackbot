@@ -17,11 +17,39 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * MCP client session state for lifecycle tracking
+ * @see Story 3.5 - AC-L5: Session state machine
+ */
+export enum SessionState {
+  /** Not yet connected, no handshake performed */
+  DISCONNECTED = 'DISCONNECTED',
+  /** Initialization in progress (initialize request sent, waiting for response) */
+  INITIALIZING = 'INITIALIZING',
+  /** Session established, ready for tool calls */
+  CONNECTED = 'CONNECTED',
+  /** Initialization failed */
+  FAILED = 'FAILED',
+}
+
+/**
+ * MCP initialize response result
+ * @see MCP Specification 2025-06-18 - Lifecycle
+ */
+export interface McpInitializeResult {
+  protocolVersion: string;
+  capabilities: Record<string, unknown>;
+  serverInfo?: {
+    name: string;
+    version?: string;
+  };
+}
+
+/**
  * MCP JSON-RPC request envelope
  */
 export interface McpJsonRpcRequest {
   jsonrpc: '2.0';
-  id: string | number;
+  id?: string | number; // Optional for notifications
   method: string;
   params?: Record<string, unknown>;
 }
@@ -128,12 +156,21 @@ export interface McpClientConfig {
 /**
  * MCP client state for debugging/health
  * @see AC#7 - Lightweight state for debugging
+ * @see Story 3.5 AC-L5 - Session state machine
  */
 export interface McpClientState {
   lastSuccessAt?: Date;
   lastError?: string;
   lastErrorAt?: Date;
   lastLatencyMs?: number;
+  /** Current session state (AC-L5) */
+  sessionState?: SessionState;
+  /** Session ID if established (AC-L2) */
+  sessionId?: string;
+  /** When session was established (AC-L5) */
+  sessionEstablishedAt?: Date;
+  /** True if server doesn't support initialize handshake (AC-L3, AC-L10) */
+  isStateless?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

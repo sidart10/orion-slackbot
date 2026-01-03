@@ -24,7 +24,22 @@ So that Orion can use external tools without code changes for each integration.
 
 7. **Given** an MCP operation, **When** it runs, **Then** it logs structured events including `traceId`; and **when a Langfuse trace is available**, it emits spans named `mcp.tools.list` and `mcp.call` capturing serverName, tool (if applicable), durationMs, and success/failure metadata.
 
+## Additional Acceptance Criteria (Added 2025-12-31 — Session Management)
+
+> **Context:** Testing revealed session-based MCP servers (Samba internal MCPs) return HTTP 400 "Missing session ID". Adopting official `@modelcontextprotocol/sdk` for proper session lifecycle.
+> See: `sprint-change-proposal-2025-12-31.md`
+
+8. **AC-S1:** **Given** the first request to an MCP server, **When** the response includes `mcp-session-id` header, **Then** the client captures and stores the session ID for that server.
+
+9. **AC-S2:** **Given** a stored session ID, **When** subsequent requests are made to that server, **Then** the client sends `Mcp-Session-Id` header on all requests.
+
+10. **AC-S3:** **Given** a session ID that has expired or is invalid, **When** the server returns HTTP 404 "session not found", **Then** the client re-initializes the session automatically and retries the request.
+
+11. **AC-S4:** **Given** session establishment, **When** a new session is created, **Then** the client logs the session establishment event with `traceId` for observability.
+
 ## Tasks / Subtasks
+
+### Phase 1: Original Implementation (COMPLETE)
 
 - [x] **Task 1: Create MCP Client Core** (AC: #1, #5)
   - [x] Create `src/tools/mcp/client.ts` and `src/tools/mcp/types.ts`
@@ -59,6 +74,33 @@ So that Orion can use external tools without code changes for each integration.
     - [x] `listTools()` success returns `{ success: true, data }`
     - [x] timeout/network returns `{ success: false, error: { code: 'TOOL_UNAVAILABLE', retryable: true } }` (or `TOOL_EXECUTION_FAILED` where appropriate)
   - [x] Add `src/tools/mcp/schema-converter.test.ts` for edge-case schema conversion
+
+### Phase 2: Session Management (2025-12-31 — COMPLETE)
+
+- [x] **Task 6: Add Official MCP SDK Dependency** (AC: #8-11)
+  - [x] Add `@modelcontextprotocol/sdk` v1.25.1 to `package.json`
+  - [x] Update `project-context.md` with new dependency (already documented)
+
+- [x] **Task 7: Implement Session Lifecycle** (AC: #8, #9, #10)
+  - [x] Enhanced existing HTTP client with session management (simpler than full SDK replacement)
+  - [x] Session ID automatically captured from `mcp-session-id` response header
+  - [x] Session ID sent via `Mcp-Session-Id` header on all subsequent requests
+  - [x] Auto re-initialize on HTTP 404 "session not found" with retry
+
+- [x] **Task 8: Session Observability** (AC: #11)
+  - [x] Log session establishment with `traceId` (`mcp.session.established`)
+  - [x] Log session re-establishment events (`mcp.session.reestablished`)
+  - [x] Log session expiration events (`mcp.session.expired`)
+
+- [x] **Task 9: Session Lifecycle Tests** (AC: #8-11)
+  - [x] Test: `captures session ID from mcp-session-id header`
+  - [x] Test: `sends session ID on subsequent requests`
+  - [x] Test: `re-initializes session on 404 session not found`
+  - [x] Test: `multiple servers maintain independent sessions`
+  - [x] Test: `concurrent calls share the same session`
+
+- [x] **Task 10: Delete Custom Client** (cleanup) — SKIPPED
+  - N/A: Enhanced existing client instead of replacing with SDK wrapper (simpler, less code churn)
 
 ## Dev Notes
 
@@ -161,15 +203,25 @@ Add `GET /health/mcp` in `src/slack/app.ts`:
 - Updated `src/tools/mcp/index.ts` to export all new modules
 - Fixed `src/slack/app.test.ts` mock to properly capture multiple route handlers
 
+### Phase 2 Implementation (2025-01-02)
+
+- Added `@modelcontextprotocol/sdk` v1.25.1 dependency
+- Enhanced `McpClient` with session lifecycle management:
+  - Added `sessionId` private field and `getSessionId()` public method
+  - Capture session ID from `mcp-session-id` response header (AC-S1)
+  - Send `Mcp-Session-Id` header on subsequent requests (AC-S2)
+  - Auto-retry on HTTP 404 "session not found" with session reset (AC-S3)
+  - Structured logging for session events with traceId (AC-S4)
+
 ### Completion Notes
 
-✅ All 5 tasks completed with comprehensive test coverage:
-- 14 client tests covering success, timeout, network errors, HTTP errors, JSON-RPC errors, concurrency, optional auth
-- 20 schema-converter tests covering naming, edge cases (nullable, enum, nested, arrays, oneOf/anyOf), parseClaudeToolName()
-- 3 /health/mcp endpoint tests (registration, response format, error handling)
-- 4 pre-existing health tests continue to pass
-- 10 pre-existing config tests continue to pass
-- Total: 60 tests (48 MCP module + 12 app tests)
+✅ All Phase 1 + Phase 2 tasks completed with comprehensive test coverage:
+- 19 client tests (14 original + 5 session management)
+- 20 schema-converter tests
+- 5 discovery tests
+- 10 config tests
+- 4 health tests
+- Total: 58 MCP module tests passing
 
 Implementation decisions:
 - Used native `fetch` with `AbortController` for timeout handling (no external dependencies)
@@ -177,19 +229,23 @@ Implementation decisions:
 - Client state is instance-scoped (no global mutable state) for concurrency safety
 - Schema conversion preserves all JSON Schema constructs Anthropic supports
 - connectionTimeoutMs stored but not separately enforced (documented) - HTTP Streamable Transport uses ephemeral connections
+- **Session management**: Enhanced existing client rather than replacing with SDK wrapper — simpler approach, less code churn, same outcome
+- **Code review (2025-01-02)**: Removed unused `@modelcontextprotocol/sdk` dependency, updated architecture.md to reflect native session implementation
 
 ## File List
 
 | Action | Path |
 |--------|------|
 | Modified | `src/tools/mcp/types.ts` - Added MCP protocol types (JSON-RPC, McpTool, McpContent, McpClientConfig, McpClientState) |
-| Created | `src/tools/mcp/client.ts` - MCP HTTP Streamable Transport client with listTools/callTool |
-| Created | `src/tools/mcp/client.test.ts` - 13 unit tests for client |
+| Modified | `src/tools/mcp/client.ts` - MCP HTTP Streamable Transport client with session management |
+| Modified | `src/tools/mcp/client.test.ts` - 19 unit tests (14 original + 5 session management) |
+| Modified | `src/tools/mcp/discovery.test.ts` - 5 discovery tests (updated for session-aware client) |
 | Created | `src/tools/mcp/schema-converter.ts` - mcpToolToClaude() function |
-| Created | `src/tools/mcp/schema-converter.test.ts` - 13 unit tests for schema conversion |
+| Created | `src/tools/mcp/schema-converter.test.ts` - 20 unit tests for schema conversion |
 | Modified | `src/tools/mcp/index.ts` - Export new client and schema-converter modules |
 | Modified | `src/slack/app.ts` - Added GET /health/mcp endpoint |
 | Modified | `src/slack/app.test.ts` - Fixed mock to capture all route handlers |
+| Modified | `package.json` - Session management implemented natively (SDK dependency removed after review) |
 
 ## Change Log
 
@@ -199,3 +255,7 @@ Implementation decisions:
 | 2025-12-23 | Updated to match repo reality: ToolResult/ToolErrorCode (`src/utils/tool-result.ts`), tracing (`createSpan`), Cloud Run health routing (`src/slack/app.ts`), and clarified boundaries vs Stories 3.2/3.3 |
 | 2025-12-23 | Implementation complete - all 5 tasks done, 40 tests passing |
 | 2025-12-23 | Code review fixes: added parseClaudeToolName() tests (7), /health/mcp endpoint tests (3), no-bearer-token test (1), documented connectionTimeoutMs design decision. Total: 60 tests passing |
+| 2025-12-31 | **Session management gap identified:** Samba MCPs return HTTP 400 "Missing session ID". Custom client doesn't implement MCP session protocol. |
+| 2025-12-31 | **Reopened for Phase 2:** Adopting official `@modelcontextprotocol/sdk` for session lifecycle. Added AC-S1 through AC-S4 and Tasks 6-10. See: `sprint-change-proposal-2025-12-31.md` |
+| 2025-01-02 | **Phase 2 complete:** Session lifecycle implemented via enhanced existing client. 5 new tests added. 58 MCP tests passing. |
+| 2025-01-02 | **Code review fixes:** Removed unused `@modelcontextprotocol/sdk` dependency (dead code), updated File List to include `discovery.test.ts`, updated `architecture.md` ADR to reflect actual implementation. |

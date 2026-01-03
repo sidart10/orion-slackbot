@@ -36,6 +36,7 @@ _Critical rules and patterns that AI agents must follow when implementing code. 
 | Key Dependencies | Version |
 |------------------|---------|
 | @anthropic-ai/sdk | ^0.71.x |
+| (MCP session management) | Native implementation via fetch headers |
 | @slack/bolt | 4.6.0 |
 | langfuse | 3.38.6 |
 | @google-cloud/storage | ^7.x |
@@ -168,13 +169,13 @@ Where possible, rules are enforced by TypeScript:
 
 - ALL handlers wrapped in `startActiveObservation()`
 - Use Slack `event_id` as trace ID when available
-- Subagent spawns must pass parent traceId
+- Parallel tool executions share parent traceId
 
 ### Span Naming
 
 Format: `{component}.{operation}`
 
-Examples: `agent.loop`, `tool.memory.view`, `slack.message.send`, `subagent.research`
+Examples: `agent.loop`, `tool.memory.view`, `slack.message.send`, `mcp.rube.search`
 
 ### Logging
 
@@ -222,8 +223,7 @@ logger.info({
 |-------|-------|---------|
 | Max agent loop iterations | 10 | Prevent infinite loops |
 | Max retries per tool | 3 | Prevent retry storms |
-| Subagent timeout | 60s | Prevent orphan requests |
-| Max subagent result | 2000 tokens | Prevent context overflow |
+| Tool execution timeout | 30s | Prevent hung tool calls |
 
 - Run context compaction BEFORE `messages.create()`, not after
 - Validate every `tool_use.id` has matching `tool_result.tool_use_id`
@@ -240,12 +240,12 @@ logger.info({
 
 ---
 
-## Subagent Boundaries
+## Parallel Tool Execution
 
-- Subagents receive ONLY explicit `SubagentContext`, never parent messages
-- Max 2000 tokens in subagent result (summarize if longer)
-- Use `AbortController` with 60s timeout per subagent
-- `Promise.all()` with individual try/catch — one failure doesn't kill others
+- Claude returns multiple `tool_use` blocks when parallel execution is beneficial
+- Execute via `Promise.all()` with individual try/catch — one failure doesn't kill others
+- Each tool call shares parent traceId for observability
+- Use `AbortController` with 30s timeout per tool call
 
 ---
 

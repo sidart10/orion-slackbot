@@ -1,27 +1,42 @@
 # Orion Agent Configuration
-# This file defines the agent's behavior and capabilities
+# @see Epic 2+3
 
-name: orion
-version: 0.1.0
-description: AI-powered Slack assistant built with the Anthropic Messages API (tool_use + streaming)
-
-# Model configuration (used by Orion’s direct Anthropic client)
+# Default Anthropic model (used if ANTHROPIC_MODEL env var is not set)
 model:
-  provider: anthropic
-  default: claude-sonnet-4-20250514
+  default: "claude-sonnet-4-20250514"
 
-# Agent behavior settings
-behavior:
-  max_retries: 3
-  response_timeout_ms: 30000
-  streaming_enabled: true
+# MCP Server Configuration
+# Loaded by src/tools/mcp/config.ts
+# @see Epic 3: Tool Connectivity (MCP)
 
-# Directories for agent components
-paths:
-  agents: .orion/agents
-  workflows: .orion/workflows
-  tasks: .orion/tasks
-  skills: .claude/skills
-  commands: .claude/commands
-  context: orion-context
+mcp_servers:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Internal MCP Servers (Samba)
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+  audience-manager:
+    type: http
+    enabled: true
+    description: "Samba Audience Manager - audience segmentation and targeting"
+    url: "https://audience-manager-mcp-vjlizxe2vq-uc.a.run.app/mcp"
+    headers: {}
 
+  msci-reports:
+    type: http
+    enabled: true
+    description: "Samba MSCI Reports - report generation and analytics"
+    url: "https://report-generator-mcp-vjlizxe2vq-uc.a.run.app/mcp"
+    headers: {}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # External MCP Servers
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  exa:
+    type: http
+    enabled: true
+    description: "Exa Search - web search and code context"
+    # Default tools: web_search_exa, get_code_context_exa
+    # Add ?tools=... to URL to enable more tools
+    url: "https://mcp.exa.ai/mcp"
+    headers: {}

@@ -45,10 +45,18 @@ export interface AgentOptions {
   systemPrompt: string;
   /** Optional Langfuse trace/span for phase-level spans (Story 2.2) - accepts both legacy and new SDK types */
   trace?: LangfuseTrace | NewLangfuseSpan;
-  /** Optional status hook (Story 2.2 FR47) */
+  /**
+   * Optional status hook (Story 2.2 FR47, Story 7.3 AC1-AC5).
+   *
+   * @see Story 7.3 - Contextual Tool Feedback
+   */
   setStatus?: (params: {
     phase: 'gather' | 'act' | 'tool' | 'verify' | 'final';
     toolName?: string | null;
+    /** Tool input for query extraction (Story 7.3 AC1) */
+    toolInput?: Record<string, unknown>;
+    /** All tools when parallel execution (Story 7.3 AC4) */
+    allTools?: Array<{ name: string; input: Record<string, unknown> }>;
   }) => void | Promise<void>;
 }
 

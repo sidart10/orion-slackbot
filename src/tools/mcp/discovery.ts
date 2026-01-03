@@ -13,7 +13,7 @@ import { isRetryable } from '../../utils/tool-result.js';
 import { logger } from '../../utils/logger.js';
 import { getMcpServerConfigs } from '../../config/mcp-servers.js';
 import { toolRegistry } from '../registry.js';
-import { McpClient } from './client.js';
+import { McpClientManager } from './manager.js';
 import { mcpToolToClaude } from './schema-converter.js';
 
 export async function discoverAllTools(
@@ -102,12 +102,13 @@ async function discoverServerTools(
       };
     }
 
-    const client = new McpClient(server.name, {
+    // Get cached client from manager (maintains session state - AC-C1, AC-C2)
+    const client = await McpClientManager.getInstance().getClient(server.name, {
       url: server.url,
       bearerToken: server.bearerToken,
       connectionTimeoutMs: server.connectionTimeoutMs,
       requestTimeoutMs: server.requestTimeoutMs,
-    });
+    }, traceId);
 
     const tools = await client.listTools(traceId);
     if (!tools.success) {

@@ -11,15 +11,15 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { logger } from '../utils/logger.js';
 
-export function isSnakeCase(value: string): boolean {
-  return /^[a-z][a-z0-9_]*$/.test(value);
-}
-
 /**
  * Parse MCP-routed tool name.
  *
  * A tool is MCP-routed iff it contains `__` with a non-empty prefix: `server__tool`.
  * Split on the first occurrence only.
+ *
+ * NOTE: This function only parses - it does NOT validate.
+ * Validation happens at registration time via the registry.
+ * If a tool exists in the registry, it's valid. Period.
  */
 export function parseMcpToolName(
   name: string
@@ -31,7 +31,6 @@ export function parseMcpToolName(
   const toolName = name.slice(separatorIndex + 2);
 
   if (!serverName || !toolName) return null;
-  if (!isSnakeCase(serverName)) return null;
 
   return { serverName, toolName };
 }

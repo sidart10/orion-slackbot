@@ -21,6 +21,12 @@ export interface SourceCitation {
   title: string;
   /** URL for clickable link (optional) */
   url?: string;
+  /** Memory sources don't need URLs (implicit trust) */
+  isMemory?: boolean;
+  /** Tool sources show what was called (no URL needed) */
+  isTool?: boolean;
+  /** Brief context about tool usage (e.g., search query) */
+  toolContext?: string;
 }
 
 /**
@@ -33,17 +39,30 @@ interface SourcesContextBlock {
 }
 
 /**
- * Format a single source as a Slack link.
+ * Format a single source for display.
  *
  * @param source - Source to format
  * @returns Formatted string with Slack link syntax if URL available
  */
 function formatSourceLink(source: SourceCitation): string {
+  const sanitize = (s: string) => s.replaceAll('|', '¦').replaceAll('>', '›').replaceAll('<', '‹');
+  
   if (source.url) {
     // Slack link format: <URL|display text>
     return formatSlackLink({ url: source.url, text: source.title });
   }
-  return source.title.replaceAll('|', '¦').replaceAll('>', '›').replaceAll('<', '‹');
+  
+  // Tool sources: show tool name with context
+  if (source.isTool) {
+    const title = sanitize(source.title);
+    if (source.toolContext) {
+      const context = sanitize(source.toolContext.slice(0, 50));
+      return `🔧 ${title} — _${context}_`;
+    }
+    return `🔧 ${title}`;
+  }
+  
+  return sanitize(source.title);
 }
 
 /**
@@ -71,21 +90,28 @@ function formatSourceLink(source: SourceCitation): string {
 export function createSourcesContextBlock(
   sources: SourceCitation[]
 ): SourcesContextBlock | null {
-  if (sources.length === 0) return null;
+  // Filter to displayable sources:
+  // - Sources with URLs (clickable)
+  // - Memory sources (implicit trust)
+  // - Tool sources (show what was used to generate response)
+  const displayable = sources.filter((s) => s.url || s.isMemory || s.isTool);
 
-  const sourceText = sources
-    .map((s) => {
+  if (displayable.length === 0) return null;
+
+  const sourceLines = displayable
+    .map((s, idx) => {
       const link = formatSourceLink(s);
-      return `[${s.id}] ${link}`;
+      // Re-number sources based on filtered list
+      return `[${idx + 1}] ${link}`;
     })
-    .join(' | ');
+    .join('\n');
 
   return {
     type: 'context',
     elements: [
       {
         type: 'mrkdwn',
-        text: `📎 *Sources:* ${sourceText}`,
+        text: `📎 *Sources:*\n${sourceLines}`,
       },
     ],
   };
