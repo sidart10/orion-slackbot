@@ -1,0 +1,31 @@
+# Build stage
+FROM golang:1.23-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /build
+
+# Clone the repository
+RUN git clone --depth 1 https://github.com/GoogleCloudPlatform/vertex-ai-creative-studio.git
+
+WORKDIR /build/vertex-ai-creative-studio/experiments/mcp-genmedia/mcp-genmedia-go/mcp-veo-go
+
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -o mcp-veo-go .
+
+# Runtime stage
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates
+
+WORKDIR /app
+
+COPY --from=builder /build/vertex-ai-creative-studio/experiments/mcp-genmedia/mcp-genmedia-go/mcp-veo-go/mcp-veo-go .
+
+# Environment variables (set via Cloud Run)
+# PROJECT_ID, LOCATION, GENMEDIA_BUCKET are required
+
+EXPOSE 8080
+
+CMD ["./mcp-veo-go", "--transport", "http"]
+

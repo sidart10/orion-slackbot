@@ -1,0 +1,71 @@
+# Cloud Build configuration for MCP Veo Server
+# Deploy: gcloud builds submit --config=infra/mcp-genmedia/cloudbuild-veo.yaml
+
+timeout: '900s' # 15 minutes (Go build can be slow)
+
+steps:
+  # Build Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'infra/mcp-genmedia/Dockerfile.veo'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-veo:$COMMIT_SHA'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-veo:latest'
+      - '.'
+
+  # Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-veo'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'mcp-veo'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-veo:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--no-allow-unauthenticated'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '5'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '600'
+      - '--set-env-vars'
+      - 'PROJECT_ID=$PROJECT_ID,LOCATION=us-central1,GENMEDIA_BUCKET=orion-genmedia'
+
+  # Grant Orion service account invoker access
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'services'
+      - 'add-iam-policy-binding'
+      - 'mcp-veo'
+      - '--region'
+      - 'us-central1'
+      - '--member'
+      - 'serviceAccount:orion-agent@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--role'
+      - 'roles/run.invoker'
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-veo:$COMMIT_SHA'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/orion/mcp-veo:latest'
+
