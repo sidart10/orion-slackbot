@@ -94,6 +94,14 @@ export function getMcpServerConfigs(): McpServerConfig[] {
       for (const [name, sdkConfig] of Object.entries(fileConfig)) {
         const url = extractUrl(sdkConfig);
         if (url) {
+          const defaults = extractDefaults(sdkConfig);
+          const authType = extractAuthType(sdkConfig);
+          
+          // Debug: log genmedia server config
+          if (name.startsWith('genmedia')) {
+            console.log(`[DEBUG] MCP server ${name}:`, { url, defaults, authType });
+          }
+          
           configs.push({
             name,
             url,
@@ -101,8 +109,8 @@ export function getMcpServerConfigs(): McpServerConfig[] {
             bearerToken: extractBearerToken(sdkConfig),
             connectionTimeoutMs: 5000,
             requestTimeoutMs: 30000,
-            defaults: extractDefaults(sdkConfig),
-            authType: extractAuthType(sdkConfig),
+            defaults,
+            authType,
           });
         }
       }

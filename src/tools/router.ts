@@ -66,6 +66,14 @@ export async function executeToolCall(params: {
         ? { ...server.defaults, ...params.args }
         : params.args;
 
+      // Log merged args for genmedia tools (debug)
+      if (server.name.startsWith('genmedia')) {
+        console.log(`[GENMEDIA] Tool: ${mcpTool.originalName}, Server: ${server.name}`);
+        console.log(`[GENMEDIA] Defaults:`, server.defaults);
+        console.log(`[GENMEDIA] User args:`, params.args);
+        console.log(`[GENMEDIA] Merged:`, mergedArgs);
+      }
+
       // Veo 3.1 only supports durations [4, 6, 8] - fix invalid values
       if (mcpTool.originalName === 'veo_t2v' && mergedArgs.duration !== undefined) {
         const validDurations = [4, 6, 8];

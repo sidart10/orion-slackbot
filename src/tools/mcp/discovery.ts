@@ -125,7 +125,7 @@ async function discoverServerTools(
     const converted: Array<{ originalName: string; claudeTool: Anthropic.Tool }> = tools.data.map(
       (t) => ({
         originalName: t.name,
-        claudeTool: mcpToolToClaude(server.name, t) as unknown as Anthropic.Tool,
+        claudeTool: mcpToolToClaude(server.name, t, server.defaults) as unknown as Anthropic.Tool,
       })
     );
 

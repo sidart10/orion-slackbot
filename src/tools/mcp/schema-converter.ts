@@ -48,6 +48,7 @@ export interface AnthropicSchemaProperty {
  *
  * @param serverName - Name of the MCP server
  * @param tool - MCP tool definition
+ * @param serverDefaults - Optional default values that will be merged at runtime
  * @returns Anthropic tool definition
  *
  * @see AC#3 - Tool name exposed as {{serverName}}__{{toolName}}
@@ -57,7 +58,11 @@ export interface AnthropicSchemaProperty {
  * const claudeTool = mcpToolToClaude('brave', mcpTool);
  * // claudeTool.name === 'brave__search'
  */
-export function mcpToolToClaude(serverName: string, tool: McpTool): AnthropicTool {
+export function mcpToolToClaude(
+  serverName: string,
+  tool: McpTool,
+  serverDefaults?: Record<string, unknown>
+): AnthropicTool {
   const name = `${serverName}__${tool.name}`;
 
   const result: AnthropicTool = {
@@ -68,12 +73,30 @@ export function mcpToolToClaude(serverName: string, tool: McpTool): AnthropicToo
     },
   };
 
-  if (tool.description) {
-    result.description = tool.description;
+  // Build description with defaults info
+  let description = tool.description ?? '';
+  
+  // Add default values info to help Claude understand what's pre-configured
+  if (serverDefaults && Object.keys(serverDefaults).length > 0) {
+    const defaultsList = Object.entries(serverDefaults)
+      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+      .join(', ');
+    description += `\n\nNote: The following defaults are pre-configured and will be used if not specified: ${defaultsList}`;
   }
 
+  if (description) {
+    result.description = description;
+  }
+
+  // Remove defaults from required list since they're pre-configured
   if (tool.inputSchema.required && tool.inputSchema.required.length > 0) {
-    result.input_schema.required = tool.inputSchema.required;
+    const defaultKeys = serverDefaults ? Object.keys(serverDefaults) : [];
+    const stillRequired = tool.inputSchema.required.filter(
+      (r) => !defaultKeys.includes(r)
+    );
+    if (stillRequired.length > 0) {
+      result.input_schema.required = stillRequired;
+    }
   }
 
   return result;
