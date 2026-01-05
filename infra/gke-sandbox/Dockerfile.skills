@@ -1,0 +1,18 @@
+# Orion Sandbox with Skills
+# Extends the base Agent Sandbox Python runtime with Orion skills baked in.
+#
+# Build: docker build -f infra/gke-sandbox/Dockerfile.skills -t gcr.io/ai-workflows-459123/orion-sandbox:latest .
+# Push:  docker push gcr.io/ai-workflows-459123/orion-sandbox:latest
+#
+# @see Story 6.2 Task 9 - Sync Skills to Sandbox Filesystem
+# @see https://agentskills.io - Agent Skills open standard
+
+FROM registry.k8s.io/agent-sandbox/python-runtime-sandbox:v0.1.0
+
+# Copy skills to /skills/ following Agent Skills convention
+# Each skill is a directory with SKILL.md at minimum
+COPY .skills/ /skills/
+
+# Verify skills are present
+RUN echo "Skills installed:" && ls -la /skills/ && \
+    echo "Total skills: $(ls -1 /skills/ | wc -l)"

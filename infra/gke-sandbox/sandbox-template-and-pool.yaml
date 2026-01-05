@@ -1,3 +1,7 @@
+# SandboxTemplate with Orion Skills
+# Skills are baked into the container image at /skills/
+# @see Story 6.2 Task 9 - Sync Skills to Sandbox Filesystem
+# @see https://agentskills.io - Agent Skills open standard
 apiVersion: extensions.agents.x-k8s.io/v1alpha1
 kind: SandboxTemplate
 metadata:
@@ -12,7 +16,9 @@ spec:
       runtimeClassName: gvisor
       containers:
         - name: python-runtime
-          image: registry.k8s.io/agent-sandbox/python-runtime-sandbox:v0.1.0
+          # Custom image with Orion skills at /skills/
+          # Build: docker build -f infra/gke-sandbox/Dockerfile.skills -t gcr.io/ai-workflows-459123/orion-sandbox:skills-v1 .
+          image: gcr.io/ai-workflows-459123/orion-sandbox:skills-v1
           ports:
             - containerPort: 8888
           readinessProbe:
