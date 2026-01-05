@@ -18,10 +18,17 @@ import {
 import { toolRegistry } from '../registry.js';
 import * as sandboxClient from './sandbox-client.js';
 import * as skillsLoader from '../../skills/loader.js';
-import type { Skill } from '../../skills/types.js';
+import type { SkillMetadata } from '../../skills/types.js';
+import { readFile as readFileFn } from 'fs/promises';
 
 // Mock dependencies
-vi.mock('./sandbox-client.js');
+vi.mock('./sandbox-client.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./sandbox-client.js')>();
+  return {
+    ...actual,
+    executeSandbox: vi.fn(),
+  };
+});
 vi.mock('../../skills/loader.js');
 vi.mock('fs/promises', () => ({
   readFile: vi.fn(),
@@ -48,6 +55,7 @@ describe('executeCodeToolDefinition', () => {
     expect(schema.type).toBe('object');
     expect(schema.properties).toHaveProperty('code');
     expect(schema.properties).toHaveProperty('skill_script');
+    expect(schema.properties).toHaveProperty('skill_doc');
     expect(schema.properties).toHaveProperty('args');
     expect(schema.properties).toHaveProperty('timeout');
   });
@@ -128,7 +136,7 @@ describe('executeCodeHandler', () => {
   });
 
   describe('input validation', () => {
-    it('returns error when neither code nor skill_script provided', async () => {
+    it('returns error when neither code, skill_script, nor skill_doc provided', async () => {
       const result = await executeCodeHandler({}, mockContext);
 
       expect(result.success).toBe(false);
@@ -136,6 +144,7 @@ describe('executeCodeHandler', () => {
         expect(result.error.code).toBe('TOOL_EXECUTION_FAILED');
         expect(result.error.message).toContain('code');
         expect(result.error.message).toContain('skill_script');
+        expect(result.error.message).toContain('skill_doc');
       }
     });
 
@@ -223,6 +232,22 @@ describe('executeCodeHandler', () => {
         executeCodeHandler({ code: 'pass' }, mockContext)
       ).resolves.toBeDefined();
     });
+
+    it('returns TOOL_TIMEOUT for SandboxTimeoutError (AC#7)', async () => {
+      // Use the actual SandboxTimeoutError class from the module
+      vi.mocked(sandboxClient.executeSandbox).mockRejectedValue(
+        new sandboxClient.SandboxTimeoutError(30)
+      );
+
+      const result = await executeCodeHandler({ code: 'pass' }, mockContext);
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.code).toBe('TOOL_TIMEOUT');
+        expect(result.error.message).toContain('timed out');
+        expect(result.error.retryable).toBe(true); // Timeouts may succeed on retry
+      }
+    });
   });
 
   describe('result capture (AC#5)', () => {
@@ -262,11 +287,11 @@ describe('executeCodeHandler', () => {
 
 describe('skill script execution (AC#4)', () => {
   const mockContext = { traceId: 'test-trace-skill' };
-  const mockSkillWithScripts: Skill = {
+  const mockSkillWithScripts: SkillMetadata = {
     name: 'test_skill',
     description: 'Test skill',
-    instructions: 'Test',
     filePath: '.skills/test_skill/SKILL.md',
+    skillPath: '.skills/test_skill',
     hasExecutableScripts: true,
     scripts: [
       { name: 'process.py', path: '/mock/path/process.py' },
@@ -279,7 +304,7 @@ describe('skill script execution (AC#4)', () => {
   });
 
   it('executes skill script with skill: prefix', async () => {
-    vi.mocked(skillsLoader.getSkills).mockResolvedValue([mockSkillWithScripts]);
+    vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockSkillWithScripts]);
     vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
       stdout: 'skill output',
       stderr: '',
@@ -287,10 +312,7 @@ describe('skill script execution (AC#4)', () => {
     });
 
     // Mock readFile for the script
-    const { readFile } = await import('fs/promises');
-    vi.mocked(readFile as unknown as typeof vi.fn).mockResolvedValue(
-      'print("hello from skill")'
-    );
+    (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('print("hello from skill")');
 
     const result = await executeCodeHandler(
       { skill_script: 'skill:test_skill/process.py' },
@@ -298,19 +320,18 @@ describe('skill script execution (AC#4)', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(skillsLoader.getSkills).toHaveBeenCalledWith('test-trace-skill');
+    expect(skillsLoader.getSkillMetadata).toHaveBeenCalledWith('test-trace-skill');
   });
 
   it('executes skill script without skill: prefix', async () => {
-    vi.mocked(skillsLoader.getSkills).mockResolvedValue([mockSkillWithScripts]);
+    vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockSkillWithScripts]);
     vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
       stdout: 'output',
       stderr: '',
       return_code: 0,
     });
 
-    const { readFile } = await import('fs/promises');
-    vi.mocked(readFile as unknown as typeof vi.fn).mockResolvedValue('pass');
+    (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('pass');
 
     const result = await executeCodeHandler(
       { skill_script: 'test_skill/process.py' },
@@ -321,7 +342,7 @@ describe('skill script execution (AC#4)', () => {
   });
 
   it('returns error when skill not found', async () => {
-    vi.mocked(skillsLoader.getSkills).mockResolvedValue([]);
+    vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([]);
 
     const result = await executeCodeHandler(
       { skill_script: 'skill:nonexistent/script.py' },
@@ -335,12 +356,12 @@ describe('skill script execution (AC#4)', () => {
   });
 
   it('returns error when skill has no executable scripts', async () => {
-    const skillWithoutScripts: Skill = {
+    const skillWithoutScripts: SkillMetadata = {
       ...mockSkillWithScripts,
       hasExecutableScripts: false,
       scripts: undefined,
     };
-    vi.mocked(skillsLoader.getSkills).mockResolvedValue([skillWithoutScripts]);
+    vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([skillWithoutScripts]);
 
     const result = await executeCodeHandler(
       { skill_script: 'skill:test_skill/script.py' },
@@ -354,7 +375,7 @@ describe('skill script execution (AC#4)', () => {
   });
 
   it('returns error when script not found in skill', async () => {
-    vi.mocked(skillsLoader.getSkills).mockResolvedValue([mockSkillWithScripts]);
+    vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockSkillWithScripts]);
 
     const result = await executeCodeHandler(
       { skill_script: 'skill:test_skill/missing.py' },
@@ -369,15 +390,14 @@ describe('skill script execution (AC#4)', () => {
   });
 
   it('passes args as ARGS environment variable along with MCP_SERVERS', async () => {
-    vi.mocked(skillsLoader.getSkills).mockResolvedValue([mockSkillWithScripts]);
+    vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockSkillWithScripts]);
     vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
       stdout: '',
       stderr: '',
       return_code: 0,
     });
 
-    const { readFile } = await import('fs/promises');
-    vi.mocked(readFile as unknown as typeof vi.fn).mockResolvedValue('print(ARGS)');
+    (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('print(ARGS)');
 
     await executeCodeHandler(
       {
@@ -395,6 +415,58 @@ describe('skill script execution (AC#4)', () => {
         }),
       })
     );
+  });
+});
+
+describe('skill doc execution (Story 6.1 on-demand SKILL.md)', () => {
+  const mockContext = { traceId: 'test-trace-skill-doc' };
+  const mockSkill: SkillMetadata = {
+    name: 'test_skill',
+    description: 'Test skill',
+    filePath: '.skills/test_skill/SKILL.md',
+    skillPath: '.skills/test_skill',
+    hasExecutableScripts: false,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('loads SKILL.md via skill_doc and prints it in sandbox', async () => {
+    vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockSkill]);
+    vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
+      stdout: 'printed skill doc',
+      stderr: '',
+      return_code: 0,
+    });
+
+    (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('SKILL CONTENT');
+
+    const result = await executeCodeHandler({ skill_doc: 'skill:test_skill' }, mockContext);
+    expect(result.success).toBe(true);
+
+    // Ensure sandbox executed code with base64 decode helper
+    const callArgs = vi.mocked(sandboxClient.executeSandbox).mock.calls[0][0];
+    expect(callArgs.code).toContain('base64.b64decode');
+  });
+
+  it('returns TOOL_NOT_FOUND when skill_doc skill is missing', async () => {
+    vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([]);
+    const result = await executeCodeHandler({ skill_doc: 'skill:nope' }, mockContext);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('TOOL_NOT_FOUND');
+    }
+  });
+
+  it('returns TOOL_INVALID_INPUT for empty skill_doc format', async () => {
+    // Test edge case: "skill:" with nothing after it
+    const result = await executeCodeHandler({ skill_doc: 'skill:' }, mockContext);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('TOOL_INVALID_INPUT');
+      expect(result.error.message).toContain('Invalid skill_doc format');
+    }
   });
 });
 
