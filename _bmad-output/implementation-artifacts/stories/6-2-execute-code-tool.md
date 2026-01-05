@@ -10,8 +10,8 @@ Execute Python code in GKE sandbox with network access. Enables Skills to call M
 |--------|---------|
 | **Key files** | `src/tools/code-execution/{tool,sandbox-client,types,index}.ts` |
 | **Dependencies** | Story 6.1 (skills loader), Story 3.2 (tool registry), GKE Sandbox (infra) |
-| **Progress** | 11/12 tasks complete. **74 tests passing** (46 sandbox-client + 28 tool). Latency verified 2026-01-05. |
-| **Remaining** | Task 9 (skill filesystem — requires SandboxTemplate update) |
+| **Progress** | **12/12 tasks complete.** 74 tests passing. Skills baked into sandbox. Latency verified. |
+| **Remaining** | None — ready for final review |
 | **Critical Fix** | K8s SandboxClaim lifecycle implemented — production 400 errors resolved |
 
 ---
@@ -84,12 +84,14 @@ Story 6.1 refactored to `SkillMetadata` pattern. Tool correctly uses `getSkillMe
 - [x] **Task 7:** Observability — Langfuse span, code hash logging ✅
 - [x] **Task 8:** Unit tests — 74 tests passing ✅
 
-### Remaining Tasks
+### Completed Tasks (continued)
 
-- [ ] **Task 9: Sync Skills to Sandbox Filesystem** (~1.5h)
-  - Use Option C: bake `.skills/` into SandboxTemplate at build time
-  - Update `infra/gke-sandbox/sandbox-template-and-pool.yaml`
-  - Test: `execute_code({ code: "cat /skills/example/SKILL.md" })`
+- [x] **Task 9: Sync Skills to Sandbox Filesystem** ✅ (completed 2026-01-05)
+  - Built custom Docker image with skills baked in: `gcr.io/ai-workflows-459123/orion-sandbox:skills-v1`
+  - Skills available at `/skills/{name}/SKILL.md` following [Agent Skills standard](https://agentskills.io)
+  - Updated `infra/gke-sandbox/sandbox-template-and-pool.yaml` to use custom image
+  - Created `infra/gke-sandbox/Dockerfile.skills` for reproducible builds
+  - **Verified:** `execute_code({ code: "cat /skills/example/SKILL.md" })` returns skill content ✅
 
 - [x] **Task 10: Tool Registration Integration** (~30min) — CRITICAL ✅
   - `registerExecuteCodeTool()` called in `src/index.ts` lines 24, 47
@@ -207,6 +209,10 @@ Before marking story "done":
 | Modified | src/agent/orion.ts — setExecuteCodeContext/clearExecuteCodeContext already integrated ✅ |
 | Modified | .env.example — Added GKE cluster config vars (2026-01-04) |
 | Created | tests/integration/sandbox-client.integration.test.ts — Integration tests (skipped, manual run) |
+| Created | infra/gke-sandbox/Dockerfile.skills — Custom sandbox image with skills (2026-01-05) |
+| Created | infra/gke-sandbox/cloudbuild-skills.yaml — Cloud Build config for skills image (2026-01-05) |
+| Modified | infra/gke-sandbox/sandbox-template-and-pool.yaml — Use custom skills image (2026-01-05) |
+| Created | scripts/test-skills-sandbox.ts — Task 9 verification script (2026-01-05) |
 
 ---
 
@@ -226,3 +232,4 @@ Before marking story "done":
 | 2026-01-04 | **CRITICAL FIX:** Implemented K8s SandboxClaim lifecycle. Production was returning 400 "X-Sandbox-ID header is required". Rewrote sandbox-client.ts with: create→poll→execute→delete lifecycle, GCP auth, proper headers (X-Sandbox-ID, X-Sandbox-Namespace, X-Sandbox-Port), correct request format (`{"command": "python3 -c '...'"}`). Added dependency injection for testing. 48 tests passing. See tech-spec-fix-sandbox-client-k8s-lifecycle.md. |
 | 2026-01-05 | Code Review: Fixed 4 MEDIUM issues — (1) Updated stale test counts in story, (2) Added missing skill_doc empty format test, (3) Removed duplicate `clearCachedEndpoint` legacy alias, (4) Fixed TypeScript assertion warnings in validation tests. 74 tests passing. |
 | 2026-01-05 | **Task 12 Complete:** Latency verified on live GKE cluster. Warm: ~1.8s in-cluster (2.5s via port-forward). Cold: ~10s. K8s overhead breakdown documented. 11/12 tasks complete. |
+| 2026-01-05 | **Task 9 Complete:** Skills baked into sandbox. Built `gcr.io/ai-workflows-459123/orion-sandbox:skills-v1` with 12 skills at `/skills/`. Updated SandboxTemplate. Verified `cat /skills/example/SKILL.md` works. **12/12 tasks complete — Story ready for done.** |
