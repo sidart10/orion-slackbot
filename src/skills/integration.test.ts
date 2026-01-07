@@ -11,7 +11,15 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { loadSkills, buildSkillsPrompt, getSkills, reloadSkills } from './index.js';
+import {
+  loadSkills,
+  buildSkillsPrompt,
+  buildSkillsHint,
+  getSkills,
+  reloadSkills,
+  getSkillMetadata,
+  reloadSkillMetadata,
+} from './index.js';
 import { toolRegistry } from '../tools/registry.js';
 
 // Mock langfuse to avoid actual API calls
@@ -24,6 +32,7 @@ vi.mock('../observability/langfuse.js', () => ({
 describe('Skills Integration', () => {
   beforeEach(() => {
     reloadSkills();
+    reloadSkillMetadata();
     toolRegistry.__resetForTests();
   });
 
@@ -64,14 +73,20 @@ describe('Skills Integration', () => {
     expect(exampleSkill?.instructions).toContain('Guidelines');
   });
 
-  it('builds system prompt section from loaded skills', async () => {
+  it('builds token-efficient system prompt hint from metadata (preferred)', async () => {
+    const metadata = await getSkillMetadata('integration-test-trace');
+    const hint = buildSkillsHint(metadata);
+
+    expect(hint).toContain('# Available Skills');
+    expect(hint).toContain('*example_skill*');
+    expect(hint).toContain('A sample skill demonstrating the Agent Skills format');
+    expect(hint).toContain('tools: greet_user');
+  });
+
+  it('builds full system prompt section from loaded skills (deprecated, kept for compatibility)', async () => {
     const skills = await loadSkills('integration-test-trace');
     const prompt = buildSkillsPrompt(skills);
-
-    expect(prompt).toContain('# Available Skills');
     expect(prompt).toContain('## Skill: example_skill');
-    expect(prompt).toContain('A sample skill demonstrating the Agent Skills format');
-    expect(prompt).toContain('Available tools: greet_user');
   });
 
   it('getSkills caches results', async () => {

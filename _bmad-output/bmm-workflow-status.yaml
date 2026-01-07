@@ -32,4 +32,4 @@ workflow_status:
   implementation-readiness: "_bmad-output/implementation-readiness-report-2025-12-17.md"
 
   # Phase 3: Implementation
-  sprint-planning: required
+  sprint-planning: "_bmad-output/sprint-status.yaml"

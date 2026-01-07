@@ -1,6 +1,7 @@
 # Story 6.1: Agent Skills Loader with GKE Sandbox Integration
 
 Status: done
+Completed: 2026-01-03
 
 ## Story
 
@@ -8,15 +9,42 @@ As a **developer**,
 I want to add new skills by creating SKILL.md files with optional executable scripts,
 So that I can extend Orion's capabilities with both instructions AND programmatic tool orchestration.
 
+## Scope Boundary (Non-Negotiable)
+
+- This story **discovers and catalogs** Skills from `.skills/` and exposes **metadata + tool definitions** to the runtime.
+- This story does **not** execute skill scripts. Script execution in GKE Sandbox is **Story 6.2**.
+- Skill **instructions** are **not** injected into the system prompt at startup; they are loaded **on-demand** (progressive disclosure).
+
+## Current State vs Target State (Authoritative)
+
+### Current State (Implemented)
+
+- **Startup loading is metadata-only**: `getSkillMetadata(traceId)` loads frontmatter only (no instructions) and is cached per-process.
+- **System prompt injects hint only**:
+  - `src/slack/handlers/user-message.ts` injects `buildSkillsHint(await getSkillMetadata(traceId))`
+  - `src/slack/handlers/app-mention.ts` injects `buildSkillsHint(await getSkillMetadata(traceId))`
+- **Skill tools are routable**:
+  - Skill tools are registered into `toolRegistry` (ensured in the agent loop before tool definitions are built).
+  - Tool routing (`src/tools/router.ts`) routes registered skill tools and returns `TOOL_NOT_IMPLEMENTED` until Story 6.2.
+- **On-demand SKILL.md reading is supported**: `execute_code` supports `skill_doc: "skill:skill_name"` to print the full SKILL.md content on demand.
+
+### Target State (What this story must enforce)
+
+- **Startup loads metadata only**: frontmatter fields + tool definitions + script catalog; no `instructions` loaded at startup.
+- **System prompt injects hint only**: name + description + available tool names + instruction for on-demand loading.
+- **Skill tools are usable in runtime**:
+  - Tools are registered (eagerly or lazily per decision below) into `toolRegistry` with the `${skillName}__${toolName}` naming convention.
+  - Tool routing executes skill tools when the registry says the tool is a skill tool (registry membership is the source of truth; conflicts are prevented at registration time).
+
 ## Acceptance Criteria
 
-1. **Given** a `.skills/` directory with SKILL.md files, **When** the loader runs, **Then** all valid skills are discovered and parsed
+1. **Given** a `.skills/` directory with SKILL.md files, **When** the loader runs, **Then** all valid skills are discovered and their **metadata** is extracted
 
-2. **Given** a SKILL.md file, **When** parsed, **Then** the skill name, description, instructions, and optional tools are extracted
+2. **Given** a SKILL.md file, **When** parsed for startup, **Then** only frontmatter metadata is loaded (name, description, version/author, tools) and **instructions are not loaded**
 
 3. **Given** invalid or malformed SKILL.md, **When** parsing fails, **Then** an error is logged but other skills still load
 
-4. **Given** loaded skills, **When** the agent initializes, **Then** skill instructions are available for system prompt injection
+4. **Given** loaded skills, **When** the agent prepares the system prompt, **Then** only a **skills hint** (name + description + available skill tools) is injected, plus instructions for how to load full SKILL.md on-demand
 
 5. **Given** skills with tool definitions, **When** loaded, **Then** the tools are validated (snake_case) and added to the tool registry
 
@@ -26,53 +54,58 @@ So that I can extend Orion's capabilities with both instructions AND programmati
 
 8. **Given** a skill with `scripts/` directory, **When** loaded, **Then** script paths are cataloged for GKE sandbox execution (see Story 6.2)
 
-9. **Given** skill instructions that reference MCP tools, **When** executed, **Then** Claude calls MCP tools directly OR routes to `execute_code` for complex orchestration
+9. **Given** a user request matches a skill, **When** that skill is invoked, **Then** the agent loads the full SKILL.md instructions on-demand (via `execute_code`) and follows them
+
+10. **Given** skill instructions that require loops/conditionals or script execution, **When** executed, **Then** the agent routes orchestration through `execute_code` in GKE Sandbox (Story 6.2)
 
 ## Tasks / Subtasks
 
-- [x] **Task 1: Create Skills Loader** (AC: #1, #3)
-  - [x] Create `src/skills/loader.ts`
-  - [x] Implement `loadSkills(traceId: string)` function
-  - [x] Discover SKILL.md files via glob in `.skills/` directory
-  - [x] Handle missing directory gracefully (return empty array)
-  - [x] Skip invalid skills with warning log (include traceId)
+### Refactor Tasks (Required to Close Story)
 
-- [x] **Task 2: SKILL.md Parser** (AC: #2, #5)
-  - [x] Create `src/skills/parser.ts`
-  - [x] Parse markdown frontmatter (YAML) using `gray-matter`
-  - [x] Extract name, description, version
-  - [x] Extract instructions from markdown body
-  - [x] Extract and validate tool definitions (snake_case names)
+- [ ] **Task 1: Metadata-Only Loading (Progressive Disclosure Level 1)** (AC: #1-4, #6, #8)
+  - [ ] Add `SkillMetadata` type and update loader to return metadata-only at startup
+  - [ ] Loader must not load `instructions` into memory during startup metadata load
+  - [ ] Add `skillPath` to metadata for on-demand loading
+  - [ ] Preserve `scripts` discovery and `hasExecutableScripts`
 
-- [x] **Task 3: Skill Types** (AC: #2, #5)
-  - [x] Create `src/skills/types.ts`
-  - [x] Define `Skill` interface
-  - [x] Define `SkillTool` interface
-  - [x] Export type-safe structures
+- [ ] **Task 2: On-Demand Instruction Loading (Progressive Disclosure Level 2)** (AC: #9)
+  - [ ] Add helper(s) to load full SKILL.md content on-demand (instructions + optional tools)
+  - [ ] Document the intended usage via `execute_code` (Story 6.2 provides execution environment)
 
-- [x] **Task 4: System Prompt Injection** (AC: #4)
-  - [x] Create `src/skills/prompt-builder.ts`
-  - [x] Format skills for system prompt
-  - [x] Handle empty skills gracefully
-  - [x] Export for use in `src/agent/context.ts`
+- [ ] **Task 3: Skills Hint Prompt Builder (Token Efficient)** (AC: #4)
+  - [ ] Replace `buildSkillsPrompt()` with `buildSkillsHint()` that returns **name + description + tool names only**
+  - [ ] Include clear instruction for loading full SKILL.md on-demand
 
-- [x] **Task 5: Tool Registration** (AC: #5)
-  - [x] Validate tool names match `/^[a-z][a-z0-9_]*$/`
-  - [x] Register skill tools with tool registry (from Story 3.2)
-  - [x] Prefix tools with skill name: `{skill_name}__{tool_name}`
-  - [x] Handle tool execution routing via registry
+- [ ] **Task 4: Update Integration Touchpoints** (AC: #4)
+  - [ ] Update `src/slack/handlers/user-message.ts` to inject **skills hint** (not full content)
+  - [ ] Update `src/slack/handlers/app-mention.ts` to inject **skills hint** (not full content)
+  - [ ] Verify any other call sites (e.g., `src/tools/code-execution/tool.ts`) don’t assume full instructions are preloaded or that `getSkills()` returns full content at startup
 
-- [x] **Task 6: Observability** (AC: #6)
-  - [x] Log skills loaded at startup with traceId
-  - [x] Create Langfuse span for loading process
-  - [x] Track parse failures with skill path and error
+- [ ] **Task 5: Tool Registration + Runtime Wiring (Decide + Implement)** (AC: #5)
+  - [ ] Decision: register skill tools eagerly from frontmatter metadata at startup (default) vs lazy on-demand
+  - [ ] If eager: register tools from frontmatter metadata via `toolRegistry.registerDynamicTool(skillName, toolName, toolDefinition)` during skill load
+  - [ ] If lazy: document how/when tools are registered, and how they’re removed/reloaded safely
+  - [ ] **Runtime wiring (MANDATORY):** ensure skill tools can be executed end-to-end
+    - [ ] Register discovered skill tools into `toolRegistry` in production code paths (not tests-only)
+    - [ ] Update `src/tools/router.ts` to route tool calls to skill tools when `toolRegistry.getSkillTool(toolName)` returns a match
+    - [ ] Route execution through the skill tool handler (`src/skills/tool-handler.ts`) using the canonical `ToolResult<T>` contract
+    - [ ] Maintain conflict safety: if a name conflicts with static/MCP tools, registry must reject and routing must treat registry membership as truth
 
-- [x] **Task 7: Verification**
-  - [x] Create sample skill in `.skills/example/SKILL.md`
-  - [x] Verify skill is discovered and loaded
-  - [x] Verify skill appears in system prompt
-  - [x] Verify skill tool is registered
-  - [x] Test malformed skill handling (invalid YAML, missing fields)
+- [ ] **Task 6: Tool Result Contract Consistency** (Dev Notes: Tool handlers)
+  - [ ] Ensure skill tool handler(s) return canonical `ToolResult<T>` from `src/utils/tool-result.ts` (never throw)
+  - [ ] Use `TOOL_NOT_IMPLEMENTED` for placeholders until Story 6.2 executes skills
+
+- [ ] **Task 7: Update Tests + Verify Token Reduction** (AC: #1-10)
+  - [ ] Update `src/skills/*` tests for metadata-only behavior + skills hint output
+  - [ ] Add a regression test ensuring skills injection does not include full SKILL.md body
+  - [ ] Verify prompt token reduction (10x+ vs full injection baseline)
+
+### Existing Implementation (Already in Codebase, Superseded by Refactor)
+
+- [x] Initial skills module created (`src/skills/*`) with loader/parser/prompt-builder
+- [x] Tool registry supports dynamic skill tool registration (`toolRegistry.registerDynamicTool(...)`)
+- [x] Script discovery added (catalog only)
+- [x] Initial skills injection implemented in Slack handlers (must be updated to hint-only)
 
 ## Dev Notes
 
@@ -110,7 +143,7 @@ src/skills/
 ├── loader.test.ts
 ├── parser.ts           # SKILL.md parser + validation
 ├── parser.test.ts
-├── prompt-builder.ts   # System prompt injection
+├── prompt-builder.ts   # Skills hint builder for system prompt injection (metadata-only)
 ├── prompt-builder.test.ts
 ├── types.ts            # Skill types
 └── index.ts            # Re-exports
@@ -200,31 +233,33 @@ export interface SkillScript {
 }
 ```
 
-### Skills Loader Implementation
+### Skills Loader Implementation (Metadata-Only at Startup)
 
 ```typescript
-// src/skills/loader.ts
+// src/skills/loader.ts (metadata-only load)
 import { glob } from 'glob';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { parseSkillMd } from './parser.js';
-import { langfuse } from '../observability/langfuse.js';
+import path from 'path';
+import { parseSkillFrontmatterOnly } from './parser.js';
+import { getLangfuse } from '../observability/langfuse.js';
 import { logger } from '../utils/logger.js';
-import type { Skill } from './types.js';
+import type { SkillMetadata, SkillScript } from './types.js';
 
 const SKILLS_DIR = '.skills';
 
 /**
  * Load all skills from the .skills directory
  * 
- * Discovers SKILL.md files, parses them, and returns validated skills.
+ * Discovers SKILL.md files, parses frontmatter metadata only, and returns validated skill metadata.
  * Invalid skills are logged but don't prevent other skills from loading.
  * 
  * @param traceId - Required for log correlation
  * @see Story 6.1 - Agent Skills Loader
  */
-export async function loadSkills(traceId: string): Promise<Skill[]> {
-  const span = langfuse.span({ name: 'skills.load', traceId });
+export async function loadSkillMetadata(traceId: string): Promise<SkillMetadata[]> {
+  const langfuse = getLangfuse();
+  const span = langfuse?.span({ name: 'skills.load', traceId });
   const startTime = Date.now();
   
   try {
@@ -248,16 +283,26 @@ export async function loadSkills(traceId: string): Promise<Skill[]> {
       found: skillPaths.length,
     });
     
-    // Parse each skill file
+    // Parse each skill file (frontmatter only)
     const results = await Promise.allSettled(
-      skillPaths.map(async (path) => {
-        const content = await readFile(path, 'utf-8');
-        return parseSkillMd(content, path);
+      skillPaths.map(async (skillPath) => {
+        const content = await readFile(skillPath, 'utf-8');
+        const meta = parseSkillFrontmatterOnly(content, skillPath);
+
+        // Scripts are discovered from the skill directory (catalog only)
+        const skillDir = path.dirname(skillPath);
+        const scripts = await discoverScripts(skillDir);
+
+        return {
+          ...meta,
+          scripts: scripts.length > 0 ? scripts : undefined,
+          hasExecutableScripts: scripts.length > 0,
+        };
       })
     );
     
     // Collect successful parses
-    const skills: Skill[] = [];
+    const skills: SkillMetadata[] = [];
     const failures: Array<{ path: string; error: string }> = [];
     
     results.forEach((result, index) => {
@@ -315,19 +360,19 @@ export async function loadSkills(traceId: string): Promise<Skill[]> {
   }
 }
 
-// Cache loaded skills (per-process)
-let cachedSkills: Skill[] | null = null;
+// Cache loaded skill metadata (per-process)
+let cachedSkillMetadata: SkillMetadata[] | null = null;
 
 /**
  * Get cached skills or load them
  * 
  * Cache is invalidated by calling reloadSkills()
  */
-export async function getSkills(traceId: string): Promise<Skill[]> {
-  if (!cachedSkills) {
-    cachedSkills = await loadSkills(traceId);
+export async function getSkillMetadata(traceId: string): Promise<SkillMetadata[]> {
+  if (!cachedSkillMetadata) {
+    cachedSkillMetadata = await loadSkillMetadata(traceId);
   }
-  return cachedSkills;
+  return cachedSkillMetadata;
 }
 
 /**
@@ -338,8 +383,8 @@ export async function getSkills(traceId: string): Promise<Skill[]> {
  * - Admin requests skill reload
  * - On container restart (automatic - cache is in-memory)
  */
-export function reloadSkills(): void {
-  cachedSkills = null;
+export function reloadSkillMetadata(): void {
+  cachedSkillMetadata = null;
 }
 ```
 
@@ -407,62 +452,48 @@ export function parseSkillMd(content: string, filePath: string): Skill {
 }
 ```
 
-### System Prompt Builder
+### Skills Hint Builder (System Prompt Injection)
 
 ```typescript
 // src/skills/prompt-builder.ts
 import type { Skill } from './types.js';
 
 /**
- * Build system prompt section from loaded skills
+ * Build system prompt section from loaded skill metadata (token efficient)
  * 
  * Returns empty string if no skills loaded.
- * Used by src/agent/context.ts when building system prompt.
+ * Used by Slack handlers when building the system prompt.
  * 
  * @see Story 2.1 - Agent Loop (system prompt assembly)
  */
-export function buildSkillsPrompt(skills: Skill[]): string {
+export function buildSkillsHint(skills: SkillMetadata[]): string {
   if (skills.length === 0) {
     return '';
   }
   
-  const skillSections = skills.map((skill) => {
-    return `## Skill: ${skill.name}
-
-${skill.description}
-
-${skill.instructions}`;
-  });
+  const hints = skills.map((s) => `- ${s.name}: ${s.description}`).join('\n');
   
   return `
 # Available Skills
 
-You have the following specialized skills available:
+${hints}
 
-${skillSections.join('\n\n---\n\n')}
+When a task matches a skill, load its full instructions on-demand:
+  execute_code({ code: "cat /skills/{skill-name}/SKILL.md" })
 `;
 }
 ```
 
-### Integration with Agent Context
+### Integration Touchpoints (Actual Runtime Locations)
 
-```typescript
-// In src/agent/context.ts (Story 2.1)
-import { getSkills } from '../skills/loader.js';
-import { buildSkillsPrompt } from '../skills/prompt-builder.js';
+Skills are injected into the system prompt inside the Slack handlers:
 
-const BASE_SYSTEM_PROMPT = `You are Orion, an AI assistant for enterprise users.
-...base prompt...`;
+- `src/slack/handlers/user-message.ts`
+- `src/slack/handlers/app-mention.ts`
 
-export async function buildSystemPrompt(traceId: string): Promise<string> {
-  const skills = await getSkills(traceId);
-  const skillsSection = buildSkillsPrompt(skills);
-  
-  return `${BASE_SYSTEM_PROMPT}\n\n${skillsSection}`;
-}
-```
+These must inject **skills hint only** (metadata), never full SKILL.md body.
 
-### Tool Registration (Integration with Story 3.2)
+### Tool Registration (Integration with Tool Registry)
 
 **CRITICAL:** Skill tools are registered **dynamically** at runtime. They do NOT get added to the static `TOOL_NAMES` const array. This is intentional—skill tools are discovered at startup, not compile time.
 
@@ -474,7 +505,7 @@ export async function buildSystemPrompt(traceId: string): Promise<string> {
 
 ```typescript
 // src/skills/tool-handler.ts
-import type { ToolResult, ToolError } from '../types/tools.js';
+import type { ToolResult } from '../utils/tool-result.js';
 
 /**
  * Execute a skill tool - NEVER throws, always returns ToolResult
@@ -504,48 +535,24 @@ export async function executeSkillTool(
 }
 ```
 
-**Registration:**
+**Registration (actual API):**
 
 ```typescript
-// In src/skills/loader.ts
-import { registerDynamicTool } from '../tools/registry.js';
-import type { ToolDefinition } from '../tools/registry.js';
+// src/skills/* (registration happens after loading skill metadata)
+import { toolRegistry } from '../tools/registry.js';
 
-export function registerSkillTools(skills: Skill[], traceId: string): void {
-  for (const skill of skills) {
-    if (!skill.tools) continue;
-    
-    for (const tool of skill.tools) {
-      const fullName = `${skill.name}__${tool.name}`;
-      
-      // Use registerDynamicTool (not registerTool) for runtime additions
-      registerDynamicTool({
-        name: fullName,
-        description: `[${skill.name}] ${tool.description}`,
-        input_schema: {
-          type: 'object',
-          properties: tool.parameters,
-          required: Object.entries(tool.parameters)
-            .filter(([, v]) => (v as { required?: boolean }).required)
-            .map(([k]) => k),
-        },
-      });
-      
-      logger.debug({
-        event: 'skills.tool_registered',
-        traceId,
-        skillName: skill.name,
-        toolName: fullName,
-      });
-    }
-  }
-}
+toolRegistry.registerDynamicTool(skillName, toolName, {
+  name: toolName, // registry will prefix to `${skillName}__${toolName}`
+  description: `[${skillName}] ${description}`,
+  input_schema: {
+    type: 'object',
+    properties,
+    required,
+  },
+});
 ```
 
-**Registry Update Required (Story 3.2):** Add `registerDynamicTool()` function that:
-- Accepts tools at runtime (not compile-time checked)
-- Adds to handler map without TOOL_NAMES validation
-- Supports removal when skills are reloaded
+Tool naming convention remains: `${skillName}__${toolName}` (double underscore).
 
 ### Package Dependencies
 
@@ -591,7 +598,7 @@ When the user asks about past discussions, decisions, or context that might be i
 **Startup Sequence:**
 1. `instrumentation.ts` loads first (OTel)
 2. `config/environment.ts` validates env vars
-3. Skills load **lazily** on first `getSkills(traceId)` call
+3. Skills metadata loads **lazily** on first request that needs it
 4. Skills should NOT block app startup — failures return empty array
 
 **Validation Strategy:**
@@ -713,29 +720,15 @@ Story 6.2: execute_code({ script: "skill:confluence-research/search.py", args: {
            GKE Sandbox → Execute script → Return results
 ```
 
-## Dev Agent Record
+## Current Implementation Notes (Superseded by Refactor)
 
-### Implementation Plan
-
-Implemented Agent Skills Loader following the story tasks in order:
-1. Created types.ts with Skill, SkillTool, SkillScript interfaces and TOOL_NAME_PATTERN
-2. Created parser.ts using gray-matter to parse SKILL.md frontmatter + markdown body
-3. Created loader.ts with loadSkills(), loadSkillsWithResult(), getSkills(), reloadSkills() for skill discovery
-4. Created prompt-builder.ts for system prompt injection
-5. Added registerDynamicTool(), removeSkillTools(), clearSkillTools(), getSkillTool() to registry.ts for runtime skill tool registration
-6. Created tool-handler.ts with executeSkillTool() (returns not-implemented until Story 6.2)
-7. Created index.ts for module re-exports
-8. Created .skills/example/SKILL.md sample skill
-9. Added comprehensive test coverage (42 skills tests + 8 registry skill tests = 50 tests passing)
-
-### Completion Notes
-
-- All ACs verified via tests
-- Skill loading is lazy (first call to getSkills)
-- Invalid skills logged but don't block valid ones
-- Script discovery implemented for GKE Sandbox (Story 6.2)
-- No lint errors introduced
-- Pre-existing test failures in memory/vercel-bundling unrelated to this story
+- An initial skills module exists in `src/skills/*` (loader/parser/prompt-builder/tool-handler).
+- Current behavior is **not compliant** with progressive disclosure:
+  - `buildSkillsPrompt()` includes full `instructions` in the system prompt.
+  - Slack handlers inject the full prompt section.
+- Skill tool support is **not end-to-end** yet:
+  - The registry supports dynamic skill tools, but production registration + routing must be explicitly wired (see Task 5).
+  - Skill tool execution remains a placeholder until Story 6.2 (GKE sandbox execution).
 
 ## File List
 
@@ -765,6 +758,19 @@ Implemented Agent Skills Loader following the story tasks in order:
 - src/tools/registry.test.ts (added skill tool registration tests)
 - package.json (added gray-matter, glob dependencies)
 
+### Review Fixes Applied (2026-01-03)
+
+- src/tools/router.ts (static ToolResult pass-through; skill tool routing returns canonical ToolResult)
+- src/skills/tool-handler.ts (+ tests) (canonical ToolResult + snake_case validation for tool-prefix skill names)
+- src/skills/loader.ts (+ tests) (`loadSkillMetadataWithResult()` returns failures)
+- src/skills/prompt-builder.ts (+ tests) (on-demand SKILL.md instruction uses `execute_code({ skill_doc: ... })`)
+- src/skills/runtime.ts (best-effort runtime wiring: ensure skill tools registered before tool definitions built)
+- src/agent/loop.ts (calls `ensureSkillToolsRegistered()` before building tool list)
+- src/agent/orion.ts (propagates traceId to execute_code via `setExecuteCodeContext()`/`clearExecuteCodeContext()`)
+- src/index.ts (registers `execute_code` tool at startup)
+- src/tools/code-execution/{types,tool,tool.test}.ts (adds `skill_doc` input for on-demand SKILL.md)
+- src/skills/integration.test.ts (adds metadata/hint path test; keeps full prompt test as deprecated compatibility)
+
 ## Change Log
 
 | Date | Change |
@@ -773,5 +779,52 @@ Implemented Agent Skills Loader following the story tasks in order:
 | 2025-12-22 | Validation review: Added traceId to all logs, tool name validation, cache invalidation docs, fixed directory location |
 | 2026-01-02 | Added GKE Sandbox integration, script discovery, updated Skill interface |
 | 2026-01-02 | **Validation review (SM)**: Critical fixes: (1) Added ToolResult pattern requirement for skill tool handlers, (2) Clarified dynamic tool registration vs TOOL_NAMES registry, (3) Added ESM .js extension requirement, (4) Consolidated duplicate type definitions, (5) Added startup order & validation strategy, (6) Clarified GKE sandbox scope boundary (discovery only, not execution), (7) Enhanced anti-patterns table |
-| 2026-01-03 | **Implementation complete**: All 7 tasks implemented with 50 tests passing (42 skills + 8 registry). Skills module created with loader, parser, prompt-builder, tool-handler. Registry extended with registerDynamicTool(). Sample skill created in .skills/example/ |
-| 2026-01-03 | **Code review (AI)**: Fixed test count (55→50), documented pre-existing .skills/summarize/, added loadSkillsWithResult() to implementation plan. All ACs verified. No HIGH issues. |
+| 2026-01-03 | Initial skills implementation landed (loader/parser/prompt-builder/tool-handler + registry support), but it injects full SKILL.md content and must be refactored to progressive disclosure. |
+| 2026-01-03 | Progressive disclosure course correction approved; refactor required (metadata-only + hint-only). |
+| 2026-01-03 | ✅ Refactor completed: metadata-only loading + hint-only prompt injection + on-demand SKILL.md via execute_code + runtime tool registration wired. |
+
+---
+
+## 🚨 Course Correction: Progressive Disclosure Refactor
+
+**Date:** 2026-01-03  
+**Status:** COMPLETED  
+**Reference:** `_bmad-output/sprint-change-proposal-2026-01-02-skills-architecture-fix.md`
+
+### Problem Summary
+
+The previous implementation injected **full SKILL.md content** into the system prompt at startup. This violates the [Agent Skills open standard](https://agentskills.io) and wastes ~15k tokens per conversation.
+
+**Wrong (Previous):**
+```typescript
+const skills = await getSkills(trace.id);
+const skillsPrompt = buildSkillsPrompt(skills);  // Full content, ~15k tokens
+systemPrompt = `${systemPrompt}\n\n${skillsPrompt}`;
+```
+
+**Correct (Implemented):**
+```typescript
+const skills = await getSkillMetadata(trace.id);  // Metadata only, ~1.2k tokens
+const skillsHint = buildSkillsHint(skills);       // Name + description only
+systemPrompt = `${systemPrompt}\n\n${skillsHint}`;
+// Claude reads full SKILL.md via execute_code(skill_doc=...) when triggered
+```
+
+### Refactor Plan
+
+Execute the refactor using the **Tasks / Subtasks** section above (Task 1–Task 7). The refactor is complete only when:
+- Startup is metadata-only
+- System prompt injection is hint-only
+- Skill tool registration + routing works end-to-end (Task 5)
+- Skill tool handler returns canonical `ToolResult<T>` with `TOOL_NOT_IMPLEMENTED` until Story 6.2
+
+### Success Criteria
+
+- [x] System prompt contains only skill metadata (~100 tokens/skill)
+- [x] Claude can read full SKILL.md via `execute_code` when triggered
+- [x] Token usage reduced by 10x+ per conversation
+- [x] All existing tests pass (updated for new pattern)
+
+### Rollback Plan
+
+Revert to current system prompt injection temporarily. Skills work but waste tokens. No user-facing breakage.

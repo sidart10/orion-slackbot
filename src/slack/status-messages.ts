@@ -128,6 +128,11 @@ export function buildLoadingMessages(params?: LoadingMessageParams): string[] {
 
   // Tool phase: build contextual tool message
   if (phase === 'tool') {
+    // Story 6.3 AC9: PTC-specific status message
+    if (toolName === 'code_execution') {
+      return ['Running multi-tool analysis…'];
+    }
+
     // Story 7.3 AC4: Multi-tool parallel display
     if (allTools && allTools.length > 1) {
       return [buildMultiToolMessage(allTools)];

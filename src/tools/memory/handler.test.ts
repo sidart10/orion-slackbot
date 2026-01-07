@@ -231,7 +231,8 @@ describe('handleMemoryTool', () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.code).toBe('MEMORY_WRITE_FAILED');
+        // Path validation now returns MEMORY_NOT_FOUND for all validation failures
+        expect(result.error.code).toBe('MEMORY_NOT_FOUND');
         expect(result.error.message).toContain('traversal');
       }
     });
@@ -312,7 +313,7 @@ describe('handleMemoryTool', () => {
     it('should handle unknown commands', async () => {
       const input = {
         command: 'unknown' as 'view',
-        path: '/memories/test.json',
+        path: '/memories/global/test.json',
       };
 
       const result = await handleMemoryTool(input, mockContext);

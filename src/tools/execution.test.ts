@@ -156,7 +156,7 @@ describe('Tool Execution', () => {
       const result = await resultPromise;
 
       expect(result.success).toBe(false);
-      expect(result.error?.code).toBe(ErrorCode.TOOL_FAILED);
+      expect(result.error?.code).toBe(ErrorCode.TOOL_EXECUTION_FAILED);
       expect(result.toolName).toBe('failing_tool');
     });
 
@@ -269,7 +269,7 @@ describe('Tool Execution', () => {
       const results = await executeToolsInParallel(calls, executors);
 
       expect(results[0].success).toBe(false);
-      expect(results[0].error?.code).toBe(ErrorCode.TOOL_FAILED);
+      expect(results[0].error?.code).toBe(ErrorCode.TOOL_EXECUTION_FAILED);
       expect(results[0].error?.message).toContain('not found');
     });
 

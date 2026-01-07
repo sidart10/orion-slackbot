@@ -160,18 +160,12 @@ describe('Thread Started Handler', () => {
     );
   });
 
-  it('should save thread context with memory state (Story 5.3 AC#1, AC#3)', async () => {
+  it('should persist thread context (Story 5.3 AC#1, AC#3)', async () => {
     const event = createThreadStartedEvent();
     await handleThreadStarted(event);
 
     expect(mockSaveThreadContext).toHaveBeenCalledTimes(1);
-    expect(mockSaveThreadContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        memoryContext: expect.any(String),
-        memoryLoadedAt: expect.any(String),
-        scopesLoaded: expect.any(Array),
-      })
-    );
+    expect(mockSaveThreadContext).toHaveBeenCalledWith();
   });
 
   it('should log thread started event', async () => {

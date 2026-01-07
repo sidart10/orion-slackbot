@@ -154,16 +154,12 @@ describe('McpClient', () => {
         });
       });
 
-      // Use real timers for this test since we need actual timeout behavior
-      vi.useRealTimers();
-
       const client = new McpClient('test-server', testConfig);
 
-      // Act - init timeout is 5s (hardcoded), not configurable
-      const result = await client.listTools();
-
-      // Restore fake timers for other tests
-      vi.useFakeTimers();
+      // Act - init timeout is 5s (hardcoded), simulate time passing with fake timers
+      const p = client.listTools();
+      await vi.advanceTimersByTimeAsync(5000);
+      const result = await p;
 
       // Assert
       expect(result.success).toBe(false);
@@ -795,8 +791,6 @@ describe('McpClient', () => {
 
     it('uses 5s timeout for initialize request (AC-L1)', async () => {
       // Arrange - mock slow initialize response
-      vi.useRealTimers();
-      
       mockFetch.mockImplementationOnce((_url: string, options: { signal?: AbortSignal; body: string }) => {
         const body = JSON.parse(options.body);
         if (body.method === 'initialize') {
@@ -817,16 +811,13 @@ describe('McpClient', () => {
         requestTimeoutMs: 30000, // Normal timeout is 30s
       });
 
-      // Act
-      const startTime = Date.now();
-      const result = await client.listTools();
-      const elapsed = Date.now() - startTime;
-
-      vi.useFakeTimers();
+      // Act - advance fake timers to trigger 5s init abort
+      const p = client.listTools();
+      await vi.advanceTimersByTimeAsync(5000);
+      const result = await p;
 
       // Assert - should fail fast within ~5s, not 30s
       expect(result.success).toBe(false);
-      expect(elapsed).toBeLessThan(6000); // Allow 1s buffer
       if (!result.success) {
         expect(result.error.message).toContain('timeout');
       }
@@ -868,18 +859,17 @@ describe('McpClient', () => {
         }, 'shared-session'));
       });
 
-      vi.useRealTimers();
-
       const client = new McpClient('test-server', testConfig);
 
       // Act - concurrent first calls
-      const results = await Promise.all([
+      const p = Promise.all([
         client.listTools(),
         client.listTools(),
         client.listTools(),
       ]);
 
-      vi.useFakeTimers();
+      await vi.advanceTimersByTimeAsync(20);
+      const results = await p;
 
       // Assert - only ONE initialize call, all succeed
       expect(initializeCallCount).toBe(1);
@@ -923,6 +913,9 @@ describe('McpClient', () => {
       const client = new McpClient('test-server', testConfig);
 
       const inFlight = client.ensureInitialized();
+
+      // Allow microtasks to run so sendInitRequest() can call fetch() and set resolveInit.
+      await Promise.resolve();
 
       // Ensure the original init is in progress, then replace it.
       expect((client as any).initializationPromise).toBeTruthy();

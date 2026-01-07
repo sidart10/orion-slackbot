@@ -5,7 +5,6 @@
  *
  * @see Story 2.8 - File-Based Memory
  * @see AC#4 - Conversation summaries stored in orion-context/conversations/
- * @see Task 11: Migrate Conversations to Vercel KV
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -18,31 +17,13 @@ vi.mock('fs/promises', () => ({
   readdir: vi.fn().mockResolvedValue([]),
 }));
 
-// Mock Vercel KV storage
-const mockSaveToKV = vi.fn().mockResolvedValue(undefined);
-const mockLoadFromKV = vi.fn().mockResolvedValue(null);
-const mockListKVKeys = vi.fn().mockResolvedValue([]);
-
-vi.mock('./vercel-kv-storage.js', () => ({
-  saveToKV: mockSaveToKV,
-  loadFromKV: mockLoadFromKV,
-  listKVKeys: mockListKVKeys,
-}));
-
 describe('memory/conversations', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    // Clear KV env vars so file-based tests run correctly
-    process.env = { ...originalEnv };
-    delete process.env.KV_REST_API_URL;
-    delete process.env.KV_REST_API_TOKEN;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    process.env = originalEnv;
   });
 
   describe('ConversationSummary interface', () => {
@@ -222,7 +203,7 @@ The team discussed project setup and configuration.
         { name: 'C123_1702848000.123456.md', isFile: () => true, parentPath: './orion-context/conversations' },
         { name: 'C123_1702848001.000000.md', isFile: () => true, parentPath: './orion-context/conversations' },
         { name: 'C456_1702848002.000000.md', isFile: () => true, parentPath: './orion-context/conversations' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       vi.mocked(readFile).mockResolvedValue(`---
 type: conversation
@@ -252,119 +233,4 @@ Summary content
       expect(summaries).toEqual([]);
     });
   });
-
-  describe('Vercel KV Backend (Task 11)', () => {
-    const originalEnv = process.env;
-
-    beforeEach(() => {
-      vi.clearAllMocks();
-      process.env = { ...originalEnv, KV_REST_API_URL: 'https://kv.vercel.com' };
-    });
-
-    afterEach(() => {
-      process.env = originalEnv;
-    });
-
-    it('should save to Vercel KV when KV_REST_API_URL is set', async () => {
-      vi.resetModules();
-      const { saveConversationSummary } = await import('./conversations.js');
-
-      await saveConversationSummary({
-        channelId: 'C123',
-        threadTs: '1702848000.123456',
-        summary: 'Test summary',
-        participants: ['U123'],
-        topics: ['test'],
-        createdAt: '2025-01-01T00:00:00.000Z',
-      });
-
-      expect(mockSaveToKV).toHaveBeenCalledWith(
-        'conversation',
-        'C123_1702848000.123456',
-        expect.objectContaining({
-          channelId: 'C123',
-          threadTs: '1702848000.123456',
-          summary: 'Test summary',
-        })
-      );
-    });
-
-    it('should load from Vercel KV when KV_REST_API_URL is set', async () => {
-      vi.resetModules();
-
-      mockLoadFromKV.mockResolvedValueOnce({
-        data: {
-          channelId: 'C123',
-          threadTs: '1702848000.123456',
-          summary: 'KV summary',
-          participants: ['U123'],
-          topics: ['kv'],
-        },
-        createdAt: '2025-01-01T00:00:00.000Z',
-        updatedAt: '2025-01-01T00:00:00.000Z',
-      });
-
-      const { loadConversationSummary } = await import('./conversations.js');
-      const summary = await loadConversationSummary('C123', '1702848000.123456');
-
-      expect(mockLoadFromKV).toHaveBeenCalledWith('conversation', 'C123_1702848000.123456');
-      expect(summary?.summary).toBe('KV summary');
-    });
-
-    it('should list conversations from KV', async () => {
-      vi.resetModules();
-
-      mockListKVKeys.mockResolvedValueOnce(['C123_1702848000.123456', 'C123_1702848001.000000']);
-      mockLoadFromKV
-        .mockResolvedValueOnce({
-          data: { channelId: 'C123', threadTs: '1702848000.123456', summary: 'S1', participants: [], topics: [] },
-          createdAt: '2025-01-01T00:00:00.000Z',
-          updatedAt: '2025-01-01T00:00:00.000Z',
-        })
-        .mockResolvedValueOnce({
-          data: { channelId: 'C123', threadTs: '1702848001.000000', summary: 'S2', participants: [], topics: [] },
-          createdAt: '2025-01-02T00:00:00.000Z',
-          updatedAt: '2025-01-02T00:00:00.000Z',
-        });
-
-      const { listConversationsByChannel } = await import('./conversations.js');
-      const summaries = await listConversationsByChannel('C123');
-
-      expect(mockListKVKeys).toHaveBeenCalledWith('conversation', 'C123_');
-      expect(summaries.length).toBe(2);
-    });
-  });
-
-  describe('File Backend (Local Development)', () => {
-    const originalEnv = process.env;
-
-    beforeEach(() => {
-      vi.clearAllMocks();
-      process.env = { ...originalEnv };
-      delete process.env.KV_REST_API_URL;
-    });
-
-    afterEach(() => {
-      process.env = originalEnv;
-    });
-
-    it('should use file backend when KV_REST_API_URL is not set', async () => {
-      vi.resetModules();
-      const { writeFile } = await import('fs/promises');
-      const { saveConversationSummary } = await import('./conversations.js');
-
-      await saveConversationSummary({
-        channelId: 'C123',
-        threadTs: '1702848000.123456',
-        summary: 'Test',
-        participants: [],
-        topics: [],
-        createdAt: '2025-01-01T00:00:00.000Z',
-      });
-
-      expect(writeFile).toHaveBeenCalled();
-      expect(mockSaveToKV).not.toHaveBeenCalled();
-    });
-  });
 });
-

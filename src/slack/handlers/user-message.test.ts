@@ -49,6 +49,7 @@ vi.mock('../../config/environment.js', () => ({
   config: {
     anthropicModel: 'claude-sonnet-4-20250514',
     anthropicMaxContextTokens: 200000,
+    gcsMemoriesBucket: 'test-bucket',
     compactionThreshold: undefined,
     compactionKeepLastN: undefined,
     compactionMaxSummaryTokens: undefined,
@@ -56,6 +57,12 @@ vi.mock('../../config/environment.js', () => ({
     threadHistoryLimit: undefined,
     threadHistoryMaxTokens: undefined,
   },
+}));
+
+// Mock memory loader (Story 5.3)
+vi.mock('../../tools/memory/loader.js', () => ({
+  loadRelevantMemories: vi.fn(),
+  formatMemoriesForContext: vi.fn(),
 }));
 
 // Mock the observability module
@@ -129,7 +136,12 @@ describe('Assistant User Message Handler', () => {
   let formatSlackMrkdwn: ReturnType<typeof vi.fn>;
   let runOrionAgent: ReturnType<typeof vi.fn>;
   let loadAgentPrompt: ReturnType<typeof vi.fn>;
-  let logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  let logger: {
+    debug: ReturnType<typeof vi.fn>;
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     vi.resetModules();
@@ -158,6 +170,7 @@ describe('Assistant User Message Handler', () => {
 
     const loggerModule = await import('../../utils/logger.js');
     logger = loggerModule.logger as unknown as {
+      debug: ReturnType<typeof vi.fn>;
       info: ReturnType<typeof vi.fn>;
       warn: ReturnType<typeof vi.fn>;
       error: ReturnType<typeof vi.fn>;
@@ -1046,13 +1059,16 @@ describe('Assistant User Message Handler', () => {
 
   describe('Memory Context Injection (Story 5.3)', () => {
     it('should inject memory context into system prompt when available (AC#1)', async () => {
-      const mockGetThreadContext = vi.fn().mockResolvedValue({
-        memoryContext: '# Restored Memory\n\n## User Preferences\n\n- *timezone*: UTC',
-        scopesLoaded: ['user'],
+      const memoryModule = await import('../../tools/memory/loader.js');
+      vi.mocked(memoryModule.loadRelevantMemories).mockResolvedValue({
+        loadDurationMs: 0,
+        scopesFound: ['user'],
+        user: '{"timezone":"UTC"}',
       });
+      vi.mocked(memoryModule.formatMemoriesForContext).mockReturnValue(
+        '# Restored Memory\n\n## User Preferences\n\n- *timezone*: UTC'
+      );
       const args = createAssistantArgs();
-      (args as unknown as { getThreadContext: typeof mockGetThreadContext }).getThreadContext =
-        mockGetThreadContext;
 
       await handleAssistantUserMessage(args);
 
@@ -1072,31 +1088,14 @@ describe('Assistant User Message Handler', () => {
       );
     });
 
-    it('should proceed without memory context when getThreadContext returns undefined', async () => {
-      const mockGetThreadContext = vi.fn().mockResolvedValue(undefined);
-      const args = createAssistantArgs();
-      (args as unknown as { getThreadContext: typeof mockGetThreadContext }).getThreadContext =
-        mockGetThreadContext;
-
-      await handleAssistantUserMessage(args);
-
-      // Should still call runOrionAgent with base system prompt
-      expect(runOrionAgent).toHaveBeenCalledWith(
-        'Hello Orion',
-        expect.objectContaining({
-          systemPrompt: expect.not.stringContaining('# Restored Memory'),
-        })
-      );
-    });
-
-    it('should proceed without memory context when memoryContext is empty', async () => {
-      const mockGetThreadContext = vi.fn().mockResolvedValue({
-        memoryContext: '',
-        scopesLoaded: [],
+    it('should proceed without memory context when formatter returns empty', async () => {
+      const memoryModule = await import('../../tools/memory/loader.js');
+      vi.mocked(memoryModule.loadRelevantMemories).mockResolvedValue({
+        loadDurationMs: 0,
+        scopesFound: [],
       });
+      vi.mocked(memoryModule.formatMemoriesForContext).mockReturnValue('');
       const args = createAssistantArgs();
-      (args as unknown as { getThreadContext: typeof mockGetThreadContext }).getThreadContext =
-        mockGetThreadContext;
 
       await handleAssistantUserMessage(args);
 
@@ -1109,11 +1108,10 @@ describe('Assistant User Message Handler', () => {
       );
     });
 
-    it('should gracefully handle getThreadContext failure', async () => {
-      const mockGetThreadContext = vi.fn().mockRejectedValue(new Error('Context failed'));
+    it('should gracefully handle memory loader failure', async () => {
+      const memoryModule = await import('../../tools/memory/loader.js');
+      vi.mocked(memoryModule.loadRelevantMemories).mockRejectedValue(new Error('Context failed'));
       const args = createAssistantArgs();
-      (args as unknown as { getThreadContext: typeof mockGetThreadContext }).getThreadContext =
-        mockGetThreadContext;
 
       // Should NOT throw - handler completes successfully
       await expect(handleAssistantUserMessage(args)).resolves.not.toThrow();

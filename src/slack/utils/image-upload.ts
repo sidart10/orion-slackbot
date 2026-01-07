@@ -5,15 +5,23 @@
  * and uploads them to Slack for inline display.
  *
  * Supports:
- * - GCS signed URLs (from Imagen/Veo)
+ * - GCS gs:// URLs (from Imagen/Veo)
+ * - GCS signed URLs (https://storage.googleapis.com/...)
  * - Direct image URLs (png, jpg, gif, webp)
  */
 
 import type { WebClient } from '@slack/web-api';
+import { Storage } from '@google-cloud/storage';
 import { logger } from '../../utils/logger.js';
 
-/** Regex to find GCS URLs (multiple domains) or direct image URLs */
-const IMAGE_URL_PATTERN =
+/** GCS client for downloading from gs:// URLs */
+const storage = new Storage();
+
+/** Regex to find GCS gs:// URLs */
+const GCS_URI_PATTERN = /gs:\/\/([^/]+)\/([^\s<>"]+\.(?:png|jpg|jpeg|gif|webp))/gi;
+
+/** Regex to find GCS signed URLs (multiple domains) or direct image URLs */
+const HTTP_IMAGE_URL_PATTERN =
   /https?:\/\/storage\.(?:googleapis|mtls\.cloud\.google)\.com\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<>"]*)?|https?:\/\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<>"]*)?/gi;
 
 /** Supported image MIME types */
@@ -34,13 +42,25 @@ interface ImageUploadResult {
 
 /**
  * Extract image URLs from text content.
+ * Handles both gs:// URIs and HTTP URLs.
  */
 export function extractImageUrls(text: string): string[] {
-  const matches = text.match(IMAGE_URL_PATTERN);
-  if (!matches) return [];
+  const urls: string[] = [];
+
+  // Find gs:// URLs (Imagen/Veo output format)
+  const gcsMatches = text.matchAll(GCS_URI_PATTERN);
+  for (const match of gcsMatches) {
+    if (match[0]) urls.push(match[0]);
+  }
+
+  // Find HTTP image URLs
+  const httpMatches = text.matchAll(HTTP_IMAGE_URL_PATTERN);
+  for (const match of httpMatches) {
+    if (match[0]) urls.push(match[0]);
+  }
 
   // Deduplicate
-  return [...new Set(matches)];
+  return [...new Set(urls)];
 }
 
 /**
@@ -75,37 +95,120 @@ function getMimeType(filename: string): string {
 }
 
 /**
- * Download an image from a URL.
+ * Download an image from a GCS gs:// URI using the GCS client.
  */
-async function downloadImage(url: string): Promise<{ buffer: Buffer; filename: string } | null> {
+async function downloadFromGcs(
+  gcsUri: string,
+  traceId?: string
+): Promise<{ buffer: Buffer; filename: string } | null> {
   try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Orion-Slack-Agent/1.0',
-      },
-    });
-
-    if (!response.ok) {
+    // Parse gs://bucket/path format
+    const match = gcsUri.match(/^gs:\/\/([^/]+)\/(.+)$/);
+    if (!match || !match[1] || !match[2]) {
       logger.warn({
-        event: 'image_download.failed',
-        url: url.slice(0, 100),
-        status: response.status,
+        event: 'image_download.invalid_gcs_uri',
+        uri: gcsUri.slice(0, 100),
+        traceId,
       });
       return null;
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const filename = getFilenameFromUrl(url);
+    const bucketName = match[1];
+    const objectPath = match[2];
+    const filename = objectPath.split('/').pop() || 'image.png';
 
-    return { buffer, filename };
+    // Best-effort timeout guard (GCS client doesn't support AbortController here)
+    const timeoutMs = 15000;
+    let timeoutId: NodeJS.Timeout | null = null;
+    const downloadPromise = storage.bucket(bucketName).file(objectPath).download();
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('GCS download timeout')), timeoutMs);
+    });
+
+    try {
+      const downloaded = await Promise.race([downloadPromise, timeoutPromise]);
+      const [buffer] = downloaded;
+
+      logger.info({
+        event: 'image_download.gcs_success',
+        bucket: bucketName,
+        filename,
+        bytes: buffer.length,
+        traceId,
+      });
+
+      return { buffer, filename };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   } catch (error) {
     logger.warn({
-      event: 'image_download.error',
-      url: url.slice(0, 100),
+      event: 'image_download.gcs_error',
+      uri: gcsUri.slice(0, 100),
       error: error instanceof Error ? error.message : String(error),
+      traceId,
     });
     return null;
   }
+}
+
+/**
+ * Download an image from an HTTP URL.
+ */
+async function downloadFromHttp(
+  url: string,
+  traceId?: string
+): Promise<{ buffer: Buffer; filename: string } | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Orion-Slack-Agent/1.0',
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        logger.warn({
+          event: 'image_download.http_failed',
+          url: url.slice(0, 100),
+          status: response.status,
+          traceId,
+        });
+        return null;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const filename = getFilenameFromUrl(url);
+
+      return { buffer, filename };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } catch (error) {
+    logger.warn({
+      event: 'image_download.http_error',
+      url: url.slice(0, 100),
+      error: error instanceof Error ? error.message : String(error),
+      traceId,
+    });
+    return null;
+  }
+}
+
+/**
+ * Download an image from a URL (handles both gs:// and http://).
+ */
+async function downloadImage(
+  url: string,
+  traceId?: string
+): Promise<{ buffer: Buffer; filename: string } | null> {
+  if (url.startsWith('gs://')) {
+    return downloadFromGcs(url, traceId);
+  }
+  return downloadFromHttp(url, traceId);
 }
 
 /**
@@ -124,7 +227,8 @@ async function uploadToSlack(
   threadTs: string,
   imageBuffer: Buffer,
   filename: string,
-  altText?: string
+  altText?: string,
+  traceId?: string
 ): Promise<string | null> {
   try {
     const result = await client.filesUploadV2({
@@ -133,7 +237,7 @@ async function uploadToSlack(
       file: imageBuffer,
       filename,
       title: altText || filename,
-      alt_txt: altText,
+      alt_text: altText,
     });
 
     // filesUploadV2 returns files array
@@ -145,6 +249,7 @@ async function uploadToSlack(
       threadTs,
       filename,
       fileId,
+      traceId,
     });
 
     return fileId ?? null;
@@ -155,6 +260,7 @@ async function uploadToSlack(
       threadTs,
       filename,
       error: error instanceof Error ? error.message : String(error),
+      traceId,
     });
     return null;
   }
@@ -173,7 +279,8 @@ export async function uploadImagesFromResponse(
   client: WebClient,
   channelId: string,
   threadTs: string,
-  responseText: string
+  responseText: string,
+  traceId?: string
 ): Promise<ImageUploadResult[]> {
   const imageUrls = extractImageUrls(responseText);
 
@@ -186,13 +293,14 @@ export async function uploadImagesFromResponse(
     channelId,
     threadTs,
     imageCount: imageUrls.length,
+    traceId,
   });
 
   const results: ImageUploadResult[] = [];
 
   // Process images sequentially to avoid rate limits
   for (const url of imageUrls) {
-    const downloaded = await downloadImage(url);
+    const downloaded = await downloadImage(url, traceId);
 
     if (!downloaded) {
       results.push({ url, success: false, error: 'Download failed' });
@@ -205,7 +313,8 @@ export async function uploadImagesFromResponse(
       threadTs,
       downloaded.buffer,
       downloaded.filename,
-      'Generated Image'
+      'Generated Image',
+      traceId
     );
 
     results.push({

@@ -6,8 +6,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SlackStreamer, createStreamer, type StreamerConfig } from './streaming.js';
+import { SlackStreamer, createStreamer, type StreamerConfig, type StreamMetrics } from './streaming.js';
 import type { WebClient } from '@slack/web-api';
+
+// Helper to build expected metrics with defaults
+function expectedMetrics(overrides: Partial<StreamMetrics> = {}): StreamMetrics {
+  return {
+    totalDuration: expect.any(Number) as number,
+    totalChars: expect.any(Number) as number,
+    deliverySuccess: true,
+    ...overrides,
+  };
+}
 
 // Mock Slack Web Client with chatStream
 function createMockClient(): {
@@ -138,10 +148,7 @@ describe('SlackStreamer', () => {
       const metrics = await streamer.stop();
       vi.useRealTimers();
 
-      expect(metrics).toEqual({
-        totalDuration: expect.any(Number),
-        totalChars: 12,
-      });
+      expect(metrics).toEqual(expectedMetrics({ totalChars: 12 }));
       expect(metrics.totalDuration).toBeGreaterThanOrEqual(10);
     });
   });
@@ -163,13 +170,60 @@ describe('SlackStreamer', () => {
       vi.useRealTimers();
     });
 
-    it('should propagate stop errors', async () => {
+    it('should propagate stop errors with delivery failure message', async () => {
       mockStreamer.stop.mockRejectedValueOnce(new Error('Stream close error'));
 
       const streamer = new SlackStreamer(config);
       await streamer.start();
 
-      await expect(streamer.stop()).rejects.toThrow('Stream close error');
+      await expect(streamer.stop()).rejects.toThrow('Stream delivery failed: Stream close error');
+    });
+
+    it('should throw on stop() if append failed during streaming', async () => {
+      vi.useFakeTimers();
+      mockStreamer.append.mockRejectedValueOnce(new Error('Slack API error'));
+
+      const streamer = new SlackStreamer(config);
+      await streamer.start();
+      streamer.append('Hello');
+
+      // Advance past debounce - error occurs
+      await vi.advanceTimersByTimeAsync(250);
+
+      // stop() should throw because deliveryError was captured
+      await expect(streamer.stop()).rejects.toThrow('Stream delivery failed: Slack API error');
+      vi.useRealTimers();
+    });
+
+    it('should include deliverySuccess: false and deliveryError in metrics on failure', async () => {
+      vi.useFakeTimers();
+      mockStreamer.append.mockRejectedValueOnce(new Error('Network failure'));
+
+      const streamer = new SlackStreamer(config);
+      await streamer.start();
+      streamer.append('Content');
+
+      await vi.advanceTimersByTimeAsync(250);
+
+      // stop() throws, but we can catch to inspect the metrics before throw
+      try {
+        await streamer.stop();
+      } catch (error) {
+        // Error thrown as expected
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toContain('Stream delivery failed');
+      }
+      vi.useRealTimers();
+    });
+
+    it('should handle SDK stop() failure and surface it', async () => {
+      mockStreamer.stop.mockRejectedValueOnce(new Error('SDK stop failed'));
+
+      const streamer = new SlackStreamer(config);
+      await streamer.start();
+      streamer.append('Test');
+
+      await expect(streamer.stop()).rejects.toThrow('Stream delivery failed: SDK stop failed');
     });
   });
 });
@@ -368,7 +422,8 @@ describe('Streaming Safety (AC#7, AC#8, AC#9)', () => {
       // Should have tried MAX_RETRIES (3) times then given up
       expect(mockStreamer.append).toHaveBeenCalledTimes(3);
 
-      await streamer.stop();
+      // stop() should now throw because of delivery error
+      await expect(streamer.stop()).rejects.toThrow('Stream delivery failed: 429');
     });
 
     it('should not retry on non-429 errors', async () => {
@@ -385,7 +440,8 @@ describe('Streaming Safety (AC#7, AC#8, AC#9)', () => {
       // Should only call once, no retry for non-429
       expect(mockStreamer.append).toHaveBeenCalledTimes(1);
 
-      await streamer.stop();
+      // stop() should now throw because of delivery error
+      await expect(streamer.stop()).rejects.toThrow('Stream delivery failed: Network error');
     });
   });
 

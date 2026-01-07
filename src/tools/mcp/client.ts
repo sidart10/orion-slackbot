@@ -123,8 +123,10 @@ export class McpClient {
   /**
    * Get Authorization header value (static token or dynamic GCP identity token).
    * Returns undefined if no auth is configured.
+   *
+   * @param traceId - Optional trace ID for structured logging
    */
-  private async getAuthHeader(): Promise<string | undefined> {
+  private async getAuthHeader(traceId?: string): Promise<string | undefined> {
     // Static bearer token takes precedence
     if (this.config.bearerToken) {
       return `Bearer ${this.config.bearerToken}`;
@@ -133,7 +135,7 @@ export class McpClient {
     // GCP identity token for Cloud Run services
     if (this.config.authType === 'gcp_identity') {
       try {
-        const token = await getGcpIdentityToken(this.config.audience);
+        const token = await getGcpIdentityToken(this.config.audience, traceId);
         return `Bearer ${token}`;
       } catch (error) {
         logger.error({
@@ -141,6 +143,7 @@ export class McpClient {
           serverName: this.serverName,
           audience: this.config.audience,
           error: error instanceof Error ? error.message : String(error),
+          traceId,
         });
         // Return undefined - request will fail with 401/403
         return undefined;
@@ -318,7 +321,7 @@ export class McpClient {
     };
 
     // Get auth header (static token or dynamic GCP identity token)
-    const authHeader = await this.getAuthHeader();
+    const authHeader = await this.getAuthHeader(traceId);
     if (authHeader) {
       headers['Authorization'] = authHeader;
     }
@@ -456,7 +459,7 @@ export class McpClient {
     };
 
     // Get auth header (static token or dynamic GCP identity token)
-    const authHeader = await this.getAuthHeader();
+    const authHeader = await this.getAuthHeader(_traceId);
     if (authHeader) {
       headers['Authorization'] = authHeader;
     }
@@ -804,7 +807,7 @@ export class McpClient {
     };
 
     // Get auth header (static token or dynamic GCP identity token)
-    const authHeader = await this.getAuthHeader();
+    const authHeader = await this.getAuthHeader(traceId);
     if (authHeader) {
       headers['Authorization'] = authHeader;
     }

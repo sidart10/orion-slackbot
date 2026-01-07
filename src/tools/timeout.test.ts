@@ -34,7 +34,7 @@ describe('withTimeout', () => {
     }
 
     expect(receivedSignal).not.toBeNull();
-    expect(receivedSignal?.aborted).toBe(true);
+    expect((receivedSignal as unknown as AbortSignal).aborted).toBe(true);
   });
 
   it('returns the underlying ToolResult when it resolves before timeout', async () => {

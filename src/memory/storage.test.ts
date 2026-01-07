@@ -88,7 +88,7 @@ describe('memory/storage', () => {
         { name: 'data.yaml', isFile: () => true, parentPath: './dir' },
         { name: 'other.txt', isFile: () => true, parentPath: './dir' },
         { name: 'subdir', isFile: () => false, parentPath: './dir' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       const { listMemoryFiles } = await import('./storage.js');
       const files = await listMemoryFiles('./dir');

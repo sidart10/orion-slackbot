@@ -116,12 +116,8 @@ export const handleThreadStarted: AssistantThreadStartedMiddleware = async ({
         prompts,
       });
 
-      // Save thread context including memory state (AC#1, #3)
-      await saveThreadContext({
-        memoryContext,
-        memoryLoadedAt: new Date().toISOString(),
-        scopesLoaded: memories?.scopesFound ?? [],
-      });
+      // Persist thread context (Slack API shape is managed by Slack; no custom payload allowed)
+      await saveThreadContext();
 
       trace.update({
         output: {

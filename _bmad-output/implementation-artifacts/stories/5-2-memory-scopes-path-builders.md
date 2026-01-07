@@ -1,6 +1,6 @@
 # Story 5.2: Memory Scopes & Path Builders
 
-Status: review
+Status: done
 
 ## Story
 
@@ -330,18 +330,33 @@ const listPath = Memory.list.user('U12345ABC');
 ### Completion Notes
 
 - ✅ All 5 tasks completed
-- ✅ 41 new tests in `paths.test.ts` all passing
-- ✅ All 71 tests in `src/tools/memory/` passing (including existing handler/storage/tool tests)
+- ✅ 43 tests in `paths.test.ts` all passing
+- ✅ All 123 tests in `src/tools/memory/` passing
 - ✅ No linter errors
-- Pre-existing failures in `src/memory/*` are from missing `gray-matter` dependency (unrelated module)
+
+### Code Review Fixes (2026-01-05)
+
+**H1/H2 - Integration:** Updated `handler.ts` and `handlers.ts` to use `validateMemoryPath()` from `paths.ts` instead of inline/duplicate validation. Now all path validation goes through the central function with scope and extension checks.
+
+**M1 - sanitizeThreadTs:** Changed `replace('.', '-')` to `replaceAll('.', '-')` for defensive coding.
+
+**M2 - Extension validation:** Made `validateMemoryPath()` require file extensions (consistent with builders). Added test for files without extension.
+
+**M3 - Duplicate constants:** Removed duplicate `MAX_CONTENT_SIZE_BYTES` from `handler.ts` and `handlers.ts`, now import `MAX_MEMORY_FILE_SIZE` from `paths.ts`.
+
+**L1 - Branded type test:** Improved test to verify `Object.isFrozen()` behavior and immutability in strict mode.
 
 ## File List
 
 | File | Action |
 |------|--------|
-| `src/tools/memory/paths.ts` | Created |
-| `src/tools/memory/paths.test.ts` | Created |
+| `src/tools/memory/paths.ts` | Created, Modified (review fixes) |
+| `src/tools/memory/paths.test.ts` | Created, Modified (review fixes) |
 | `src/tools/memory/index.ts` | Modified (added exports) |
+| `src/tools/memory/handler.ts` | Modified (review: use validateMemoryPath) |
+| `src/tools/memory/handler.test.ts` | Modified (review: update test paths/expectations) |
+| `src/tools/memory/handlers.ts` | Modified (review: use validateMemoryPath) |
+| `src/tools/memory/handlers.test.ts` | Modified (review: update test paths) |
 
 ## Change Log
 
@@ -350,3 +365,4 @@ const listPath = Memory.list.user('U12345ABC');
 | 2025-12-22 | Story created for Epic 5 |
 | 2025-12-22 | Aligned branded type with architecture (object pattern), added extension/size validation |
 | 2026-01-02 | Implemented all tasks: branded MemoryPath type, path builders, validation. 41 tests passing. |
+| 2026-01-05 | Code review: Fixed 6 issues (2 High, 3 Medium, 1 Low). Integrated validateMemoryPath into handlers. 123 tests passing. Status: done |

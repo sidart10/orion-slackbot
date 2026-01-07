@@ -205,6 +205,8 @@ export interface McpServerHttpConfig extends McpServerConfigBase {
   authType?: 'gcp_identity';
   /** Default arguments to merge into tool calls */
   defaults?: Record<string, unknown>;
+  /** Request timeout in ms for tool calls to this server (e.g. Genmedia can be long-running) */
+  requestTimeoutMs?: number;
 }
 
 export interface McpServerSseConfig extends McpServerConfigBase {

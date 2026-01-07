@@ -44,7 +44,7 @@ export function getTypeDirectory(type: MemoryTypeValue): string {
  */
 export async function listMemoryFiles(dir: string): Promise<string[]> {
   try {
-    const entries = await readdir(dir, { withFileTypes: true, recursive: true });
+    const entries = await readdir(dir, { withFileTypes: true, recursive: true, encoding: 'utf8' });
     return entries
       .filter((e) => e.isFile() && (e.name.endsWith('.md') || e.name.endsWith('.yaml')))
       .map((e) => join(e.parentPath || dir, e.name));

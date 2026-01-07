@@ -19,6 +19,7 @@ import { getToolDefinitions, refreshMcpTools } from './tools.js';
 import type { AgentContext, AgentResult } from './orion.js';
 import { gatherContext, type ContextSource } from './gather.js';
 import { verify } from './verify.js';
+import { ensureSkillToolsRegistered } from '../skills/runtime.js';
 import {
   getMemoryTool,
   setMemoryToolContext,
@@ -115,10 +116,11 @@ export interface AgentLoopOptions {
 
 // Initialize Anthropic client (uses ANTHROPIC_API_KEY env var automatically)
 // Story 5.1 AC#7: Enable memory tool auto-context via beta header
+// Story 6.3: Enable PTC (Programmatic Tool Calling) via advanced-tool-use beta
 const anthropic = new Anthropic({
   apiKey: config.anthropicApiKey,
   defaultHeaders: {
-    'anthropic-beta': 'context-management-2025-06-27',
+    'anthropic-beta': 'context-management-2025-06-27,advanced-tool-use-2025-11-20',
   },
 });
 
@@ -347,7 +349,35 @@ type StreamingToolUse = {
   input: unknown;
   _index: number;
   _skipExecution?: boolean;
+  /** Story 6.3: Caller info for PTC (Programmatic Tool Calling) */
+  caller?: { type: string; id: string };
 };
+
+/**
+ * Story 6.3: PTC content block types (Programmatic Tool Calling)
+ * These types are for Anthropic's code_execution feature that allows Claude
+ * to orchestrate multiple tools through Python code.
+ *
+ * @see https://docs.anthropic.com/claude/docs/tool-use/programmatic-tool-calling
+ */
+type ServerToolUseBlock = {
+  type: 'server_tool_use';
+  id: string;
+  name: 'code_execution';
+  input: unknown;
+};
+
+type CodeExecutionToolResultBlock = {
+  type: 'code_execution_tool_result';
+  content: {
+    return_code: number;
+    stdout: string;
+    stderr: string;
+  };
+};
+
+/** Caller type for PTC - identifies tool calls made from code_execution */
+const PTC_CALLER_TYPE = 'code_execution_20250825';
 
 /**
  * Execute the canonical agent loop and stream text deltas to the caller.
@@ -414,6 +444,20 @@ export async function* executeAgentLoop(
     });
   }
 
+  // Story 6.1: Ensure skill tools are registered before building tool list.
+  // Best-effort: failures should not crash the agent.
+  if (context.traceId) {
+    const skillReg = await ensureSkillToolsRegistered(context.traceId);
+    if (!skillReg.success) {
+      logger.warn({
+        event: 'skills.tools.registration_failed',
+        traceId: context.traceId,
+        errorCode: skillReg.error.code,
+        errorMessage: skillReg.error.message,
+      });
+    }
+  }
+
   // Story 5.1: Set up memory tool context for this request
   // Memory tool uses SDK betaMemoryTool helper with GCS backend
   let memoryTool: ReturnType<typeof getMemoryTool> | null = null;
@@ -438,6 +482,16 @@ export async function* executeAgentLoop(
 
   // Get MCP + static tools from registry, add memory tool if configured
   const registryTools = getToolDefinitions();
+
+  // Story 6.3: Add code_execution built-in tool for PTC (Programmatic Tool Calling)
+  // This allows Claude to orchestrate multiple MCP tools through Python code
+  // The API expects both 'type' (versioned) and 'name' fields per Anthropic docs:
+  // https://platform.claude.com/docs/en/agents-and-tools/tool-use/code-execution-tool
+  const codeExecutionTool = {
+    type: 'code_execution_20250825' as const,
+    name: 'code_execution',
+  };
+
   // Memory tool uses BetaRunnableTool type from @anthropic-ai/sdk/helpers/beta/memory
   // This type is NOT Anthropic.Tool, but the SDK's messages.create() accepts both.
   // The type assertion is safe because:
@@ -445,9 +499,11 @@ export async function* executeAgentLoop(
   // 2. The API accepts this tool format alongside standard Anthropic.Tool objects
   // 3. Runtime behavior is validated via integration tests
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tools = memoryTool
-    ? [...registryTools, memoryTool as unknown as Anthropic.Tool]
-    : registryTools;
+  const tools = [
+    ...registryTools,
+    codeExecutionTool as unknown as Anthropic.Tool,
+    ...(memoryTool ? [memoryTool as unknown as Anthropic.Tool] : []),
+  ];
   void options.setStatus?.({ phase: 'gather' });
   const gatherSpan = createAgentSpan(trace, 'agent.gather', {
     messageLength: userMessage.length,
@@ -505,6 +561,16 @@ export async function* executeAgentLoop(
   // Clone messages for retry attempts (we may need to reset between attempts)
   const baseMessages = [...messages];
 
+  // State tracking for fallback logic (fix silent response failures)
+  let usedFallback = false;
+
+  // Story 6.3: PTC (Programmatic Tool Calling) state
+  // Container ID for session reuse within a single agent loop execution
+  let activeContainer: string | undefined;
+  // Track PTC tool calls for observability
+  let ptcToolCallCount = 0;
+  let ptcContainerStartTime: number | undefined;
+
   // Story 2.3: Verification retry loop (AC#3 - max 3 attempts)
   for (
     verificationAttempts = 1;
@@ -527,6 +593,10 @@ export async function* executeAgentLoop(
     // Buffer for this attempt's response (AC#2 - unverified content never delivered)
     let attemptResponse = '';
 
+    // State tracking for fallback logic (fix silent response failures)
+    let toolsExecutedSuccessfully = false;
+    let lastIterationResponse = '';
+
     void options.setStatus?.({ phase: 'act' });
     const actSpan = createAgentSpan(trace, 'agent.act', {
       promptLength: effectiveSystemPrompt.length,
@@ -541,6 +611,10 @@ export async function* executeAgentLoop(
       // Only the FINAL iteration's text (after all tools complete) should be delivered.
       // Previous iterations may output "thinking" text before tool_use that shouldn't be shown.
       const previousAttemptResponse = attemptResponse;
+      // Preserve response before reset for fallback logic
+      if (attemptResponse.length > 0) {
+        lastIterationResponse = attemptResponse;
+      }
       attemptResponse = '';
 
       // Debug log for duplicate detection (Story 7.5)
@@ -561,6 +635,7 @@ export async function* executeAgentLoop(
         messagesCount: attemptMessages.length,
       });
 
+      // Story 6.3: Include container for PTC session reuse
       const stream = (await anthropic.messages.create({
         model: config.anthropicModel,
         max_tokens: 8192,
@@ -568,6 +643,7 @@ export async function* executeAgentLoop(
         messages: attemptMessages,
         stream: true,
         ...(tools.length > 0 ? { tools } : {}),
+        ...(activeContainer ? { container: activeContainer } : {}),
       })) as unknown as AsyncIterable<Anthropic.RawMessageStreamEvent>;
 
       let inputTokensThisCall = 0;
@@ -582,24 +658,122 @@ export async function* executeAgentLoop(
       for await (const event of stream) {
         if (event.type === 'message_start') {
           modelThisCall = event.message?.model;
+          // Story 6.3: Extract container ID for PTC session reuse
+          const container = (event.message as unknown as { container?: string })?.container;
+          if (container) {
+            activeContainer = container;
+            if (!ptcContainerStartTime) {
+              ptcContainerStartTime = Date.now();
+            }
+            logger.debug({
+              event: 'agent.loop.ptc_container_received',
+              containerId: container,
+              traceId: context.traceId,
+            });
+          }
           continue;
         }
 
         if (event.type === 'content_block_start') {
-          if (event.content_block?.type === 'tool_use') {
+          // Story 6.3: Cast to string to support beta PTC types not yet in SDK types
+          const blockType = event.content_block?.type as string | undefined;
+
+          // Story 6.3: Handle server_tool_use (PTC code execution started)
+          if (blockType === 'server_tool_use') {
+            const serverBlock = event.content_block as unknown as ServerToolUseBlock;
+            logger.info({
+              event: 'agent.loop.ptc_code_execution_started',
+              serverToolUseId: serverBlock.id,
+              traceId: context.traceId,
+            });
+            // Update Slack status for PTC
+            void options.setStatus?.({
+              phase: 'tool',
+              toolName: 'code_execution',
+              toolInput: { mode: 'programmatic_batch' },
+            });
+            continue;
+          }
+
+          if (blockType === 'tool_use') {
+            // Cast to ToolUseBlock type for property access
+            const toolBlock = event.content_block as Anthropic.ToolUseBlock;
+
             // Story 2.9: Capture index for streaming accumulation correlation
             // M3 fix: Defensive type check for index field
-            const rawIndex = (event as Record<string, unknown>).index;
+            const rawIndex = (event as unknown as { index?: unknown }).index;
             const blockIndex = typeof rawIndex === 'number' ? rawIndex : -1;
+
+            // Story 6.3: Check for PTC caller field (for observability tracking)
+            const callerField = (event.content_block as unknown as { caller?: { type: string; id: string } })?.caller;
+            if (callerField?.type === PTC_CALLER_TYPE) {
+              ptcToolCallCount++;
+            }
+
             toolUsesThisCall.push({
-              id: event.content_block.id,
-              name: event.content_block.name,
-              input: event.content_block.input,
+              id: toolBlock.id,
+              name: toolBlock.name,
+              input: toolBlock.input,
               _index: blockIndex,
+              caller: callerField,
             });
             // Initialize buffer for potential streamed input
             toolInputBuffers.set(blockIndex, '');
           }
+
+          // Story 6.3: Handle code_execution_tool_result (PTC completed)
+          if (blockType === 'code_execution_tool_result') {
+            const resultBlock = event.content_block as unknown as CodeExecutionToolResultBlock;
+            const { return_code, stdout, stderr } = resultBlock.content ?? {};
+
+            // Log PTC completion
+            logger.info({
+              event: 'agent.loop.ptc_code_execution_completed',
+              returnCode: return_code,
+              stdoutLength: stdout?.length ?? 0,
+              stderrLength: stderr?.length ?? 0,
+              traceId: context.traceId,
+            });
+
+            // Story 6.3 AC#7: Handle error conditions
+            if (return_code !== 0) {
+              if (stderr?.includes('TimeoutError')) {
+                logger.warn({
+                  event: 'agent.loop.ptc_tool_timeout',
+                  stderr: stderr?.slice(0, 500),
+                  traceId: context.traceId,
+                });
+              }
+              if (stderr?.includes('container_expired')) {
+                logger.error({
+                  event: 'agent.loop.ptc_container_expired',
+                  traceId: context.traceId,
+                });
+              }
+            }
+
+            // Story 6.3 AC#10: Emit Langfuse event for PTC observability
+            const langfuseClient = getLangfuse();
+            if (langfuseClient?.event && ptcToolCallCount > 0) {
+              const containerTimeMs = ptcContainerStartTime ? Date.now() - ptcContainerStartTime : 0;
+              // Estimate token savings: ~4 chars per token for tool results that didn't enter context
+              const estimatedTokenSavings = Math.floor((stdout?.length ?? 0) / 4);
+
+              langfuseClient.event({
+                name: 'ptc_execution_completed',
+                metadata: {
+                  traceId: context.traceId,
+                  containerTimeMs,
+                  toolCallCount: ptcToolCallCount,
+                  estimatedTokenSavings,
+                },
+              });
+            }
+
+            // Clear status after PTC completes
+            void options.setStatus?.({ phase: 'act' });
+          }
+
           continue;
         }
 
@@ -637,7 +811,7 @@ export async function* executeAgentLoop(
         // Story 2.9: Handle content_block_stop to finalize accumulated input
         if (event.type === 'content_block_stop') {
           // M3 fix: Defensive type check for index field
-          const rawIndex = (event as Record<string, unknown>).index;
+          const rawIndex = (event as unknown as { index?: unknown }).index;
           const blockIndex = typeof rawIndex === 'number' ? rawIndex : -1;
           const accumulated = toolInputBuffers.get(blockIndex);
 
@@ -715,6 +889,11 @@ export async function* executeAgentLoop(
         traceId: context.traceId,
       });
 
+      // Update fallback with latest response after each iteration
+      if (attemptResponse.length > 0) {
+        lastIterationResponse = attemptResponse;
+      }
+
       if (!wantsToolUse) {
         break;
       }
@@ -734,6 +913,7 @@ export async function* executeAgentLoop(
       }
 
       toolCount += toolUsesThisCall.length;
+      toolsExecutedSuccessfully = true; // Mark that tools executed for fallback logic
       // Story 7.3: Pass tool context for rich status messages (AC1, AC4)
       void options.setStatus?.({
         phase: 'tool',
@@ -906,6 +1086,9 @@ export async function* executeAgentLoop(
         })
       );
 
+      // Story 6.3 AC8: Tool result messages contain ONLY tool_result blocks (no text).
+      // This applies to both regular and PTC (programmatic) tool calls per Anthropic spec.
+      // The toolResults array is constructed with only { type: 'tool_result', ... } objects.
       attemptMessages.push({
         role: 'user',
         content: toolResults as unknown as Anthropic.ContentBlockParam[],
@@ -1006,6 +1189,23 @@ export async function* executeAgentLoop(
     // Store the response for potential retry feedback
     verifiedResponse = attemptResponse;
 
+    // Fallback logic: If verification failed but tools executed successfully,
+    // use the last preserved response to avoid silent failures
+    if (!verification.passed && toolsExecutedSuccessfully && lastIterationResponse.length > 0) {
+      logger.warn({
+        event: 'agent.verify.fallback_to_tool_response',
+        verificationIssues: verification.issues.map((i) => i.code),
+        originalLength: attemptResponse.length,
+        fallbackLength: lastIterationResponse.length,
+        traceId: context.traceId,
+      });
+
+      verification = { passed: true, issues: [], feedback: 'OK (fallback after tool execution)' };
+      verifiedResponse = lastIterationResponse;
+      usedFallback = true;
+      break;
+    }
+
     // If verification passed, break out of retry loop
     if (verification.passed) {
       break;
@@ -1036,8 +1236,18 @@ export async function* executeAgentLoop(
       event: 'agent.loop.yielding_response',
       responseLength: verifiedResponse.length,
       responsePreview: verifiedResponse.slice(0, 200),
+      usedFallback,
       traceId: context.traceId,
     });
+
+    // Log fallback delivery for monitoring
+    if (usedFallback) {
+      logger.info({
+        event: 'agent.loop.fallback_response_delivered',
+        responseLength: verifiedResponse.length,
+        traceId: context.traceId,
+      });
+    }
 
     // Yield the verified response to the caller (chunked for Slack streaming)
     const chunks = chunkVerifiedOutput(verifiedResponse);

@@ -12,14 +12,9 @@
 import type { MemoryToolHandlers } from '@anthropic-ai/sdk/helpers/beta/memory';
 import { readFile, writeFile, deleteFile, listFiles, copyFile } from './storage.js';
 import { formatFileWithLineNumbers, formatDirectoryListing } from './format.js';
+import { validateMemoryPath, MAX_MEMORY_FILE_SIZE } from './paths.js';
 import { getLangfuse, type LangfuseSpan } from '../../observability/langfuse.js';
 import { logger } from '../../utils/logger.js';
-
-/**
- * Maximum content size for memory files (100KB).
- * @see project-context.md - Memory Path Rules / Constraints
- */
-const MAX_CONTENT_SIZE_BYTES = 100 * 1024;
 
 /**
  * Convert /memories/ path to GCS path (strip prefix).
@@ -29,15 +24,13 @@ function toGcsPath(path: string): string {
 }
 
 /**
- * Validate memory path.
+ * Validate memory path using central validation from paths.ts.
  * @throws Error if path is invalid
  */
 function validatePath(path: string): void {
-  if (!path.startsWith('/memories/')) {
-    throw new Error('Path must start with /memories/');
-  }
-  if (path.includes('..')) {
-    throw new Error('Path traversal not allowed');
+  const result = validateMemoryPath(path);
+  if (!result.valid) {
+    throw new Error(result.error || 'Invalid memory path');
   }
 }
 
@@ -123,8 +116,8 @@ export function createMemoryHandlers(bucket: string, traceId: string): MemoryToo
         const gcsPath = toGcsPath(command.path);
 
         // Validate content size (SDK uses file_text, not content)
-        if (Buffer.byteLength(command.file_text, 'utf-8') > MAX_CONTENT_SIZE_BYTES) {
-          throw new Error(`Content exceeds maximum size of ${MAX_CONTENT_SIZE_BYTES / 1024}KB`);
+        if (Buffer.byteLength(command.file_text, 'utf-8') > MAX_MEMORY_FILE_SIZE) {
+          throw new Error(`Content exceeds maximum size of ${MAX_MEMORY_FILE_SIZE / 1024}KB`);
         }
 
         await writeFile(bucket, gcsPath, command.file_text);
@@ -172,8 +165,8 @@ export function createMemoryHandlers(bucket: string, traceId: string): MemoryToo
         const newContent = content.replace(command.old_str, command.new_str);
 
         // Validate new content size
-        if (Buffer.byteLength(newContent, 'utf-8') > MAX_CONTENT_SIZE_BYTES) {
-          throw new Error(`Result exceeds maximum size of ${MAX_CONTENT_SIZE_BYTES / 1024}KB`);
+        if (Buffer.byteLength(newContent, 'utf-8') > MAX_MEMORY_FILE_SIZE) {
+          throw new Error(`Result exceeds maximum size of ${MAX_MEMORY_FILE_SIZE / 1024}KB`);
         }
 
         await writeFile(bucket, gcsPath, newContent);
@@ -233,8 +226,8 @@ export function createMemoryHandlers(bucket: string, traceId: string): MemoryToo
         const newContent = lines.join('\n');
 
         // Validate new content size
-        if (Buffer.byteLength(newContent, 'utf-8') > MAX_CONTENT_SIZE_BYTES) {
-          throw new Error(`Result exceeds maximum size of ${MAX_CONTENT_SIZE_BYTES / 1024}KB`);
+        if (Buffer.byteLength(newContent, 'utf-8') > MAX_MEMORY_FILE_SIZE) {
+          throw new Error(`Result exceeds maximum size of ${MAX_MEMORY_FILE_SIZE / 1024}KB`);
         }
 
         await writeFile(bucket, gcsPath, newContent);

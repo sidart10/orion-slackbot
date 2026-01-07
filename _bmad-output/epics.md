@@ -1,13 +1,14 @@
 ---
-stepsCompleted: [1, 2]
+stepsCompleted: [1, 2, 3, 4]
 inputDocuments:
   - "_bmad-output/prd.md"
   - "_bmad-output/architecture.md"
   - "_bmad-output/ux-design-specification.md"
+  - "_bmad-output/sprint-change-proposal-2026-01-06.md"
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-last_updated: '2025-12-31'
+last_updated: '2026-01-06'
 starterTemplate: 'Custom Structure (Direct API + Agent Skills) - no external template'
 ---
 
@@ -45,16 +46,16 @@ FR16: System provides suggested prompts to help users discover capabilities
 FR17: System responds to @mentions and direct messages
 FR18: System can summarize Slack threads on request
 
-**Code Generation & Execution — PHASE 2 (FR19-23):**
+**Code Generation & Execution (FR19-23):**
 FR19: System generates executable code when pre-built integrations don't exist *(Phase 2)*
-FR20: System executes generated code in sandboxed environments *(Phase 2)*
-FR21: System can call external APIs via generated code *(Phase 2)*
-FR22: System processes and transforms data via generated code *(Phase 2)*
+FR20: System executes generated code in sandboxed environments *(MVP — GKE Agent Sandbox)*
+FR21: System can call external APIs via generated code *(MVP — sandbox has network access)*
+FR22: System processes and transforms data via generated code *(MVP — Python execution)*
 FR23: System validates generated code output before returning results *(Phase 2)*
 
 **Composable Extensions (FR24-29):**
 FR24: Developers can add new Skills via Agent Skills open standard (agentskills.io) — SKILL.md files in .skills/ directory
-FR25: Developers can add new Commands via file-based workflow definitions in .orion/commands/
+FR25: Developers can add new Commands via file-based workflow definitions in .orion/commands/ *(Post-MVP — deferred)*
 FR26: System connects to MCP servers via generic HTTP streamable client (runtime-configurable)
 FR27: System can invoke multiple MCP servers within a single response (tools merged into unified registry)
 FR28: System selects appropriate tools from available options for each task
@@ -204,9 +205,16 @@ Epic 2 (Agent Loop):     FR1, FR2, FR5, FR6, FR47, FR50 (dynamic status, error t
 Epic 3 (MCP/Tools):      FR26, FR27, FR28, FR29, FR39
 Epic 4 (REMOVED):        FR3, FR4 reworded; FR10 via native pattern
 Epic 5 (Memory):         FR44, FR45, FR46
-Epic 6 (Skills):         FR24, FR25
+Epic 6 (Skills):         FR24, FR20, FR21, FR22 (skills + code execution)
 Epic 7 (Slack Polish):   FR16, FR18 (suggested prompts, summarization)
-Epic 8 (Code Gen):       FR19-23 *(Phase 2)*
+Epic 8 (Code Gen):       FR19 (partial), FR23 *(Phase 2 — reduced scope)*
+```
+
+**Deferred to Post-MVP:**
+```
+FR25 (Commands):         Skills + execute_code provide equivalent extensibility
+FR19 (Code Gen patterns): Claude generates code naturally; explicit patterns deferred
+FR23 (Output validation): Claude's native verification sufficient for MVP
 ```
 
 **UX Spec Integration (Hybrid Approach):**
@@ -296,7 +304,7 @@ Connect Orion to external tools via the Model Context Protocol.
 | 3.2 | Tool Discovery & Registration | done |
 | 3.3 | Tool Execution & Error Handling | done |
 | 3.4 | Channel @Mention Tool Feedback | done |
-| 3.5 | MCP Session Lifecycle | ready-for-dev |
+| 3.5 | MCP Session Lifecycle | done |
 
 ---
 
@@ -332,25 +340,27 @@ Enable Orion to remember context across sessions.
 **Stories:**
 | Story | Title | Status |
 |-------|-------|--------|
-| 5.1 | Memory Tool Handler (SDK Helper + GCS Backend) | in-progress |
-| 5.2 | Memory Scopes & Path Builders | ready-for-dev |
-| 5.3 | Memory Auto-Check at Conversation Start | ready-for-dev |
+| 5.1 | Memory Tool Handler (SDK Helper + GCS Backend) | done |
+| 5.2 | Memory Scopes & Path Builders | review |
+| 5.3 | Memory Auto-Check at Conversation Start | done |
 
 ---
 
 ### Epic 6: Skills & Extensions Framework
-Enable developers to add new capabilities via file-based definitions.
+Enable developers to add new capabilities via file-based definitions and code execution.
 
-**User Outcome:** New skills and commands can be added by dropping files—no code changes required.
+**User Outcome:** New skills can be added by dropping SKILL.md files—no code changes required. Code execution enables programmatic tool orchestration.
 
 **Scope:**
 - Agent Skills loader (parse SKILL.md from `.skills/` directory)
-- Skills injection into system prompt or tool definitions
-- Commands loader from `.orion/commands/`
-- Skill execution integration with agent loop
+- Skills injection into system prompt via progressive disclosure
+- Code execution via GKE Agent Sandbox (FR20-22)
+- Skill script execution integration with agent loop
 
-**FRs:** FR24, FR25
+**FRs:** FR24, FR20, FR21, FR22
 **NFRs:** None specific
+
+**Note:** Commands framework (FR25) deferred to post-MVP. Skills + execute_code provide equivalent extensibility for MVP.
 
 **Course Correction (2026-01-02):**
 Story 6-1 implemented incorrectly — used full content injection (~15k tokens) instead of progressive disclosure (~1.2k tokens). Refactor required to follow Agent Skills open standard ([agentskills.io](https://agentskills.io)). Story 6-2 enhanced with skill filesystem sync to GKE sandbox.  
@@ -359,8 +369,28 @@ See: `sprint-change-proposal-2026-01-02-skills-architecture-fix.md`
 **Stories:**
 | Story | Title | Status |
 |-------|-------|--------|
-| 6.1 | Agent Skills Loader | refactor-needed |
-| 6.2 | Execute Code Tool | in-progress |
+| 6.1 | Agent Skills Loader | done |
+| 6.2 | Execute Code Tool (GKE Sandbox) | review |
+| 6.3 | Anthropic Managed PTC Integration | pending |
+
+**Sprint Change (2026-01-06) — Story 6.3: Anthropic Managed PTC:**
+Programmatic Tool Calling enables Claude to orchestrate tools through code, reducing token usage by ~37%.
+
+Tasks:
+- Task 0: Validation spike (MCP + `allowed_callers`)
+- Task 1-3: Beta header, code_execution tool, allowed_callers config
+- Task 4: PTC response handling + container expiration errors + message formatting
+- Task 5-6: Container field tracking, types
+- Task 7: Streaming UX ("Running multi-tool analysis...")
+- Task 8: Observability (Langfuse metrics: `ptc_tool_call_count`, `ptc_container_time_ms`, `ptc_token_savings_estimate`)
+
+Acceptance Criteria (AC7-AC10):
+- AC7: Log `ptc_container_expired` events on container expiration
+- AC8: PTC messages contain ONLY `tool_result` blocks (no text content)
+- AC9: Slack status updates during code execution
+- AC10: Langfuse traces include PTC metrics
+
+See: `sprint-change-proposal-2026-01-06.md`, `tech-spec-anthropic-managed-ptc.md`
 
 ---
 
@@ -387,7 +417,7 @@ Add discovery, summarization, and UX polish features to complete the Slack exper
 | 7.3 | Contextual Tool Feedback | done | P1 |
 | 7.4 | Response Completion Indicators | done | P2 |
 | 7.5 | Fix Duplicate Response Bug | done | P0 |
-| 7.6 | Conversation Summarization (All types incl. threads) | ready-for-dev | P1 |
+| 7.6 | Conversation Summarization (All types incl. threads) | done | P1 |
 
 **Note:** Foundational UX (FR47-50) moved to Epic 1/2 for day-1 integration:
 - FR47 (dynamic status) → Story 2.2 ✓ (enhanced in 7.3)
@@ -406,18 +436,22 @@ Add discovery, summarization, and UX polish features to complete the Slack exper
 
 ---
 
-### Epic 8: Code Generation & Execution *(Phase 2)*
-Enable Orion to write and execute code when pre-built integrations don't exist.
+### Epic 8: Code Generation & Execution *(Phase 2 — Reduced Scope)*
+Advanced code generation patterns and output validation.
 
-**User Outcome:** No integration ceiling—Orion writes its way through gaps.
+**User Outcome:** Enhanced code generation with explicit validation and guardrails.
 
-**Scope:** *(Deferred to Phase 2)*
-- Code generation for API calls
-- Sandboxed execution environment
-- Output validation before returning results
-- Security controls for generated code
+**Scope:** *(Reduced — Most moved to Epic 6)*
+- **FR19:** Code generation patterns, templates, guardrails (deferred)
+- **FR23:** Output validation before returning results (deferred)
 
-**FRs:** FR19, FR20, FR21, FR22, FR23
+**Moved to Epic 6 (Story 6-2):**
+- Sandboxed execution environment (GKE Agent Sandbox) → FR20
+- External API calls via generated code → FR21
+- Data processing via generated code → FR22
+- Security controls (gVisor isolation)
+
+**FRs Remaining:** FR19 (partial), FR23
 **NFRs:** NFR8
 
 ---
@@ -431,12 +465,12 @@ Enable Orion to write and execute code when pre-built integrations don't exist.
 | 3 | Tool Connectivity (MCP) | 5 (3.1-3.5) | MVP |
 | 4 | ~~Subagents~~ | 0 | REMOVED |
 | 5 | Persistent Memory | 3 | MVP |
-| 6 | Skills & Extensions Framework | 3 | MVP |
+| 6 | Skills & Extensions Framework | 3 (6.1-6.3) | MVP |
 | 7 | Slack Polish | 6 (7.1-7.6) | MVP |
 | 8 | Code Generation & Execution | TBD | Phase 2 |
 
 **MVP Total:** ~31 stories across 6 epics (Epic 4 removed)
-**Updated:** 2026-01-02 (Story 3.5 added per MCP lifecycle course correction)
+**Updated:** 2026-01-06 (Added Story 6.3: Anthropic Managed PTC from sprint change proposal)
 **Phase 2:** Epic 8 (deferred)
 
 ### UX Integration (Hybrid Approach)

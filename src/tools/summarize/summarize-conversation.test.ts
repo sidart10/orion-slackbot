@@ -94,8 +94,10 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.type).toBe('public_channel');
-      expect(result.data?.messageCount).toBe(2);
+      if (result.success) {
+        expect(result.data.type).toBe('public_channel');
+        expect(result.data.messageCount).toBe(2);
+      }
     });
 
     it('returns summary for private channel', async () => {
@@ -123,7 +125,9 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.type).toBe('private_channel');
+      if (result.success) {
+        expect(result.data.type).toBe('private_channel');
+      }
     });
 
     it('returns summary for MPIM (group DM)', async () => {
@@ -151,7 +155,9 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.type).toBe('mpim');
+      if (result.success) {
+        expect(result.data.type).toBe('mpim');
+      }
     });
 
     it('returns summary for DM (1:1)', async () => {
@@ -179,7 +185,9 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.type).toBe('im');
+      if (result.success) {
+        expect(result.data.type).toBe('im');
+      }
     });
   });
 
@@ -204,7 +212,9 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.timeRange?.description).toBe('past 7 days');
+      if (result.success) {
+        expect(result.data.timeRange?.description).toBe('past 7 days');
+      }
     });
 
     it('sets truncated flag when messages capped', async () => {
@@ -227,7 +237,9 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.truncated).toBe(true);
+      if (result.success) {
+        expect(result.data.truncated).toBe(true);
+      }
     });
 
     it('returns helpful message for empty conversation', async () => {
@@ -250,8 +262,10 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.messageCount).toBe(0);
-      expect(result.data?.summary).toContain('No messages found');
+      if (result.success) {
+        expect(result.data.messageCount).toBe(0);
+        expect(result.data.summary).toContain('No messages found');
+      }
     });
   });
 
@@ -275,7 +289,9 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error?.message).toContain("couldn't find that channel");
+      if (!result.success) {
+        expect(result.error.message).toContain("couldn't find that channel");
+      }
     });
 
     it('returns error for unresolved target', async () => {
@@ -294,7 +310,9 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error?.message).toContain("couldn't determine which conversation");
+      if (!result.success) {
+        expect(result.error.message).toContain("couldn't determine which conversation");
+      }
     });
   });
 
@@ -324,7 +342,9 @@ describe('summarizeConversation', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.participants).toEqual(['U123', 'U456', 'U789']);
+      if (result.success) {
+        expect(result.data.participants).toEqual(['U123', 'U456', 'U789']);
+      }
     });
   });
 

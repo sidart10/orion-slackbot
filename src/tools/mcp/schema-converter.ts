@@ -10,12 +10,46 @@
 import type { McpTool, McpJsonSchemaProperty } from './types.js';
 
 /**
+ * Models that support Programmatic Tool Calling (PTC).
+ * PTC allows Claude to invoke tools from Python code in Anthropic's container.
+ * @see Story 6.3 - Anthropic Managed PTC
+ */
+const PTC_SUPPORTED_MODELS = [
+  'claude-opus-4-5-20251101',
+  'claude-sonnet-4-5-20250929',
+  'claude-4-opus-20250514', // potential future model IDs
+] as const;
+
+/**
+ * Check if the current model supports PTC.
+ * Falls back to environment variable PTC_ENABLED for explicit control.
+ */
+export function isPtcEnabled(): boolean {
+  // Explicit override via environment variable
+  const ptcEnv = process.env.PTC_ENABLED;
+  if (ptcEnv !== undefined) {
+    return ptcEnv === 'true' || ptcEnv === '1';
+  }
+
+  // Check if current model supports PTC
+  const model = process.env.ANTHROPIC_MODEL ?? '';
+  return PTC_SUPPORTED_MODELS.some((supported) => model.includes(supported));
+}
+
+/**
  * Anthropic tool definition format
  * @see https://docs.anthropic.com/claude/docs/tool-use
+ * @see Story 6.3 - Programmatic Tool Calling (PTC)
  */
 export interface AnthropicTool {
   name: string;
   description?: string;
+  /**
+   * Story 6.3: Specifies which callers can invoke this tool.
+   * For PTC, set to ['code_execution_20250825'] to allow Claude to call
+   * this tool from Python code in Anthropic's container.
+   */
+  allowed_callers?: string[];
   input_schema: {
     type: 'object';
     properties: Record<string, AnthropicSchemaProperty>;
@@ -65,8 +99,12 @@ export function mcpToolToClaude(
 ): AnthropicTool {
   const name = `${serverName}__${tool.name}`;
 
+  // Story 6.3: Enable PTC (Programmatic Tool Calling) - single caller mode
+  // This allows Claude to invoke MCP tools from Python code in Anthropic's container
+  // Only add allowed_callers when the model supports PTC (e.g., Opus 4.5)
   const result: AnthropicTool = {
     name,
+    ...(isPtcEnabled() ? { allowed_callers: ['code_execution_20250825'] } : {}),
     input_schema: {
       type: 'object',
       properties: convertProperties(tool.inputSchema.properties ?? {}),

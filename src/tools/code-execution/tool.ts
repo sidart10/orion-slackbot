@@ -12,8 +12,8 @@ import { readFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { executeSandbox } from './sandbox-client.js';
-import { getSkills } from '../../skills/loader.js';
+import { executeSandbox, SandboxTimeoutError } from './sandbox-client.js';
+import { getSkillMetadata } from '../../skills/loader.js';
 import { getLangfuse } from '../../observability/langfuse.js';
 import { logger } from '../../utils/logger.js';
 import { config } from '../../config/environment.js';
@@ -111,7 +111,8 @@ The sandbox has:
 - Network access to call APIs and MCP servers
 - 30-second default timeout (configurable up to 120s)
 
-For skill scripts, use: skill_script: "skill:skill_name/script_name.py"`,
+For skill scripts, use: skill_script: "skill:skill_name/script_name.py"
+To load a skill's full SKILL.md on-demand, use: skill_doc: "skill:skill_name"`,
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -122,6 +123,10 @@ For skill scripts, use: skill_script: "skill:skill_name/script_name.py"`,
       skill_script: {
         type: 'string',
         description: 'Path to skill script: "skill:skill_name/script_name.py"',
+      },
+      skill_doc: {
+        type: 'string',
+        description: 'Load and print a skill SKILL.md file: "skill:skill_name" (prints full markdown)',
       },
       args: {
         type: 'object',
@@ -171,8 +176,9 @@ export async function executeCodeHandler(
         };
       }
 
-      const skills = await getSkills(traceId);
-      const skill = skills.find((s) => s.name === skillName);
+      // Use metadata-only loading (Story 6.1 progressive disclosure)
+      const skillMetadata = await getSkillMetadata(traceId);
+      const skill = skillMetadata.find((s) => s.name === skillName);
 
       // Check skill exists and has executable scripts (Story 6.1 alignment)
       if (!skill) {
@@ -216,6 +222,53 @@ export async function executeCodeHandler(
       if (input.args) {
         codeToExecute = `import os, json\nARGS = json.loads(os.environ.get('ARGS', '{}'))\n${codeToExecute}`;
       }
+    } else if (input.skill_doc) {
+      // On-demand SKILL.md loading (progressive disclosure, Story 6.1)
+      // This reads the SKILL.md from the Orion filesystem (not from inside the sandbox)
+      // and prints it in the sandbox as stdout for Claude to consume.
+      const requested = input.skill_doc.replace(/^skill:/, '');
+      const skillName = requested.split('/')[0];
+      if (!skillName) {
+        return {
+          success: false,
+          error: {
+            code: 'TOOL_INVALID_INPUT',
+            message: `Invalid skill_doc format: "${input.skill_doc}". Expected: "skill:skill_name"`,
+            retryable: false,
+          },
+        };
+      }
+
+      const skillMetadata = await getSkillMetadata(traceId);
+      const skill = skillMetadata.find((s) => s.name === skillName);
+      if (!skill) {
+        return {
+          success: false,
+          error: {
+            code: 'TOOL_NOT_FOUND',
+            message: `Skill not found: ${skillName}`,
+            retryable: false,
+          },
+        };
+      }
+
+      const skillMdPath = join(skill.skillPath, 'SKILL.md');
+      let skillMd: string;
+      try {
+        skillMd = await readFile(skillMdPath, 'utf-8');
+      } catch {
+        return {
+          success: false,
+          error: {
+            code: 'TOOL_NOT_FOUND',
+            message: `SKILL.md not found for skill "${skillName}" at ${skillMdPath}`,
+            retryable: false,
+          },
+        };
+      }
+      const encoded = Buffer.from(skillMd, 'utf-8').toString('base64');
+      codeToExecute = `import base64\nprint(base64.b64decode("${encoded}").decode("utf-8"))\n`;
+      scriptName = `skill_doc:${skillName}`;
     } else if (input.code) {
       codeToExecute = input.code;
     } else {
@@ -223,7 +276,7 @@ export async function executeCodeHandler(
         success: false,
         error: {
           code: 'TOOL_EXECUTION_FAILED',
-          message: 'Either "code" or "skill_script" must be provided',
+          message: 'Either "code", "skill_script", or "skill_doc" must be provided',
           retryable: false,
         },
       };
@@ -241,7 +294,11 @@ export async function executeCodeHandler(
     logger.info({
       event: 'execute_code.start',
       traceId,
-      hasSkillScript: !!scriptName,
+      executionType: input.skill_script
+        ? 'skill_script'
+        : input.skill_doc
+          ? 'skill_doc'
+          : 'inline_code',
       codeHash,
       codeLength: codeToExecute.length,
       timeout,
@@ -293,21 +350,23 @@ export async function executeCodeHandler(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     const duration = Date.now() - startTime;
+    const isTimeout = error instanceof SandboxTimeoutError;
 
-    span?.end({ metadata: { error: errorMsg, durationMs: duration } });
+    span?.end({ metadata: { error: errorMsg, durationMs: duration, isTimeout } });
 
     logger.error({
       event: 'execute_code.error',
       traceId,
       error: errorMsg,
+      isTimeout,
     });
 
     return {
       success: false,
       error: {
-        code: 'TOOL_EXECUTION_FAILED',
+        code: isTimeout ? 'TOOL_TIMEOUT' : 'TOOL_EXECUTION_FAILED',
         message: errorMsg,
-        retryable: false,
+        retryable: isTimeout, // Timeouts may succeed on retry with simpler code
       },
     };
   }

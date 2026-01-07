@@ -1,14 +1,16 @@
 /**
- * Tool routing for execution (static + MCP).
+ * Tool routing for execution (static + skill + MCP).
  *
  * Story 3.3 depends on Story 3.2's registry naming:
  * - Static tools: `tool_name`
+ * - Skill tools: `${skillName}__${toolName}` (Story 6.1)
  * - MCP tools: `${serverName}__${toolName}`
  *
  * Always returns ToolResult<T> — never throws.
  *
  * @see Story 3.3 - Tool Execution & Error Handling
  * @see Story 3.2 - Tool Discovery & Registration
+ * @see Story 6.1 - Agent Skills Loader (skill tool routing)
  */
 
 import type { ToolResult } from '../utils/tool-result.js';
@@ -16,6 +18,16 @@ import { getMcpServerConfigs } from '../config/mcp-servers.js';
 import { toToolError } from './errors.js';
 import { McpClientManager } from './mcp/manager.js';
 import { toolRegistry } from './registry.js';
+import { executeSkillTool } from '../skills/tool-handler.js';
+import { logger } from '../utils/logger.js';
+
+function isToolResult(value: unknown): value is ToolResult<unknown> {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.success !== 'boolean') return false;
+  if (v.success === true) return 'data' in v;
+  return 'error' in v;
+}
 
 export async function executeToolCall(params: {
   toolName: string;
@@ -25,18 +37,36 @@ export async function executeToolCall(params: {
   signal: AbortSignal;
 }): Promise<ToolResult<unknown>> {
   try {
-    // 1. Check static tools first
+    // 1. Check static tools first (highest priority)
     const staticTool = toolRegistry.getStaticTool(params.toolName);
     if (staticTool) {
       try {
-        const data = await staticTool.handler(params.args);
-        return { success: true, data };
+        const maybe = await staticTool.handler(params.args);
+        // Allow static handlers to return ToolResult directly (canonical shape),
+        // otherwise wrap raw handler output in ToolResult.
+        if (isToolResult(maybe)) return maybe;
+        return { success: true, data: maybe };
       } catch (e) {
         return { success: false, error: toToolError(e) };
       }
     }
 
-    // 2. Check MCP tools - the registry is the source of truth
+    // 2. Check skill tools (Story 6.1 AC#5)
+    //    Skill tools use naming convention: skillName__toolName
+    const skillTool = toolRegistry.getSkillTool(params.toolName);
+    if (skillTool) {
+      logger.debug({
+        event: 'tools.router.skill_tool_matched',
+        traceId: params.traceId,
+        toolName: params.toolName,
+        skillName: skillTool.skillName,
+      });
+
+      // Execute skill tool - returns ToolResult, never throws
+      return await executeSkillTool(params.toolName, params.args, params.traceId);
+    }
+
+    // 3. Check MCP tools - the registry is the source of truth
     //    If it's registered, the name is valid. No re-parsing/validation needed.
     const mcpTool = toolRegistry.getMcpTool(params.toolName);
     if (mcpTool) {
@@ -68,14 +98,19 @@ export async function executeToolCall(params: {
 
       // Log merged args for genmedia tools (debug)
       if (server.name.startsWith('genmedia')) {
-        console.log(`[GENMEDIA] Tool: ${mcpTool.originalName}, Server: ${server.name}`);
-        console.log(`[GENMEDIA] Defaults:`, server.defaults);
-        console.log(`[GENMEDIA] User args:`, params.args);
-        console.log(`[GENMEDIA] Merged:`, mergedArgs);
+        logger.debug({
+          event: 'mcp.genmedia.args_merged',
+          traceId: params.traceId,
+          tool: mcpTool.originalName,
+          server: server.name,
+          hasDefaults: !!server.defaults,
+          defaultKeys: server.defaults ? Object.keys(server.defaults) : [],
+          userArgKeys: Object.keys(params.args),
+        });
       }
 
-      // Veo 3.1 only supports durations [4, 6, 8] - fix invalid values
-      if (mcpTool.originalName === 'veo_t2v' && mergedArgs.duration !== undefined) {
+      // Veo 3.1 only supports durations [4, 6, 8] - fix invalid values (both t2v and i2v)
+      if ((mcpTool.originalName === 'veo_t2v' || mcpTool.originalName === 'veo_i2v') && mergedArgs.duration !== undefined) {
         const validDurations = [4, 6, 8];
         const dur = Number(mergedArgs.duration);
         if (!validDurations.includes(dur)) {
@@ -109,7 +144,7 @@ export async function executeToolCall(params: {
       return { success: true, data: result.data };
     }
 
-    // 3. Tool not found in either registry
+    // 4. Tool not found in any registry (static, skill, or MCP)
     return {
       success: false,
       error: {

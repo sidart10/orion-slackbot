@@ -66,9 +66,11 @@ describe('summarizeThread', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.type).toBe('thread');
-      expect(result.data?.messageCount).toBe(2);
-      expect(result.data?.summary).toContain('Summary');
+      if (result.success) {
+        expect(result.data.type).toBe('thread');
+        expect(result.data.messageCount).toBe(2);
+        expect(result.data.summary).toContain('Summary');
+      }
     });
 
     it('returns empty summary for thread with no messages', async () => {
@@ -83,8 +85,10 @@ describe('summarizeThread', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.messageCount).toBe(0);
-      expect(result.data?.summary).toContain('no messages');
+      if (result.success) {
+        expect(result.data.messageCount).toBe(0);
+        expect(result.data.summary).toContain('no messages');
+      }
     });
 
     it('includes participants in result', async () => {
@@ -103,7 +107,9 @@ describe('summarizeThread', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data?.participants).toEqual(['U123', 'U456']);
+      if (result.success) {
+        expect(result.data.participants).toEqual(['U123', 'U456']);
+      }
     });
 
     it('identifies bot messages correctly', async () => {
@@ -143,8 +149,10 @@ describe('summarizeThread', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error?.message).toContain("couldn't find that thread");
-      expect(result.error?.retryable).toBe(false);
+      if (!result.success) {
+        expect(result.error.message).toContain("couldn't find that thread");
+        expect(result.error.retryable).toBe(false);
+      }
     });
 
     it('returns error for not_in_channel', async () => {
@@ -159,9 +167,11 @@ describe('summarizeThread', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error?.message).toContain("don't have access");
-      expect(result.error?.message).toContain('/invite @Orion');
-      expect(result.error?.retryable).toBe(false);
+      if (!result.success) {
+        expect(result.error.message).toContain("don't have access");
+        expect(result.error.message).toContain('/invite @Orion');
+        expect(result.error.retryable).toBe(false);
+      }
     });
 
     it('returns error for missing_scope', async () => {
@@ -176,9 +186,11 @@ describe('summarizeThread', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error?.message).toContain("don't have permission");
-      expect(result.error?.message).toContain('admin');
-      expect(result.error?.retryable).toBe(false);
+      if (!result.success) {
+        expect(result.error.message).toContain("don't have permission");
+        expect(result.error.message).toContain('admin');
+        expect(result.error.retryable).toBe(false);
+      }
     });
 
     it('returns generic error for unknown failures', async () => {
@@ -193,8 +205,10 @@ describe('summarizeThread', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error?.message).toContain('Failed to summarize thread');
-      expect(result.error?.retryable).toBe(true);
+      if (!result.success) {
+        expect(result.error.message).toContain('Failed to summarize thread');
+        expect(result.error.retryable).toBe(true);
+      }
     });
 
     it('never throws - always returns ToolResult', async () => {

@@ -47,7 +47,7 @@ So that context is maintained within a conversation.
   - [x] Update `src/slack/handlers/user-message.ts` to use Assistant callback signature
   - [x] Add `setTitle()` to set thread title from message
   - [x] Add `setStatus()` to show thinking indicator
-  - [x] Use `getThreadContext()` to retrieve saved context
+  - [x] Use Slack thread utilities (`getThreadContext()` / `saveThreadContext()`) for Slack-managed context (do not rely on custom payload storage)
   - [x] Maintain Langfuse trace wrapping
 
 - [x] **Task 5: Implement Thread History Fetching** (AC: #4)
@@ -90,7 +90,7 @@ Each callback receives utility functions:
 - `setStatus()` — Show loading/thinking indicator
 - `setSuggestedPrompts()` — Display prompt suggestions
 - `saveThreadContext()` — Persist context
-- `getThreadContext()` — Retrieve saved context
+- `getThreadContext()` — Retrieve Slack-managed context (not a general-purpose key/value store)
 
 ### Architecture Requirements (MANDATORY)
 

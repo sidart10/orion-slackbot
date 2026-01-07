@@ -22,18 +22,9 @@ import {
   listMemoryFiles,
   parseMemoryFile,
 } from './storage.js';
-import { listKVKeys, loadFromKV } from './vercel-kv-storage.js';
 
 // Re-export for other modules (preferences.ts, conversations.ts, knowledge.ts)
 export { ORION_CONTEXT_ROOT };
-
-/**
- * Check if running on Vercel (production)
- * Vercel KV requires KV_REST_API_URL to be set
- */
-function isVercelKVAvailable(): boolean {
-  return Boolean(process.env.KV_REST_API_URL);
-}
 
 /**
  * Memory types supported by the system
@@ -174,16 +165,12 @@ export interface MemorySearchResult {
 /**
  * Search memory files using keyword matching with scores (AC#2)
  *
- * On Vercel: Searches KV for preferences/conversations, files for knowledge.
- * Locally: Scans files in orion-context/.
- *
- * Ranks by keyword matches, returns top 10 with scores.
+ * Scans files in orion-context/, ranks by keyword matches, returns top 10 with scores.
  *
  * @param query - Search query string
  * @param type - Optional memory type to filter by
  * @returns Array of matching memories with relevance scores
  * @see Story 2.8 - File-Based Memory
- * @see Task 12: Update Memory Search for KV
  */
 export async function searchMemoryWithScores(
   query: string,
@@ -199,23 +186,7 @@ export async function searchMemoryWithScores(
     return [];
   }
 
-  const results: Array<{ memory: Memory; score: number }> = [];
-
-  if (isVercelKVAvailable()) {
-    // On Vercel: search KV for preferences and conversations
-    const kvResults = await searchKVMemories(keywords, type);
-    results.push(...kvResults);
-
-    // Knowledge is always file-based (bundled at deploy time)
-    if (!type || type === MemoryType.KNOWLEDGE) {
-      const knowledgeResults = await searchFileMemories(keywords, MemoryType.KNOWLEDGE);
-      results.push(...knowledgeResults);
-    }
-  } else {
-    // Locally: scan all files
-    const fileResults = await searchFileMemories(keywords, type);
-    results.push(...fileResults);
-  }
+  const results = await searchFileMemories(keywords, type);
 
   // Sort by relevance score, return top 10 with normalized scores
   const maxScore = keywords.length;
@@ -230,67 +201,7 @@ export async function searchMemoryWithScores(
 }
 
 /**
- * Search Vercel KV for matching memories
- */
-async function searchKVMemories(
-  keywords: string[],
-  type?: MemoryTypeValue
-): Promise<Array<{ memory: Memory; score: number }>> {
-  const results: Array<{ memory: Memory; score: number }> = [];
-
-  // Search preferences
-  if (!type || type === MemoryType.PREFERENCE) {
-    const prefKeys = await listKVKeys('preference');
-    for (const key of prefKeys) {
-      const result = await loadFromKV<Record<string, unknown>>('preference', key);
-      if (!result) continue;
-
-      const content = JSON.stringify(result.data).toLowerCase();
-      const score = keywords.reduce((acc, kw) => acc + (content.includes(kw) ? 1 : 0), 0);
-
-      if (score > 0) {
-        results.push({
-          memory: {
-            type: MemoryType.PREFERENCE,
-            key: `preference:${key}`,
-            content: JSON.stringify(result.data),
-            metadata: { createdAt: result.createdAt },
-          },
-          score,
-        });
-      }
-    }
-  }
-
-  // Search conversations
-  if (!type || type === MemoryType.CONVERSATION) {
-    const convKeys = await listKVKeys('conversation');
-    for (const key of convKeys) {
-      const result = await loadFromKV<{ summary: string }>('conversation', key);
-      if (!result) continue;
-
-      const content = (result.data.summary || '').toLowerCase();
-      const score = keywords.reduce((acc, kw) => acc + (content.includes(kw) ? 1 : 0), 0);
-
-      if (score > 0) {
-        results.push({
-          memory: {
-            type: MemoryType.CONVERSATION,
-            key: `conversation:${key}`,
-            content: result.data.summary || '',
-            metadata: { createdAt: result.createdAt },
-          },
-          score,
-        });
-      }
-    }
-  }
-
-  return results;
-}
-
-/**
- * Search file-based memories (used locally and for knowledge on Vercel)
+ * Search file-based memories
  */
 async function searchFileMemories(
   keywords: string[],
@@ -334,4 +245,3 @@ export async function searchMemory(
   const results = await searchMemoryWithScores(query, type);
   return results.map((r) => r.memory);
 }
-

@@ -19,6 +19,7 @@ import {
   type LangfuseSpanAttributes,
   type LangfuseGenerationAttributes,
 } from '@langfuse/tracing';
+import type { LangfuseTrace as LegacyLangfuseTrace } from './langfuse.js';
 // Note: langfuse.ts is still used for feedback scoring (logFeedbackScore)
 // which requires the old SDK's score()/event() methods not available in @langfuse/tracing
 
@@ -223,7 +224,36 @@ export async function startActiveObservation<T>(
   });
 }
 
-// Legacy createSpan and logGeneration removed — use trace.startSpan() and trace.startGeneration() instead
+/**
+ * Legacy compatibility helper: create a child span under a legacy Langfuse trace.
+ *
+ * Some older modules still pass a `parentTrace` (old SDK) rather than using the new tracing SDK.
+ * This wrapper provides a minimal `{ update().end() }` surface.
+ */
+export function createSpan(
+  parentTrace: LegacyLangfuseTrace,
+  params: { name: string; input?: unknown; metadata?: Record<string, unknown> }
+): { update: (data: Record<string, unknown>) => { end: (data?: Record<string, unknown>) => void }; end: (data?: Record<string, unknown>) => void } {
+  const span = parentTrace.span({
+    name: params.name,
+    input: params.input as Record<string, unknown> | undefined,
+    metadata: params.metadata,
+  });
+
+  const api = {
+    update: (data: Record<string, unknown>) => {
+      // Old SDK spans may not support update(); best-effort if present.
+      const anySpan = span as unknown as { update?: (d: Record<string, unknown>) => void };
+      anySpan.update?.(data);
+      return api;
+    },
+    end: (data?: Record<string, unknown>) => {
+      span.end(data);
+    },
+  };
+
+  return api;
+}
 
 /**
  * Start a manual span that must be explicitly ended.

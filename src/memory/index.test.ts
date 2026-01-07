@@ -6,11 +6,9 @@
  * @see Story 2.8 - File-Based Memory
  * @see AC#1 - Information saved to orion-context/ as files
  * @see AC#2 - Gather phase searches orion-context/ for relevant memories
- * @see Task 12: Update Memory Search for KV
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { join } from 'path';
 
 // Mock fs/promises before importing the module
 vi.mock('fs/promises', () => ({
@@ -20,29 +18,13 @@ vi.mock('fs/promises', () => ({
   readdir: vi.fn().mockResolvedValue([]),
 }));
 
-// Mock Vercel KV storage
-const mockListKVKeys = vi.fn().mockResolvedValue([]);
-const mockLoadFromKV = vi.fn().mockResolvedValue(null);
-
-vi.mock('./vercel-kv-storage.js', () => ({
-  listKVKeys: mockListKVKeys,
-  loadFromKV: mockLoadFromKV,
-}));
-
 describe('memory/index', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    // Clear KV env vars so file-based tests run correctly
-    process.env = { ...originalEnv };
-    delete process.env.KV_REST_API_URL;
-    delete process.env.KV_REST_API_TOKEN;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    process.env = originalEnv;
   });
 
   describe('MemoryType', () => {
@@ -227,12 +209,12 @@ describe('memory/index', () => {
 
     it('should search by keywords and return matching memories (AC#2)', async () => {
       const { readdir, readFile } = await import('fs/promises');
-      const { searchMemory, MemoryType } = await import('./index.js');
+      const { searchMemory } = await import('./index.js');
 
       // Mock directory listing
       vi.mocked(readdir).mockResolvedValue([
         { name: 'test.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       // Mock file content with frontmatter
       vi.mocked(readFile).mockResolvedValue(`---
@@ -258,7 +240,7 @@ This is test content about audience segments.
 
       vi.mocked(readdir).mockResolvedValue([
         { name: 'test.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       vi.mocked(readFile).mockResolvedValue(`---
 type: knowledge
@@ -284,7 +266,7 @@ Test content
       vi.mocked(readdir).mockResolvedValue([
         { name: 'file1.md', isFile: () => true, parentPath: './orion-context/knowledge' },
         { name: 'file2.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       // First call returns high match, second returns low match
       vi.mocked(readFile)
@@ -315,7 +297,7 @@ random content`);
         isFile: () => true,
         parentPath: './orion-context/knowledge',
       }));
-      vi.mocked(readdir).mockResolvedValue(files as unknown as import('fs').Dirent[]);
+      vi.mocked(readdir).mockResolvedValue(files as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       // All files match the query
       vi.mocked(readFile).mockResolvedValue(`---
@@ -398,7 +380,7 @@ matching content for test query`);
 
       vi.mocked(readdir).mockResolvedValue([
         { name: 'test.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       vi.mocked(readFile).mockResolvedValue(`---
 type: knowledge
@@ -424,7 +406,7 @@ This content has keywords: test query terms
       vi.mocked(readdir).mockResolvedValue([
         { name: 'high.md', isFile: () => true, parentPath: './orion-context/knowledge' },
         { name: 'low.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       vi.mocked(readFile)
         .mockResolvedValueOnce(`---
@@ -450,7 +432,7 @@ basic information`); // 0 matches
 
       vi.mocked(readdir).mockResolvedValue([
         { name: 'partial.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       // Only matches "audience" but not "segments" or "targeting"
       vi.mocked(readFile).mockResolvedValue(`---
@@ -466,113 +448,4 @@ content about audience only`);
       expect(results[0].relevance).toBeCloseTo(1/3, 2);
     });
   });
-
-  describe('Vercel KV Search (Task 12)', () => {
-    const originalEnv = process.env;
-
-    beforeEach(() => {
-      vi.clearAllMocks();
-      process.env = { ...originalEnv, KV_REST_API_URL: 'https://kv.vercel.com' };
-    });
-
-    afterEach(() => {
-      process.env = originalEnv;
-    });
-
-    it('should search KV for preferences when on Vercel', async () => {
-      vi.resetModules();
-
-      mockListKVKeys.mockResolvedValueOnce(['U123']); // preference keys
-      mockListKVKeys.mockResolvedValueOnce([]); // conversation keys
-      mockLoadFromKV.mockResolvedValueOnce({
-        data: { preferences: { theme: 'dark mode enabled' } },
-        createdAt: '2025-01-01T00:00:00.000Z',
-      });
-
-      const { searchMemoryWithScores } = await import('./index.js');
-      const results = await searchMemoryWithScores('dark mode');
-
-      expect(mockListKVKeys).toHaveBeenCalledWith('preference');
-      expect(results.length).toBe(1);
-      expect(results[0].memory.type).toBe('preference');
-    });
-
-    it('should search KV for conversations when on Vercel', async () => {
-      vi.resetModules();
-
-      mockListKVKeys.mockResolvedValueOnce([]); // preference keys
-      mockListKVKeys.mockResolvedValueOnce(['C123_ts1']); // conversation keys
-      mockLoadFromKV.mockResolvedValueOnce({
-        data: { summary: 'Discussion about project timeline' },
-        createdAt: '2025-01-01T00:00:00.000Z',
-      });
-
-      const { readdir, readFile } = await import('fs/promises');
-      vi.mocked(readdir).mockResolvedValue([]);
-
-      const { searchMemoryWithScores } = await import('./index.js');
-      const results = await searchMemoryWithScores('project timeline');
-
-      expect(mockListKVKeys).toHaveBeenCalledWith('conversation');
-      expect(results.length).toBe(1);
-      expect(results[0].memory.type).toBe('conversation');
-    });
-
-    it('should also search file-based knowledge on Vercel', async () => {
-      vi.resetModules();
-
-      mockListKVKeys.mockResolvedValueOnce([]); // preference keys
-      mockListKVKeys.mockResolvedValueOnce([]); // conversation keys
-
-      const { readdir, readFile } = await import('fs/promises');
-      vi.mocked(readdir).mockResolvedValue([
-        { name: 'test.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
-      vi.mocked(readFile).mockResolvedValue(`---
-type: knowledge
----
-audience targeting information`);
-
-      const { searchMemoryWithScores } = await import('./index.js');
-      const results = await searchMemoryWithScores('audience targeting');
-
-      // Should still search file-based knowledge
-      expect(results.length).toBe(1);
-      expect(results[0].memory.type).toBe('knowledge');
-    });
-  });
-
-  describe('File Backend Search (Local)', () => {
-    const originalEnv = process.env;
-
-    beforeEach(() => {
-      vi.clearAllMocks();
-      process.env = { ...originalEnv };
-      delete process.env.KV_REST_API_URL;
-    });
-
-    afterEach(() => {
-      process.env = originalEnv;
-    });
-
-    it('should use file-based search when KV not available', async () => {
-      vi.resetModules();
-
-      const { readdir, readFile } = await import('fs/promises');
-      vi.mocked(readdir).mockResolvedValue([
-        { name: 'test.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
-      vi.mocked(readFile).mockResolvedValue(`---
-type: knowledge
----
-audience targeting information`);
-
-      const { searchMemoryWithScores } = await import('./index.js');
-      const results = await searchMemoryWithScores('audience targeting');
-
-      expect(mockListKVKeys).not.toHaveBeenCalled();
-      expect(results.length).toBe(1);
-    });
-  });
 });
-

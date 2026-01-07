@@ -11,7 +11,7 @@
  */
 
 import { logger } from '../utils/logger.js';
-import type { VerificationResult } from '../agent/loop.js';
+import type { VerificationResult } from '../agent/verification.js';
 import { MAX_VERIFICATION_ATTEMPTS } from '../agent/verification.js';
 
 /** Target citation rate threshold (90%) */
@@ -91,7 +91,7 @@ export function trackVerification(result: VerificationResult, attempt: number): 
 
   // Track issues by rule type
   for (const issue of result.issues) {
-    metrics.issuesByType[issue.rule] = (metrics.issuesByType[issue.rule] || 0) + 1;
+    metrics.issuesByType[issue.code] = (metrics.issuesByType[issue.code] || 0) + 1;
   }
 
   // Log verification metric event
@@ -100,7 +100,7 @@ export function trackVerification(result: VerificationResult, attempt: number): 
     passed: result.passed,
     attempt,
     issueCount: result.issues.length,
-    issues: result.issues.map((i) => i.rule),
+    issues: result.issues.map((i) => i.code),
   });
 }
 

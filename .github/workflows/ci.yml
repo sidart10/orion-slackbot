@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]  # Also run on push to main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,6 +38,51 @@ jobs:
       - name: Run type check
         run: pnpm typecheck
 
-      - name: Run tests
-        run: pnpm test
+      - name: Run tests with coverage
+        run: pnpm test:coverage
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage/
+          retention-days: 30
+
+      - name: Comment coverage summary on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let coverageSummary = 'Coverage report generated but summary not available';
+            try {
+              // Read coverage-summary.json if it exists
+              if (fs.existsSync('coverage/coverage-summary.json')) {
+                const coverage = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+                const total = coverage.total;
+                coverageSummary = `
+            📊 **Test Coverage Summary**
+
+            | Metric | Coverage |
+            |--------|----------|
+            | Statements | ${total.statements.pct}% |
+            | Branches | ${total.branches.pct}% |
+            | Functions | ${total.functions.pct}% |
+            | Lines | ${total.lines.pct}% |
+
+            *Coverage thresholds: statements ≥85%, branches ≥78%, functions ≥85%, lines ≥85%*
+            `;
+              }
+            } catch (error) {
+              console.log('Could not read coverage summary:', error);
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: coverageSummary
+            });
 

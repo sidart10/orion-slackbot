@@ -56,12 +56,10 @@ import {
   setSummarizeToolContext,
   clearSummarizeToolContext,
 } from '../../tools/summarize/index.js';
-import { getSkills, buildSkillsPrompt } from '../../skills/index.js';
+import { getSkillMetadata, buildSkillsHint } from '../../skills/index.js';
 import { uploadImagesFromResponse } from '../utils/image-upload.js';
-import {
-  setMemoryToolContext,
-  clearMemoryToolContext,
-} from '../../tools/memory/index.js';
+import { clearMemoryToolContext } from '../../tools/memory/index.js';
+import { loadRelevantMemories, formatMemoriesForContext } from '../../tools/memory/loader.js';
 
 /**
  * Handles user messages in assistant threads (Assistant callback signature).
@@ -234,7 +232,14 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
         });
 
         // Declare agentSpan outside try block so it can be ended in catch
-        let agentSpan: ReturnType<typeof trace.startSpan> | null = null;
+        // (Use a local, minimal interface to avoid SDK type drift in handlers.)
+        type SpanLike = {
+          update: (data: Record<string, unknown>) => SpanLike;
+          end: () => void;
+        };
+        let agentSpan: SpanLike | null = null;
+        // Create early so we can always end it in catch (TS can't see assignments inside inner closures).
+        agentSpan = trace.startSpan('agent.orion', { input: { messageText } }) as unknown as SpanLike;
 
         try {
           // AR20: 4-minute hard timeout for agent execution
@@ -304,45 +309,52 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             systemPrompt = 'You are Orion, a helpful AI assistant. Use Slack mrkdwn formatting: *bold* for emphasis, _italic_ for secondary emphasis. Never use blockquotes.';
           }
 
-          // Story 5.3: Inject memory context into system prompt (AC#1)
-          // Memory was loaded at thread start and saved via saveThreadContext
-          try {
-            const savedContext = await getThreadContext();
-            const memoryContext = savedContext?.memoryContext as string | undefined;
-            if (memoryContext && memoryContext.trim().length > 0) {
-              systemPrompt = `${memoryContext}\n\n---\n\n${systemPrompt}`;
-              logger.info({
-                event: 'memory_context_injected',
-                memoryContextLength: memoryContext.length,
+          // Story 5.3: Inject memory context into system prompt (best-effort, stateless)
+          // Slack thread context does not support custom payloads; reload memories when needed.
+          if (config.gcsMemoriesBucket) {
+            try {
+              const memories = await loadRelevantMemories({
+                userId,
+                threadTs,
+                traceId: trace.id ?? 'unknown',
+                bucket: config.gcsMemoriesBucket,
+              });
+              const memoryContext = formatMemoriesForContext(memories);
+              if (memoryContext && memoryContext.trim().length > 0) {
+                systemPrompt = `${memoryContext}\n\n---\n\n${systemPrompt}`;
+                logger.info({
+                  event: 'memory_context_injected',
+                  memoryContextLength: memoryContext.length,
+                  traceId: trace.id,
+                });
+              }
+            } catch (ctxError) {
+              logger.debug({
+                event: 'memory_context_retrieval_skipped',
+                reason: ctxError instanceof Error ? ctxError.message : String(ctxError),
                 traceId: trace.id,
               });
             }
-          } catch (ctxError) {
-            // Best-effort: log and continue without memory context
-            logger.debug({
-              event: 'memory_context_retrieval_skipped',
-              reason: ctxError instanceof Error ? ctxError.message : String(ctxError),
-              traceId: trace.id,
-            });
           }
 
-          // Story 6.1: Inject skills into system prompt (AC#4)
+          // Story 6.1: Inject skills hint into system prompt (AC#4)
+          // Uses metadata-only loading for token efficiency (~100 tokens/skill vs ~5000)
           try {
-            const skills = await getSkills(trace.id);
-            if (skills.length > 0) {
-              const skillsPrompt = buildSkillsPrompt(skills);
-              systemPrompt = `${systemPrompt}\n\n${skillsPrompt}`;
+            const skillMetadata = await getSkillMetadata(trace.id ?? 'no-trace');
+            if (skillMetadata.length > 0) {
+              const skillsHint = buildSkillsHint(skillMetadata);
+              systemPrompt = `${systemPrompt}\n\n${skillsHint}`;
               logger.info({
-                event: 'skills_injected',
-                skillCount: skills.length,
-                skillNames: skills.map((s) => s.name),
+                event: 'skills_hint_injected',
+                skillCount: skillMetadata.length,
+                skillNames: skillMetadata.map((s) => s.name),
                 traceId: trace.id,
               });
             }
           } catch (skillsError) {
             // Best-effort: log and continue without skills
             logger.warn({
-              event: 'skills_injection_failed',
+              event: 'skills_hint_injection_failed',
               reason: skillsError instanceof Error ? skillsError.message : String(skillsError),
               traceId: trace.id,
             });
@@ -457,11 +469,6 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             loading_messages: buildLoadingMessages(),
           });
 
-          // Run Orion agent with Anthropic API (AC#1)
-          agentSpan = trace.startSpan('agent.orion', {
-            input: { messageText, historyLength: historyForAgent.length },
-          });
-
           // Set summarize tool context (Story 7.6)
           setSummarizeToolContext({
             client,
@@ -470,9 +477,6 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             threadTs,
             messageTs: message.ts,
           });
-
-          // Set memory tool context (Story 5.1)
-          setMemoryToolContext(trace.id ?? '');
 
           const agentResponse = runOrionAgent(messageText, {
             context: {
@@ -558,7 +562,27 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           });
 
           // Stop streaming and get metrics
-          const metrics = await streamer.stop();
+          let metrics;
+          try {
+            metrics = await streamer.stop();
+          } catch (stopError) {
+            logger.error({
+              event: 'stream_delivery_failed',
+              channel: body.event.channel,
+              threadTs,
+              userId: body.event.user,
+              error: stopError instanceof Error ? stopError.message : String(stopError),
+              traceId,
+            });
+
+            // Notify user of delivery failure
+            await say({
+              text: '⚠️ *Message delivery failed*\n\nI generated a response but couldn\'t deliver it to Slack. Please try again.',
+              thread_ts: threadTs,
+            });
+
+            throw stopError;
+          }
 
           // Story 2.7 + Source Citations Fix: Only use sources from tool results
           // NOTE: Thread messages are NOT sources - they're the conversation context.
@@ -675,7 +699,8 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
               client,
               channelId,
               threadTs ?? message.ts,
-              allUrls
+              allUrls,
+              trace.id
             );
             if (imageResults.length > 0) {
               logger.info({
@@ -862,7 +887,18 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           clearMemoryToolContext();
 
           // Ensure stream is stopped even on error
-          await streamer.stop().catch(() => {});
+          try {
+            await streamer.stop();
+          } catch (stopError) {
+            // Log but don't throw - we're already in error path
+            logger.warn({
+              event: 'stream_stop_failed_during_error_cleanup',
+              channel: body.event.channel,
+              threadTs,
+              error: stopError instanceof Error ? stopError.message : String(stopError),
+              traceId,
+            });
+          }
 
           // End agentSpan if it was created
           if (agentSpan) {
