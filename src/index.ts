@@ -21,8 +21,11 @@ import { handleAppMention } from './slack/handlers/app-mention.js';
 import { config } from './config/environment.js';
 import { logger } from './utils/logger.js';
 import { registerSummarizeTool } from './tools/summarize/index.js';
-import { registerExecuteCodeTool } from './tools/code-execution/index.js';
+import { registerOrionSandboxTool } from './tools/orion-sandbox/index.js';
 import { shutdown as shutdownLangfuse } from './observability/langfuse.js';
+// Story 6.2: Skills API initialization
+// Story 6.3: Container lifecycle manager for graceful shutdown
+import { initializeSkills, containerLifecycle } from './skills/index.js';
 
 // Note: Memory tool uses SDK betaMemoryTool helper — passed directly to messages.create()
 // via getMemoryTool() in agent loop, not registered in toolRegistry
@@ -43,8 +46,13 @@ export async function startApp(): Promise<void> {
   // Register static tools before app start (Story 7.6)
   // Note: Memory tool (Story 5.1) uses SDK helper, passed directly in agent loop
   registerSummarizeTool();
-  // Story 6.2: execute_code tool registration (required for skill on-demand workflows)
-  registerExecuteCodeTool();
+  // Story 6.2: orion_sandbox tool registration (required for skill on-demand workflows)
+  registerOrionSandboxTool();
+
+  // Story 6.2: Initialize skills (sync to Anthropic API)
+  // This uploads local .skills/ to Anthropic Skills API and caches IDs
+  // Adds ~1-3s to cold start. Failure is non-fatal (logs warning, continues)
+  await initializeSkills('startup');
 
   // Create and configure Slack app with ExpressReceiver
   const { app } = createSlackApp();
@@ -69,11 +77,13 @@ export async function startApp(): Promise<void> {
   });
 
   // Register centralized graceful shutdown handler
-  // Coordinates shutdown of Langfuse client and OpenTelemetry SDK
+  // Coordinates shutdown of Langfuse client, container lifecycle, and OpenTelemetry SDK
   process.on('SIGTERM', async () => {
     logger.info({ event: 'server.shutdown.started' });
     // Shutdown Langfuse client first (flushes pending traces)
     await shutdownLangfuse();
+    // Story 6.3: Clear container lifecycle cleanup timer (AC#7)
+    containerLifecycle.destroy();
     // Then shutdown OTel SDK (stops span processor)
     await shutdownInstrumentation();
     logger.info({ event: 'server.shutdown.complete' });

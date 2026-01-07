@@ -36,6 +36,8 @@ import { loadAgentPrompt } from '../../agent/loader.js';
 import { config } from '../../config/environment.js';
 import { getChannelName, getUserDisplayName } from '../identity.js';
 import { uploadImagesFromResponse } from '../utils/image-upload.js';
+import { createSlackFileUploader } from '../utils/file-uploader.js';
+import { createFilesApiClient } from '../../files/index.js';
 import {
   setSummarizeToolContext,
   clearSummarizeToolContext,
@@ -496,6 +498,39 @@ export async function handleAppMention({
             error: imageError instanceof Error ? imageError.message : String(imageError),
             traceId: trace.id,
           });
+        }
+
+        // Story 6.6: Upload generated files from code execution (PTC Skills)
+        const generatedFileIds = agentResult?.generatedFileIds ?? [];
+        if (generatedFileIds.length > 0) {
+          // Fire-and-forget upload — don't block the response
+          const filesClient = createFilesApiClient();
+          const uploader = createSlackFileUploader(filesClient, client);
+
+          uploader
+            .uploadFiles(generatedFileIds, channelId, threadTs, {
+              deleteAfterUpload: true,
+              traceId: trace.id,
+            })
+            .then((result) => {
+              logger.info({
+                event: 'files_uploaded',
+                channelId,
+                threadTs,
+                total: result.results.length,
+                successful: result.successCount,
+                failed: result.failureCount,
+                totalBytes: result.totalBytes,
+                traceId: trace.id,
+              });
+            })
+            .catch((fileError) => {
+              logger.warn({
+                event: 'files_upload_failed',
+                error: fileError instanceof Error ? fileError.message : String(fileError),
+                traceId: trace.id,
+              });
+            });
         }
 
         // Post feedback buttons as follow-up message (AC#7)

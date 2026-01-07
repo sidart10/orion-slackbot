@@ -53,8 +53,8 @@ export {
 
 // Execute Code Tool (Story 6.2)
 export {
-  registerExecuteCodeTool,
-  setExecuteCodeContext,
-  clearExecuteCodeContext,
+  registerOrionSandboxTool,
+  setOrionSandboxContext,
+  clearOrionSandboxContext,
   EXECUTE_CODE_TOOL_NAME,
-} from './code-execution/index.js';
+} from './orion-sandbox/index.js';

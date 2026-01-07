@@ -329,6 +329,14 @@ describe('parseClaudeToolName', () => {
  * @see AC#2 - MCP tools with allowed_callers callable from Python
  */
 describe('mcpToolToClaude PTC (Story 6.3)', () => {
+  // Enable PTC for these tests
+  beforeEach(() => {
+    process.env.PTC_ENABLED = 'true';
+  });
+  afterEach(() => {
+    delete process.env.PTC_ENABLED;
+  });
+
   const createBasicMcpTool = (): McpTool => ({
     name: 'search',
     description: 'Search the web',

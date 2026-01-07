@@ -49,6 +49,15 @@ vi.mock('./utils/logger.js', () => ({
 // Mock langfuse shutdown
 vi.mock('./observability/langfuse.js', () => ({
   shutdown: vi.fn().mockResolvedValue(undefined),
+  getLangfuse: vi.fn(() => ({
+    span: vi.fn(() => ({ end: vi.fn() })),
+    event: vi.fn(),
+  })),
+}));
+
+// Mock skills initialization (Story 6.2)
+vi.mock('./skills/index.js', () => ({
+  initializeSkills: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('Application Startup', () => {

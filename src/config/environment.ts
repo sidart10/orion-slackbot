@@ -44,6 +44,20 @@ export const config = {
   // Optional: used for compaction threshold calculations (Story 2.6)
   anthropicMaxContextTokens: parseOptionalInt('ANTHROPIC_MAX_CONTEXT_TOKENS'),
 
+  // Anthropic Beta Features (Story 6.2)
+  // CONSOLIDATED: All beta headers in one place for easy management
+  anthropic: {
+    allBetas: [
+      'context-management-2025-06-27', // Memory tool auto-context (Story 5.1)
+      'advanced-tool-use-2025-11-20', // PTC - Programmatic Tool Calling (Story 6.3)
+      'code-execution-2025-08-25', // Skills execution + container (Story 6.2)
+      'skills-2025-10-02', // Skills API CRUD operations (Story 6.2)
+      'files-api-2025-04-14', // File downloads from container (Story 6.2)
+    ],
+    // Enable/disable skills feature (default: true)
+    skillsEnabled: process.env.ANTHROPIC_SKILLS_ENABLED !== 'false',
+  },
+
   // Context compaction (Story 2.6) - all optional; handler applies safe defaults
   compactionThreshold: parseOptionalFloat('COMPACTION_THRESHOLD'),
   compactionKeepLastN: parseOptionalInt('COMPACTION_KEEP_LAST_N'),
@@ -67,7 +81,9 @@ export const config = {
   port: parseInt(process.env.PORT ?? '3000', 10),
   logLevel: process.env.LOG_LEVEL ?? 'info',
 
-  // GKE Agent Sandbox (Story 6.2)
+  // GKE Agent Sandbox (Legacy - retained for orion_sandbox tool compatibility)
+  // Note: Skills now execute in Anthropic managed container, but orion_sandbox
+  // tool still uses GKE for custom Python script execution (Story 6.1)
   gkeSandboxRouterUrl:
     process.env.GKE_SANDBOX_ROUTER_URL ??
     'http://sandbox-router-svc.default.svc.cluster.local:8080',

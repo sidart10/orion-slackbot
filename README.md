@@ -1,6 +1,100 @@
 # Orion Slack Agent
 
-AI-powered Slack assistant built with the Anthropic Messages API (streaming).
+An AI assistant that lives in Slack, powered by Claude. Orion maintains persistent memory across conversations, executes custom Skills, and integrates with external tools via MCP (Model Context Protocol).
+
+## Table of Contents
+
+- [Features](#features)
+- [How It Works](#how-it-works)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Environment Variables](#environment-variables)
+- [Scripts](#scripts)
+- [Project Structure](#project-structure)
+- [Development](#development)
+- [Docker](#docker)
+- [Deployment](#deployment)
+- [CI/CD Pipeline](#cicd-pipeline)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Features
+
+- **Streaming Responses** — Real-time typing with sub-second first token
+- **Persistent Memory** — Per-user and per-thread context stored in GCS
+- **Custom Skills** — Extensible skill system with Python execution support
+- **MCP Integration** — Connect to external tools (Rube, Serena, custom servers)
+- **Code Execution** — Secure Python/shell execution via GKE Agent Sandbox
+- **Full Observability** — Distributed tracing via Langfuse
+- **Native Slack AI** — Uses Slack's Assistant API for thread management
+
+## How It Works
+
+Orion operates in a **three-phase loop**:
+
+1. **Gather** — Collects relevant context from thread history and memory files
+2. **Act** — Calls Claude API with available tools, executes tool calls in a bounded loop
+3. **Verify** — Validates response quality and Slack formatting, retries if needed
+
+Each phase is observable via Langfuse traces.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Slack["Slack"]
+        User[User Message]
+        Thread[Thread Response]
+    end
+
+    subgraph Entry["Entry Layer"]
+        Bolt[Slack Bolt App]
+        Assistant[Assistant Handler]
+    end
+
+    subgraph Agent["Agent Core (3 Phases)"]
+        direction TB
+        Gather[1. GATHER<br/>Context + Memory]
+        Act[2. ACT<br/>Claude API + Tools]
+        Verify[3. VERIFY<br/>Quality Check]
+    end
+
+    subgraph Tools["Tool System"]
+        Registry[Tool Registry]
+        Static[Static Tools<br/>summarize, orion_sandbox]
+        Skills[Skill Tools<br/>.skills/*]
+        MCP[MCP Tools<br/>rube, serena, etc.]
+    end
+
+    subgraph External["External Services"]
+        Claude[Anthropic Claude API]
+        GCS[GCS Memory Bucket]
+        Sandbox[GKE Agent Sandbox]
+        MCPServers[MCP Servers]
+        Langfuse[Langfuse Observability]
+    end
+
+    User --> Bolt
+    Bolt --> Assistant
+    Assistant --> Gather
+    Gather --> Act
+    Act --> Verify
+    Verify -->|retry| Act
+    Verify --> Thread
+
+    Gather -.-> GCS
+    Act <--> Claude
+    Act --> Registry
+    Registry --> Static
+    Registry --> Skills
+    Registry --> MCP
+
+    Static --> Sandbox
+    MCP --> MCPServers
+
+    Agent -.-> Langfuse
+```
 
 ## Prerequisites
 
@@ -9,6 +103,7 @@ AI-powered Slack assistant built with the Anthropic Messages API (streaming).
 - Slack workspace with bot configured
 - Anthropic API key
 - Langfuse account (for observability)
+- GCP project with GKE cluster (for code execution)
 
 ## Quick Start
 
@@ -23,6 +118,39 @@ cp .env.example .env
 # Then start development server
 pnpm dev
 ```
+
+## Environment Variables
+
+### Required
+
+| Variable | Description |
+|----------|-------------|
+| `SLACK_BOT_TOKEN` | Bot token starting with `xoxb-` |
+| `SLACK_SIGNING_SECRET` | Request signature validation |
+| `ANTHROPIC_API_KEY` | Claude API key |
+
+### Optional
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SLACK_APP_TOKEN` | — | Socket mode token (`xapp-`), for local dev |
+| `LANGFUSE_PUBLIC_KEY` | — | Observability public key |
+| `LANGFUSE_SECRET_KEY` | — | Observability secret key |
+| `LANGFUSE_BASEURL` | `https://cloud.langfuse.com` | Langfuse endpoint |
+| `PORT` | `3000` | HTTP server port |
+| `LOG_LEVEL` | `info` | Logging verbosity |
+| `NODE_ENV` | `development` | Environment mode |
+
+### GKE Sandbox (Code Execution)
+
+| Variable | Description |
+|----------|-------------|
+| `GCP_PROJECT_ID` | GCP project ID |
+| `GKE_CLUSTER_NAME` | Cluster name (e.g., `orion-sandbox-cluster`) |
+| `GKE_CLUSTER_REGION` | Cluster region (e.g., `us-central1`) |
+| `GKE_SANDBOX_ROUTER_URL` | Sandbox router URL (local: `http://localhost:8080`) |
+
+See `.env.example` for a complete template.
 
 ## Scripts
 
@@ -42,36 +170,82 @@ pnpm dev
 
 ```
 orion-slack-agent/
-├── .orion/              # Agent definitions (BMAD-inspired)
-│   ├── config.yaml      # Agent configuration
-│   ├── agents/          # Agent personas
-│   ├── workflows/       # Workflow definitions
-│   └── tasks/           # Task definitions
-├── .claude/             # Claude SDK extensions
-│   ├── skills/          # Skill definitions
-│   └── commands/        # Command definitions
-├── orion-context/       # Persistent context storage
-│   ├── conversations/   # Conversation history
-│   ├── user-preferences/# User settings
-│   └── knowledge/       # Knowledge base
-├── src/                 # Source code
-│   ├── index.ts         # Entry point
-│   ├── instrumentation.ts # OpenTelemetry setup
-│   └── config/          # Configuration
-└── docker/              # Docker configuration
+├── src/                      # Application source code
+│   ├── index.ts              # Entry point (instrumentation first!)
+│   ├── instrumentation.ts    # OpenTelemetry + Langfuse setup
+│   ├── agent/                # Agent core loop
+│   │   ├── orion.ts          # Main orchestrator (runOrionAgent)
+│   │   ├── loop.ts           # ACT phase - Claude API + tool loop
+│   │   ├── gather.ts         # GATHER phase - context + memory
+│   │   └── verify.ts         # VERIFY phase - quality checks
+│   ├── slack/                # Slack integration
+│   │   ├── app.ts            # Bolt app setup (HTTP/Socket)
+│   │   ├── assistant.ts      # Native Slack AI Assistant
+│   │   ├── handlers/         # Event handlers
+│   │   ├── prompts/          # System prompts
+│   │   └── utils/            # Slack-specific utilities
+│   ├── tools/                # Tool implementations
+│   │   ├── index.ts          # Registry + executor
+│   │   ├── mcp/              # MCP client + schema conversion
+│   │   ├── orion-sandbox/    # GKE sandbox execution
+│   │   ├── summarize/        # Thread summarization
+│   │   └── memory/           # SDK memory helper
+│   ├── skills/               # Skills system
+│   │   ├── loader.ts         # Discovers .skills/*
+│   │   ├── parser.ts         # SKILL.md parser
+│   │   └── prompt-builder.ts # Injects skill hints
+│   ├── config/               # Configuration
+│   ├── memory/               # Memory path utilities
+│   ├── observability/        # Langfuse + tracing
+│   └── utils/                # Shared utilities
+│
+├── .orion/                   # Agent configuration
+│   ├── config.yaml           # MCP servers, model settings
+│   ├── agents/               # Agent personas (orion.md)
+│   ├── workflows/            # Workflow definitions
+│   └── tasks/                # Task definitions
+│
+├── .skills/                  # Skill definitions
+│   ├── summarize/            # Thread summarization skill
+│   ├── pdf/                  # PDF generation
+│   ├── docx/                 # Word document generation
+│   ├── xlsx/                 # Excel generation
+│   └── ...                   # Additional skills
+│
+├── orion-context/            # Local persistent memory
+│   ├── conversations/        # Thread summaries
+│   ├── user-preferences/     # User settings
+│   └── knowledge/            # Domain knowledge
+│
+├── infra/                    # Infrastructure configs
+│   └── gke-sandbox/          # GKE Agent Sandbox manifests
+│
+├── scripts/                  # Deployment & utility scripts
+├── docker/                   # Docker configuration
+├── docs/                     # Documentation
+└── tests/                    # Test suites
 ```
-
-## Environment Variables
-
-See `.env.example` for all configuration options.
 
 ## Development
 
 This project uses:
-- **TypeScript** for type safety
+
+- **TypeScript 5.7** with strict mode
 - **Vitest** for testing
 - **ESLint + Prettier** for code quality
 - **Langfuse** for observability
+
+### Local Development with GKE Sandbox
+
+To enable code execution locally:
+
+```bash
+# Terminal 1: Start the sandbox tunnel (auto-restarts on disconnect)
+./scripts/dev-sandbox-tunnel.sh
+
+# Terminal 2: Start the dev server
+pnpm dev
+```
 
 ## Docker
 
@@ -95,11 +269,72 @@ pnpm docker:build
 docker build -f docker/Dockerfile -t orion-slack-agent .
 ```
 
+## Deployment
+
+### Cloud Run (Recommended)
+
+#### Prerequisites
+
+1. Install and authenticate [gcloud CLI](https://cloud.google.com/sdk/docs/install)
+2. Set your project: `gcloud config set project YOUR_PROJECT_ID`
+3. Enable required APIs:
+
+```bash
+gcloud services enable run.googleapis.com secretmanager.googleapis.com containerregistry.googleapis.com
+```
+
+#### Create Secrets
+
+```bash
+echo -n "xoxb-your-bot-token" | gcloud secrets create slack-bot-token --data-file=-
+echo -n "your-signing-secret" | gcloud secrets create slack-signing-secret --data-file=-
+echo -n "sk-ant-your-api-key" | gcloud secrets create anthropic-api-key --data-file=-
+echo -n "pk-lf-your-public-key" | gcloud secrets create langfuse-public-key --data-file=-
+echo -n "sk-lf-your-secret-key" | gcloud secrets create langfuse-secret-key --data-file=-
+```
+
+#### Grant Access
+
+```bash
+PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format='value(projectNumber)')
+
+for SECRET in slack-bot-token slack-signing-secret anthropic-api-key langfuse-public-key langfuse-secret-key; do
+  gcloud secrets add-iam-policy-binding $SECRET \
+    --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+    --role="roles/secretmanager.secretAccessor"
+done
+```
+
+#### Deploy
+
+```bash
+./scripts/deploy.sh [staging|production]
+```
+
+### Configure Slack App
+
+After deploying:
+
+1. Go to [Slack App Settings](https://api.slack.com/apps)
+2. Navigate to **Event Subscriptions** → Enable Events
+3. Set Request URL: `https://YOUR_CLOUD_RUN_URL/slack/events`
+4. Subscribe to bot events:
+   - `assistant_thread_started`
+   - `assistant_thread_context_changed`
+   - `message.im`
+   - `message.channels`
+5. Save changes
+
+### Verify Deployment
+
+```bash
+curl https://YOUR_CLOUD_RUN_URL/health
+gcloud run logs read orion-slack-agent --region us-central1
+```
+
 ## CI/CD Pipeline
 
-### Automated Pipeline
-
-The project uses GitHub Actions for CI and Cloud Build for CD:
+### GitHub Actions Workflows
 
 | Trigger | Action |
 |---------|--------|
@@ -107,44 +342,32 @@ The project uses GitHub Actions for CI and Cloud Build for CD:
 | Push to main | Deploy to staging |
 | Manual dispatch | Deploy to staging or production |
 
-### GitHub Actions Workflows
-
-- **CI (`.github/workflows/ci.yml`)**: Runs on every PR
-  - Linting with ESLint
-  - Type checking with TypeScript
-  - Unit tests with Vitest
-
-- **Deploy (`.github/workflows/deploy.yml`)**: Runs on merge to main
-  - Authenticates with GCP using Workload Identity
-  - Triggers Cloud Build
-  - Supports environment tagging
-
 ### Required GitHub Secrets
 
-| Secret | Description | Example |
-|--------|-------------|---------|
-| `GCP_PROJECT_ID` | GCP project ID | `my-project-123` |
-| `GCP_REGION` | Cloud Run region | `us-central1` |
-| `WORKLOAD_IDENTITY_PROVIDER` | Workload Identity Provider | `projects/123/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
-| `SERVICE_ACCOUNT` | Deploy service account | `github-actions-deploy@my-project.iam.gserviceaccount.com` |
+| Secret | Description |
+|--------|-------------|
+| `GCP_PROJECT_ID` | GCP project ID |
+| `GCP_REGION` | Cloud Run region |
+| `WORKLOAD_IDENTITY_PROVIDER` | Workload Identity Provider path |
+| `SERVICE_ACCOUNT` | Deploy service account email |
 
-### GCP Workload Identity Federation Setup
+### GCP Workload Identity Setup
 
-Workload Identity Federation allows GitHub Actions to authenticate with GCP without storing service account keys.
+<details>
+<summary>Click to expand setup instructions</summary>
 
 ```bash
-# Set your project variables
 export PROJECT_ID=your-project-id
 export PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
 export GITHUB_ORG=your-github-org
 export REPO_NAME=orion-slack-agent
 
-# 1. Create Workload Identity Pool
+# Create Workload Identity Pool
 gcloud iam workload-identity-pools create "github-pool" \
   --location="global" \
   --display-name="GitHub Actions Pool"
 
-# 2. Create Workload Identity Provider
+# Create Provider
 gcloud iam workload-identity-pools providers create-oidc "github-provider" \
   --location="global" \
   --workload-identity-pool="github-pool" \
@@ -152,139 +375,37 @@ gcloud iam workload-identity-pools providers create-oidc "github-provider" \
   --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
   --issuer-uri="https://token.actions.githubusercontent.com"
 
-# 3. Create Service Account for deployments
+# Create Service Account
 gcloud iam service-accounts create "github-actions-deploy" \
   --display-name="GitHub Actions Deploy"
 
-# 4. Grant required permissions
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:github-actions-deploy@$PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/run.admin"
+# Grant permissions
+for ROLE in roles/run.admin roles/cloudbuild.builds.editor roles/storage.admin roles/iam.serviceAccountUser; do
+  gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:github-actions-deploy@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="$ROLE"
+done
 
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:github-actions-deploy@$PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/cloudbuild.builds.editor"
-
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:github-actions-deploy@$PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/storage.admin"
-
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:github-actions-deploy@$PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/iam.serviceAccountUser"
-
-# 5. Allow GitHub to impersonate the service account
+# Allow GitHub to impersonate
 gcloud iam service-accounts add-iam-policy-binding \
   "github-actions-deploy@$PROJECT_ID.iam.gserviceaccount.com" \
   --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/attribute.repository/$GITHUB_ORG/$REPO_NAME" \
   --role="roles/iam.workloadIdentityUser"
 
-# 6. Get the Workload Identity Provider resource name (for GitHub secret)
-echo "WORKLOAD_IDENTITY_PROVIDER:"
-echo "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
-
-echo "SERVICE_ACCOUNT:"
-echo "github-actions-deploy@$PROJECT_ID.iam.gserviceaccount.com"
+# Get values for GitHub secrets
+echo "WORKLOAD_IDENTITY_PROVIDER: projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
+echo "SERVICE_ACCOUNT: github-actions-deploy@$PROJECT_ID.iam.gserviceaccount.com"
 ```
 
-### Environment Tagging
+</details>
 
-- **Automatic (merge to main)**: Deploys with `staging` tag
-- **Manual dispatch**: Choose `staging` or `production`
+## Contributing
 
-Access deployments:
-- Staging: `https://staging---orion-slack-agent-xxx.run.app`
-- Production: `https://production---orion-slack-agent-xxx.run.app`
-
-### Manual Deployment
-
-For manual deployment without CI/CD:
-
-```bash
-./scripts/deploy.sh [staging|production]
-```
-
----
-
-## Cloud Run Deployment
-
-### Prerequisites
-
-1. Install and authenticate [gcloud CLI](https://cloud.google.com/sdk/docs/install)
-2. Set your project: `gcloud config set project YOUR_PROJECT_ID`
-3. Enable required APIs:
-   ```bash
-   gcloud services enable run.googleapis.com
-   gcloud services enable secretmanager.googleapis.com
-   gcloud services enable containerregistry.googleapis.com
-   ```
-
-### Create Secrets in GCP Secret Manager
-
-```bash
-# Create each secret (you'll be prompted to enter the value)
-echo -n "xoxb-your-bot-token" | gcloud secrets create slack-bot-token --data-file=-
-echo -n "your-signing-secret" | gcloud secrets create slack-signing-secret --data-file=-
-echo -n "sk-ant-your-api-key" | gcloud secrets create anthropic-api-key --data-file=-
-echo -n "claude-sonnet-4-20250514" | gcloud secrets create anthropic-model --data-file=-
-echo -n "orion-memories" | gcloud secrets create gcs-memories-bucket --data-file=-
-echo -n "pk-lf-your-public-key" | gcloud secrets create langfuse-public-key --data-file=-
-echo -n "sk-lf-your-secret-key" | gcloud secrets create langfuse-secret-key --data-file=-
-```
-
-### Grant Cloud Run Access to Secrets
-
-```bash
-# Get your project number
-PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format='value(projectNumber)')
-
-# Grant access to each secret
-for SECRET in slack-bot-token slack-signing-secret anthropic-api-key anthropic-model gcs-memories-bucket langfuse-public-key langfuse-secret-key; do
-  gcloud secrets add-iam-policy-binding $SECRET \
-    --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-    --role="roles/secretmanager.secretAccessor"
-done
-```
-
-### Deploy
-
-```bash
-# Set your project ID
-export GCP_PROJECT_ID=your-project-id
-
-# Deploy (optional: specify tag like 'staging' or 'production')
-./scripts/deploy.sh
-
-# Or with a specific tag
-./scripts/deploy.sh production
-```
-
-### Configure Slack App
-
-After deploying to Cloud Run:
-
-1. Go to [Slack App Settings](https://api.slack.com/apps)
-2. Navigate to **Event Subscriptions**
-3. Enable Events
-4. Set Request URL: `https://YOUR_CLOUD_RUN_URL/slack/events`
-5. Subscribe to bot events:
-   - `assistant_thread_started`
-   - `assistant_thread_context_changed`
-   - `message.im`
-   - `message.channels`
-6. Save changes
-
-### Verify Deployment
-
-```bash
-# Check health endpoint
-curl https://YOUR_CLOUD_RUN_URL/health
-
-# View logs
-gcloud run logs read orion-slack-agent --region us-central1
-```
+1. Create a feature branch from `main`
+2. Make changes following existing code patterns
+3. Run `pnpm lint && pnpm typecheck && pnpm test`
+4. Submit a PR with clear description
 
 ## License
 
 Private - All rights reserved
-

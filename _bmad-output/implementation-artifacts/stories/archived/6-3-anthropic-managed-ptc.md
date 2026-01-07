@@ -1,6 +1,15 @@
 # Story 6.3: Anthropic Managed Programmatic Tool Calling (PTC)
 
-Status: done
+Status: archived
+
+---
+**Archived:** 2026-01-07
+**Reason:** Scope absorbed into Stories 6.7 (PTC Core) and 6.8 (PTC Observability) with expanded context for Skills API integration.
+**See:** `sprint-change-proposal-2026-01-07-skills-migration-to-anthropic.md`
+
+---
+
+Original Status: done
 
 ## TL;DR
 

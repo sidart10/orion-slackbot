@@ -58,6 +58,8 @@ import {
 } from '../../tools/summarize/index.js';
 import { getSkillMetadata, buildSkillsHint } from '../../skills/index.js';
 import { uploadImagesFromResponse } from '../utils/image-upload.js';
+import { createSlackFileUploader } from '../utils/file-uploader.js';
+import { createFilesApiClient } from '../../files/index.js';
 import { clearMemoryToolContext } from '../../tools/memory/index.js';
 import { loadRelevantMemories, formatMemoriesForContext } from '../../tools/memory/loader.js';
 
@@ -718,6 +720,40 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
               error: imageError instanceof Error ? imageError.message : String(imageError),
               traceId: trace.id,
             });
+          }
+
+          // Story 6.6: Upload generated files from code execution (PTC Skills)
+          const generatedFileIds = agentResult?.generatedFileIds ?? [];
+          if (generatedFileIds.length > 0) {
+            // Fire-and-forget upload — don't block the response
+            const filesClient = createFilesApiClient();
+            const uploader = createSlackFileUploader(filesClient, client);
+            const effectiveThreadTs = threadTs ?? message.ts;
+
+            uploader
+              .uploadFiles(generatedFileIds, channelId, effectiveThreadTs, {
+                deleteAfterUpload: true,
+                traceId: trace.id,
+              })
+              .then((result) => {
+                logger.info({
+                  event: 'files_uploaded',
+                  channelId,
+                  threadTs: effectiveThreadTs,
+                  total: result.results.length,
+                  successful: result.successCount,
+                  failed: result.failureCount,
+                  totalBytes: result.totalBytes,
+                  traceId: trace.id,
+                });
+              })
+              .catch((fileError) => {
+                logger.warn({
+                  event: 'files_upload_failed',
+                  error: fileError instanceof Error ? fileError.message : String(fileError),
+                  traceId: trace.id,
+                });
+              });
           }
 
           // Send feedback buttons as follow-up message (Story 1.8)

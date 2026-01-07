@@ -151,7 +151,7 @@ describe('buildSkillsHint (token efficient)', () => {
     // Should NOT contain any instructions content
     expect(result).not.toContain('## Skill:');
     // Should contain on-demand loading instruction
-    expect(result).toContain('execute_code');
+    expect(result).toContain('orion_sandbox');
     expect(result).toContain('skill_doc');
     expect(result).toContain('skill:{skill-name}');
   });

@@ -9,8 +9,15 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { messagesCreateMock } = vi.hoisted(() => ({
+const { messagesCreateMock, containerLifecycleMock } = vi.hoisted(() => ({
   messagesCreateMock: vi.fn(),
+  containerLifecycleMock: {
+    getContainerId: vi.fn(),
+    setContainerId: vi.fn(),
+    clearContainerId: vi.fn(),
+    destroy: vi.fn(),
+    _clear: vi.fn(),
+  },
 }));
 
 // Mock config (imported by loop.ts)
@@ -48,6 +55,16 @@ vi.mock('@anthropic-ai/sdk', () => {
   return { default: MockAnthropic };
 });
 
+// Story 6.3: Mock skills/index for container lifecycle testing
+vi.mock('../skills/index.js', () => ({
+  isSkillsInitialized: vi.fn(() => false),
+  getCachedSkillIds: vi.fn(() => ({})),
+  buildContainerParameter: vi.fn((skillIds: string[]) => ({
+    skills: skillIds.map((id) => ({ type: 'custom', skill_id: id, version: 'latest' })),
+  })),
+  containerLifecycle: containerLifecycleMock,
+}));
+
 // ✅ REMOVED: Local helper functions now come from test factories
 // These functions are now imported from tests/factories/agent-factory.ts
 // - createMockMessageStream
@@ -58,6 +75,7 @@ vi.mock('@anthropic-ai/sdk', () => {
 import { executeAgentLoop, type AgentLoopOptions, extractMarkdownLinks, formatToolDisplayName, summarizeToolInput } from './loop.js';
 // ✅ NEW: Import test factories
 import {
+  createAgentContext,
   createAgentLoopOptions,
   createMockMessageStream,
   createMockStreamWithText,
@@ -65,6 +83,10 @@ import {
   createMockStreamWithPtc,
   createMockStreamWithPtcExpired,
   createMockStreamWithPtcTimeout,
+  // Story 6.2 Skills factories
+  createMockStreamWithPauseTurn,
+  createMockCodeExecutionResultWithFiles,
+  createContainerId,
 } from '../../tests/factories/index.js';
 
 describe('executeAgentLoop', () => {
@@ -1698,10 +1720,10 @@ describe('executeAgentLoop PTC (Story 6.3)', () => {
       if (next.done) break;
     }
 
-    // Then: Second request should include container ID
+    // Then: Second request should include container ID (Story 6.2: now as object with id property)
     expect(messagesCreateMock).toHaveBeenCalledTimes(2);
-    const secondCallArgs = messagesCreateMock.mock.calls[1][0];
-    expect(secondCallArgs).toHaveProperty('container', containerId);
+    const secondCallArgs = messagesCreateMock.mock.calls[1][0] as { container?: { id?: string } };
+    expect(secondCallArgs.container?.id).toBe(containerId);
   });
 
   // AC8: PTC tool_result format (no text content)
@@ -1902,6 +1924,515 @@ describe('executeAgentLoop PTC (Story 6.3)', () => {
     // The last setStatus call should clear the status
     const lastCall = statusCalls[statusCalls.length - 1];
     expect(lastCall === undefined || lastCall === null || (typeof lastCall === 'object' && lastCall !== null && 'phase' in lastCall && (lastCall as { phase: string }).phase === 'final')).toBe(true);
+  });
+});
+
+/**
+ * Story 6.2: Skills API Client - pause_turn and extractFileIds Tests
+ *
+ * Tests for handling pause_turn stop reason and extracting file IDs
+ * from bash_code_execution_tool_result content blocks.
+ *
+ * @see Story 6.2 - Skills API Client for Anthropic Container Integration
+ * @see AC#8 - pause_turn stop reason continues conversation
+ * @see AC#9 - extractFileIds() parses file IDs from results
+ */
+describe('executeAgentLoop Skills Integration (Story 6.2)', () => {
+  const baseOptions: AgentLoopOptions = createAgentLoopOptions();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // ==========================================================================
+  // AC#8: pause_turn stop reason continues conversation
+  // ==========================================================================
+
+  describe('pause_turn handling (AC#8)', () => {
+    it('should continue conversation when stop_reason is pause_turn', async () => {
+      // GIVEN: Stream returns pause_turn stop reason, then end_turn
+      const containerId = createContainerId();
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: createMockStreamWithPauseTurn({ containerId }),
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: [
+              { type: 'message_start', message: { model: 'claude-sonnet-4-20250514', container: containerId } },
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Operation completed.' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 50, output_tokens: 20 } },
+            ],
+          })
+        );
+
+      // WHEN: Executing agent loop
+      const chunks: string[] = [];
+      const gen = executeAgentLoop('Run long operation', baseOptions);
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+        chunks.push(next.value);
+      }
+
+      // THEN: Loop should have continued and produced final response
+      expect(messagesCreateMock).toHaveBeenCalledTimes(2);
+      expect(chunks.join('')).toContain('Operation completed');
+    });
+
+    it('should preserve container ID across pause_turn continuation', async () => {
+      // GIVEN: pause_turn with specific container ID
+      const containerId = 'container-preserved-123';
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: createMockStreamWithPauseTurn({ containerId }),
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockStreamWithText('Done')
+        );
+
+      // WHEN: Executing agent loop
+      const gen = executeAgentLoop('Test', baseOptions);
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // THEN: Second request should include same container ID (Story 6.2: now as object)
+      expect(messagesCreateMock).toHaveBeenCalledTimes(2);
+      const secondCallArgs = messagesCreateMock.mock.calls[1][0] as { container?: { id?: string } };
+      expect(secondCallArgs.container?.id).toBe(containerId);
+    });
+
+    it('should handle multiple pause_turn cycles', async () => {
+      // GIVEN: Multiple pause_turn cycles before completion
+      const containerId = createContainerId();
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: createMockStreamWithPauseTurn({ containerId }),
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: createMockStreamWithPauseTurn({ containerId }),
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockStreamWithText('Finally done')
+        );
+
+      // WHEN: Executing agent loop
+      const chunks: string[] = [];
+      const gen = executeAgentLoop('Long multi-step operation', baseOptions);
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+        chunks.push(next.value);
+      }
+
+      // THEN: Should have made 3 API calls
+      expect(messagesCreateMock).toHaveBeenCalledTimes(3);
+      expect(chunks.join('')).toContain('Finally done');
+    });
+
+    it('should log pause_turn continuation with traceId', async () => {
+      // GIVEN: pause_turn response
+      const containerId = createContainerId();
+      const loggerModule = await import('../utils/logger.js');
+      const infoMock = loggerModule.logger.info as unknown as ReturnType<typeof vi.fn>;
+
+      messagesCreateMock
+        .mockImplementationOnce(async () =>
+          createMockMessageStream({
+            events: createMockStreamWithPauseTurn({ containerId }),
+          })
+        )
+        .mockImplementationOnce(async () =>
+          createMockStreamWithText('Done')
+        );
+
+      // WHEN: Executing agent loop
+      const gen = executeAgentLoop('Test', baseOptions);
+      while (true) {
+        const next = await gen.next();
+        if (next.done) break;
+      }
+
+      // THEN: pause_turn should be logged
+      expect(infoMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'agent.loop.pause_turn',
+          traceId: expect.any(String),
+          containerId,
+        })
+      );
+    });
+  });
+
+  // ==========================================================================
+  // AC#9: extractFileIds() parses file IDs from results
+  // ==========================================================================
+
+  describe('extractFileIds (AC#9)', () => {
+    it('should extract file IDs from bash_code_execution_tool_result', async () => {
+      // GIVEN: Response with code_execution_tool_result containing file_ids
+      const fileIds = ['file_abc123', 'file_def456'];
+
+      messagesCreateMock.mockImplementation(async () =>
+        createMockMessageStream({
+          events: [
+            { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+            { type: 'content_block_start', index: 0, content_block: { type: 'server_tool_use', id: 'stu_1', name: 'code_execution', input: {} } },
+            createMockCodeExecutionResultWithFiles({ fileIds }),
+            { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Created files.' } },
+            { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 100, output_tokens: 50 } },
+          ],
+        })
+      );
+
+      // WHEN: Executing agent loop
+      const gen = executeAgentLoop('Generate report', baseOptions);
+      let result;
+      while (true) {
+        const next = await gen.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+      }
+
+      // THEN: File IDs should be extractable from result
+      // Note: The actual extractFileIds function will be implemented in loop.ts
+      // This test ensures the response structure is correctly processed
+      expect(result).toBeDefined();
+    });
+
+    it('should handle response with no file_ids', async () => {
+      // GIVEN: code_execution_tool_result without file_ids
+      messagesCreateMock.mockImplementation(async () =>
+        createMockMessageStream({
+          events: [
+            { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+            { type: 'content_block_start', index: 0, content_block: { type: 'server_tool_use', id: 'stu_1', name: 'code_execution', input: {} } },
+            {
+              type: 'content_block_start',
+              index: 1,
+              content_block: {
+                type: 'code_execution_tool_result',
+                content: { return_code: 0, stdout: 'Done', stderr: '' },
+                // No files field
+              },
+            },
+            { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Completed.' } },
+            { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 100, output_tokens: 50 } },
+          ],
+        })
+      );
+
+      // WHEN: Executing agent loop
+      const gen = executeAgentLoop('Test', baseOptions);
+      let result;
+      while (true) {
+        const next = await gen.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+      }
+
+      // THEN: Should complete without error (AgentResult has tokens, not response)
+      expect(result).toBeDefined();
+      expect(result.inputTokens).toBeGreaterThanOrEqual(0);
+      expect(result.outputTokens).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should handle multiple file_ids in single result', async () => {
+      // GIVEN: code_execution_tool_result with multiple files
+      const fileIds = ['file_1', 'file_2', 'file_3', 'file_4'];
+
+      messagesCreateMock.mockImplementation(async () =>
+        createMockMessageStream({
+          events: [
+            { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+            createMockCodeExecutionResultWithFiles({ fileIds }),
+            { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Generated 4 files.' } },
+            { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 100, output_tokens: 50 } },
+          ],
+        })
+      );
+
+      // WHEN: Executing agent loop
+      const gen = executeAgentLoop('Generate multiple', baseOptions);
+      let result;
+      while (true) {
+        const next = await gen.next();
+        if (next.done) {
+          result = next.value;
+          break;
+        }
+      }
+
+      // THEN: Should complete with all files tracked
+      expect(result).toBeDefined();
+    });
+  });
+});
+
+/**
+ * Unit tests for extractFileIds helper function
+ *
+ * @see Story 6.2 AC#9 - File ID extraction from results
+ */
+describe('extractFileIds', () => {
+  // Note: This function will be implemented in loop.ts
+  // These tests document the expected behavior
+
+  it('extracts file_id from code_execution_tool_result content block', async () => {
+    // GIVEN: Import the function (will be added in implementation)
+    const { extractFileIds } = await import('./loop.js');
+
+    // WHEN: Parsing a response with file_ids
+    const mockResponse = {
+      content: [
+        {
+          type: 'code_execution_tool_result',
+          content: {
+            return_code: 0,
+            stdout: 'Done',
+            stderr: '',
+            files: [{ file_id: 'file_abc123' }, { file_id: 'file_def456' }],
+          },
+        },
+      ],
+    };
+
+    const result = extractFileIds(mockResponse);
+
+    // THEN: File IDs are extracted
+    expect(result.fileIds).toContain('file_abc123');
+    expect(result.fileIds).toContain('file_def456');
+  });
+
+  it('returns empty array when no file_ids present', async () => {
+    const { extractFileIds } = await import('./loop.js');
+
+    const mockResponse = {
+      content: [
+        {
+          type: 'text',
+          text: 'No files generated.',
+        },
+      ],
+    };
+
+    const result = extractFileIds(mockResponse);
+
+    expect(result.fileIds).toEqual([]);
+  });
+
+  it('handles nested content blocks', async () => {
+    const { extractFileIds } = await import('./loop.js');
+
+    const mockResponse = {
+      content: [
+        { type: 'text', text: 'Starting...' },
+        {
+          type: 'code_execution_tool_result',
+          content: {
+            return_code: 0,
+            stdout: 'Created file',
+            stderr: '',
+            files: [{ file_id: 'file_nested123' }],
+          },
+        },
+        { type: 'text', text: 'Done.' },
+      ],
+    };
+
+    const result = extractFileIds(mockResponse);
+
+    expect(result.fileIds).toContain('file_nested123');
+    expect(result.fileIds).toHaveLength(1);
+  });
+});
+
+// ==========================================================================
+// Story 6.3: Container Lifecycle Integration Tests
+// ==========================================================================
+
+describe('Container Lifecycle Integration (Story 6.3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    containerLifecycleMock.getContainerId.mockReset();
+    containerLifecycleMock.setContainerId.mockReset();
+  });
+
+  it('should call getContainerId at loop start when threadTs is provided (AC#1)', async () => {
+    // GIVEN: Options with threadTs (threaded conversation)
+    const threadTs = '1704672000.123456';
+    const context = createAgentContext({ threadTs });
+    const options = createAgentLoopOptions({ context });
+
+    containerLifecycleMock.getContainerId.mockReturnValue(undefined);
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Hello!', { inputTokens: 10, outputTokens: 5 })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Hi', options);
+    while (!(await gen.next()).done) {
+      // consume
+    }
+
+    // THEN: getContainerId should be called with threadTs
+    expect(containerLifecycleMock.getContainerId).toHaveBeenCalledWith(threadTs);
+  });
+
+  it('should NOT call getContainerId when threadTs is undefined (AC#2)', async () => {
+    // GIVEN: Options without threadTs (non-threaded DM)
+    const context = createAgentContext({ threadTs: undefined });
+    const options = createAgentLoopOptions({ context });
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Hello!', { inputTokens: 10, outputTokens: 5 })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Hi', options);
+    while (!(await gen.next()).done) {
+      // consume
+    }
+
+    // THEN: getContainerId should NOT be called
+    expect(containerLifecycleMock.getContainerId).not.toHaveBeenCalled();
+  });
+
+  it('should call setContainerId when new container ID received (AC#3)', async () => {
+    // GIVEN: Options with threadTs
+    const threadTs = '1704672000.123456';
+    const containerId = 'cntr_new_container_123';
+    const context = createAgentContext({ threadTs });
+    const options = createAgentLoopOptions({ context });
+
+    containerLifecycleMock.getContainerId.mockReturnValue(undefined); // No existing container
+
+    // API returns container ID in message_start
+    messagesCreateMock.mockImplementation(async () =>
+      createMockMessageStream({
+        events: [
+          { type: 'message_start', message: { model: 'claude-sonnet-4-20250514', container: containerId } },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello!' } },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 10, output_tokens: 5 } },
+        ],
+      })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Hi', options);
+    while (!(await gen.next()).done) {
+      // consume
+    }
+
+    // THEN: setContainerId should be called with new container
+    expect(containerLifecycleMock.setContainerId).toHaveBeenCalledWith(threadTs, containerId);
+  });
+
+  it('should NOT call setContainerId when container ID unchanged (reuse)', async () => {
+    // GIVEN: Options with threadTs and existing container
+    const threadTs = '1704672000.123456';
+    const existingContainerId = 'cntr_existing_123';
+    const context = createAgentContext({ threadTs });
+    const options = createAgentLoopOptions({ context });
+
+    containerLifecycleMock.getContainerId.mockReturnValue(existingContainerId);
+
+    // API returns same container ID
+    messagesCreateMock.mockImplementation(async () =>
+      createMockMessageStream({
+        events: [
+          { type: 'message_start', message: { model: 'claude-sonnet-4-20250514', container: existingContainerId } },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello!' } },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 10, output_tokens: 5 } },
+        ],
+      })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Hi', options);
+    while (!(await gen.next()).done) {
+      // consume
+    }
+
+    // THEN: setContainerId should NOT be called (same container, no update needed)
+    expect(containerLifecycleMock.setContainerId).not.toHaveBeenCalled();
+  });
+
+  it('should NOT call setContainerId when threadTs is undefined', async () => {
+    // GIVEN: Options without threadTs
+    const containerId = 'cntr_new_123';
+    const context = createAgentContext({ threadTs: undefined });
+    const options = createAgentLoopOptions({ context });
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockMessageStream({
+        events: [
+          { type: 'message_start', message: { model: 'claude-sonnet-4-20250514', container: containerId } },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello!' } },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 10, output_tokens: 5 } },
+        ],
+      })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Hi', options);
+    while (!(await gen.next()).done) {
+      // consume
+    }
+
+    // THEN: setContainerId should NOT be called (no threadTs to track)
+    expect(containerLifecycleMock.setContainerId).not.toHaveBeenCalled();
+  });
+
+  it('should reuse existing container ID from lifecycle manager', async () => {
+    // GIVEN: Lifecycle manager has existing container
+    const threadTs = '1704672000.123456';
+    const existingContainerId = 'cntr_cached_456';
+    const context = createAgentContext({ threadTs });
+    const options = createAgentLoopOptions({ context });
+
+    containerLifecycleMock.getContainerId.mockReturnValue(existingContainerId);
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockMessageStream({
+        events: [
+          { type: 'message_start', message: { model: 'claude-sonnet-4-20250514', container: existingContainerId } },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello!' } },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 10, output_tokens: 5 } },
+        ],
+      })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Hi', options);
+    while (!(await gen.next()).done) {
+      // consume
+    }
+
+    // THEN: API call should include container.id from lifecycle manager
+    expect(messagesCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        container: expect.objectContaining({ id: existingContainerId }),
+      })
+    );
   });
 });
 

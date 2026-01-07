@@ -1,9 +1,9 @@
 /**
- * execute_code Tool
+ * orion_sandbox Tool
  *
  * Executes Python code in a secure GKE sandbox with network access.
  *
- * @see Story 6.2 - execute_code Tool (GKE Agent Sandbox)
+ * @see Story 6.2 - orion_sandbox Tool (GKE Agent Sandbox)
  * @see project-context.md lines 69-92 for handler pattern
  */
 
@@ -18,7 +18,7 @@ import { getLangfuse } from '../../observability/langfuse.js';
 import { logger } from '../../utils/logger.js';
 import { config } from '../../config/environment.js';
 import { toolRegistry } from '../registry.js';
-import type { ExecuteCodeInput, ExecuteCodeOutput } from './types.js';
+import type { OrionSandboxInput, OrionSandboxOutput } from './types.js';
 import type { ToolResult } from '../../utils/tool-result.js';
 
 // Cache the MCP bootstrap script
@@ -71,17 +71,17 @@ async function getMcpBootstrap(): Promise<string> {
 let currentContext: { traceId: string } = { traceId: 'unknown' };
 
 /**
- * Set the execution context for the execute_code tool.
+ * Set the execution context for the orion_sandbox tool.
  * Must be called before tool execution to ensure proper traceId.
  */
-export function setExecuteCodeContext(ctx: { traceId: string }): void {
+export function setOrionSandboxContext(ctx: { traceId: string }): void {
   currentContext = ctx;
 }
 
 /**
  * Clear the execution context after tool execution.
  */
-export function clearExecuteCodeContext(): void {
+export function clearOrionSandboxContext(): void {
   currentContext = { traceId: 'unknown' };
 }
 
@@ -96,8 +96,8 @@ export function __resetCacheForTests(): void {
 /**
  * Tool definition for Claude.
  */
-export const executeCodeToolDefinition: Anthropic.Tool = {
-  name: 'execute_code',
+export const orionSandboxToolDefinition: Anthropic.Tool = {
+  name: 'orion_sandbox',
   description: `Execute Python code in a secure sandbox with network access.
 
 Use this tool when you need to:
@@ -143,16 +143,16 @@ To load a skill's full SKILL.md on-demand, use: skill_doc: "skill:skill_name"`,
 /**
  * Execute code handler — MUST return ToolResult, NEVER throw.
  *
- * @see Story 6.2 - execute_code Tool
+ * @see Story 6.2 - orion_sandbox Tool
  * @see project-context.md lines 69-92 for handler pattern
  */
-export async function executeCodeHandler(
-  input: ExecuteCodeInput,
+export async function orionSandboxHandler(
+  input: OrionSandboxInput,
   context: { traceId: string }
-): Promise<ToolResult<ExecuteCodeOutput>> {
+): Promise<ToolResult<OrionSandboxOutput>> {
   const { traceId } = context;
   const langfuse = getLangfuse();
-  const span = langfuse?.span({ traceId, name: 'tool.execute_code' });
+  const span = langfuse?.span({ traceId, name: 'tool.orion_sandbox' });
   const startTime = Date.now();
 
   try {
@@ -292,7 +292,7 @@ export async function executeCodeHandler(
     const codeHash = createHash('sha256').update(codeToExecute).digest('hex').slice(0, 16);
 
     logger.info({
-      event: 'execute_code.start',
+      event: 'orion_sandbox.start',
       traceId,
       executionType: input.skill_script
         ? 'skill_script'
@@ -332,7 +332,7 @@ export async function executeCodeHandler(
     });
 
     logger.info({
-      event: 'execute_code.complete',
+      event: 'orion_sandbox.complete',
       traceId,
       success: result.return_code === 0,
       durationMs: duration,
@@ -355,7 +355,7 @@ export async function executeCodeHandler(
     span?.end({ metadata: { error: errorMsg, durationMs: duration, isTimeout } });
 
     logger.error({
-      event: 'execute_code.error',
+      event: 'orion_sandbox.error',
       traceId,
       error: errorMsg,
       isTimeout,
@@ -373,20 +373,20 @@ export async function executeCodeHandler(
 }
 
 /**
- * Register execute_code tool with registry.
+ * Register orion_sandbox tool with registry.
  *
  * Call this during agent initialization.
- * Use setExecuteCodeContext() before executing to inject proper traceId.
+ * Use setOrionSandboxContext() before executing to inject proper traceId.
  */
-export function registerExecuteCodeTool(): void {
+export function registerOrionSandboxTool(): void {
   toolRegistry.registerStaticTool(
-    'execute_code',
+    'orion_sandbox',
     async (input: unknown) => {
-      // Use currentContext which should be set by caller via setExecuteCodeContext()
-      const result = await executeCodeHandler(input as ExecuteCodeInput, currentContext);
+      // Use currentContext which should be set by caller via setOrionSandboxContext()
+      const result = await orionSandboxHandler(input as OrionSandboxInput, currentContext);
       return result;
     },
-    executeCodeToolDefinition
+    orionSandboxToolDefinition
   );
 }
 

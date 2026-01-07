@@ -84,7 +84,7 @@ export function buildSkillsHint(skills: SkillMetadata[]): string {
 ${hints.join('\n')}
 
 When a task matches a skill, load its full instructions on-demand:
-  execute_code({ skill_doc: "skill:{skill-name}" })
+  orion_sandbox({ skill_doc: "skill:{skill-name}" })
 `;
 }
 

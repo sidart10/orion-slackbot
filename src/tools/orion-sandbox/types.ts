@@ -1,12 +1,12 @@
 /**
- * Types for execute_code tool.
+ * Types for orion_sandbox tool.
  *
- * @see Story 6.2 - execute_code Tool (GKE Agent Sandbox)
+ * @see Story 6.2 - orion_sandbox Tool (GKE Agent Sandbox)
  */
 
 import type { ToolResult } from '../../utils/tool-result.js';
 
-export interface ExecuteCodeInput {
+export interface OrionSandboxInput {
   code?: string;
   skill_script?: string; // Format: "skill:skill_name/script_name.py" or "skill_name/script_name.py"
   skill_doc?: string; // Format: "skill:skill_name" or "skill_name" (loads SKILL.md and prints it)
@@ -14,14 +14,14 @@ export interface ExecuteCodeInput {
   timeout?: number;
 }
 
-export interface ExecuteCodeOutput {
+export interface OrionSandboxOutput {
   stdout: string;
   stderr: string;
   return_code: number;
   execution_time_ms: number;
 }
 
-export type ExecuteCodeResult = ToolResult<ExecuteCodeOutput>;
+export type OrionSandboxResult = ToolResult<OrionSandboxOutput>;
 
 export interface SandboxOptions {
   code: string;

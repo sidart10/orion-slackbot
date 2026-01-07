@@ -341,21 +341,23 @@ Enable Orion to remember context across sessions.
 | Story | Title | Status |
 |-------|-------|--------|
 | 5.1 | Memory Tool Handler (SDK Helper + GCS Backend) | done |
-| 5.2 | Memory Scopes & Path Builders | review |
+| 5.2 | Memory Scopes & Path Builders | done |
 | 5.3 | Memory Auto-Check at Conversation Start | done |
 
 ---
 
 ### Epic 6: Skills & Extensions Framework
-Enable developers to add new capabilities via file-based definitions and code execution.
+Enable developers to add new capabilities via Anthropic Skills API and file-based definitions, with code execution for programmatic tool orchestration.
 
-**User Outcome:** New skills can be added by dropping SKILL.md files—no code changes required. Code execution enables programmatic tool orchestration.
+**User Outcome:** New skills can be added by dropping SKILL.md files and uploading to Anthropic—no code changes required. Code execution enables programmatic tool calling (PTC) with MCP tool access.
 
 **Scope:**
-- Agent Skills loader (parse SKILL.md from `.skills/` directory)
-- Skills injection into system prompt via progressive disclosure
-- Code execution via GKE Agent Sandbox (FR20-22)
-- Skill script execution integration with agent loop
+- Agent Skills loader (parse SKILL.md metadata from `.skills/` directory)
+- Anthropic Skills API integration (upload, reference by skill_id)
+- Anthropic Files API integration (download generated files)
+- Programmatic Tool Calling (PTC) with `allowed_callers` for MCP
+- GKE Agent Sandbox fallback for edge-case skills (webapp-testing, web-artifacts-builder)
+- Skill migration from filesystem to Anthropic container
 
 **FRs:** FR24, FR20, FR21, FR22
 **NFRs:** None specific
@@ -363,34 +365,49 @@ Enable developers to add new capabilities via file-based definitions and code ex
 **Note:** Commands framework (FR25) deferred to post-MVP. Skills + execute_code provide equivalent extensibility for MVP.
 
 **Course Correction (2026-01-02):**
-Story 6-1 implemented incorrectly — used full content injection (~15k tokens) instead of progressive disclosure (~1.2k tokens). Refactor required to follow Agent Skills open standard ([agentskills.io](https://agentskills.io)). Story 6-2 enhanced with skill filesystem sync to GKE sandbox.  
+Story 6-1 implemented incorrectly — used full content injection (~15k tokens) instead of progressive disclosure (~1.2k tokens). Refactor required to follow Agent Skills open standard ([agentskills.io](https://agentskills.io)). Story 6-2 enhanced with skill filesystem sync to GKE sandbox.
 See: `sprint-change-proposal-2026-01-02-skills-architecture-fix.md`
+
+**Course Correction (2026-01-07):**
+Anthropic's code execution container supports Skills + PTC + MCP via `allowed_callers`. Migrating skills to Anthropic eliminates ~90% of GKE complexity. Stories 6.2-6.3 archived; replaced by 6.2-6.13.
+See: `sprint-change-proposal-2026-01-07-skills-migration-to-anthropic.md`
 
 **Stories:**
 | Story | Title | Status |
 |-------|-------|--------|
-| 6.1 | Agent Skills Loader | done |
-| 6.2 | Execute Code Tool (GKE Sandbox) | review |
-| 6.3 | Anthropic Managed PTC Integration | pending |
+| 6.1 | Agent Skills Loader (Progressive Disclosure) | done |
+| 6.2 | Skills API Client | pending |
+| 6.3 | Skills Container Config | pending |
+| 6.4 | Skill Registry Service | pending |
+| 6.5 | Files API Client | pending |
+| 6.6 | Files API Slack Integration | pending |
+| 6.7 | Programmatic Tool Calling (PTC) Core | pending |
+| 6.8 | PTC Observability | pending |
+| 6.9 | Upload Custom Skills Script | pending |
+| 6.10 | Skill Migration & Testing | pending |
+| 6.11 | Prompt Builder Cleanup | pending |
+| 6.12 | GKE Sandbox Scope Reduction | pending |
+| 6.13 | Documentation Update | pending |
 
-**Sprint Change (2026-01-06) — Story 6.3: Anthropic Managed PTC:**
-Programmatic Tool Calling enables Claude to orchestrate tools through code, reducing token usage by ~37%.
+**Archived Stories:**
+- `archived/6-2-execute-code-gke-sandbox.md` — GKE sandbox implemented, now fallback only
+- `archived/6-3-anthropic-managed-ptc.md` — Absorbed into 6.7/6.8 with expanded scope
 
-Tasks:
-- Task 0: Validation spike (MCP + `allowed_callers`)
-- Task 1-3: Beta header, code_execution tool, allowed_callers config
-- Task 4: PTC response handling + container expiration errors + message formatting
-- Task 5-6: Container field tracking, types
-- Task 7: Streaming UX ("Running multi-tool analysis...")
-- Task 8: Observability (Langfuse metrics: `ptc_tool_call_count`, `ptc_container_time_ms`, `ptc_token_savings_estimate`)
+**Sprint Change (2026-01-07) — Skills Migration to Anthropic Container:**
+Anthropic's code execution container supports Skills + PTC + MCP via `allowed_callers`, eliminating ~90% of GKE sandbox complexity.
 
-Acceptance Criteria (AC7-AC10):
-- AC7: Log `ptc_container_expired` events on container expiration
-- AC8: PTC messages contain ONLY `tool_result` blocks (no text content)
-- AC9: Slack status updates during code execution
-- AC10: Langfuse traces include PTC metrics
+**Phases:**
+- Phase 1 (6.2-6.6): API Integration Foundation — Skills API, Files API, container config
+- Phase 2 (6.7-6.11): PTC & Skill Migration — code execution, upload skills, migrate
+- Phase 3 (6.12-6.13): Cleanup — reduce GKE scope, update docs
 
-See: `sprint-change-proposal-2026-01-06.md`, `tech-spec-anthropic-managed-ptc.md`
+**Key Changes:**
+- Skills uploaded to Anthropic via Skills API (not baked into Docker)
+- Generated files downloaded via Files API (not stdout parsing)
+- Container reused across conversation turns (`container.id`)
+- GKE sandbox retained for 2 edge-case skills only
+
+See: `sprint-change-proposal-2026-01-07-skills-migration-to-anthropic.md`, `tech-spec-skills-migration-to-anthropic-container.md`
 
 ---
 
@@ -465,12 +482,12 @@ Advanced code generation patterns and output validation.
 | 3 | Tool Connectivity (MCP) | 5 (3.1-3.5) | MVP |
 | 4 | ~~Subagents~~ | 0 | REMOVED |
 | 5 | Persistent Memory | 3 | MVP |
-| 6 | Skills & Extensions Framework | 3 (6.1-6.3) | MVP |
+| 6 | Skills & Extensions Framework | 13 (6.1-6.13) | MVP |
 | 7 | Slack Polish | 6 (7.1-7.6) | MVP |
 | 8 | Code Generation & Execution | TBD | Phase 2 |
 
-**MVP Total:** ~31 stories across 6 epics (Epic 4 removed)
-**Updated:** 2026-01-06 (Added Story 6.3: Anthropic Managed PTC from sprint change proposal)
+**MVP Total:** ~41 stories across 6 epics (Epic 4 removed)
+**Updated:** 2026-01-07 (Skills migration to Anthropic container — Stories 6.2-6.3 archived, 6.2-6.13 added)
 **Phase 2:** Epic 8 (deferred)
 
 ### UX Integration (Hybrid Approach)

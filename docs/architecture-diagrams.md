@@ -39,7 +39,7 @@ graph TB
     Router --> Skills[Skill Tools]
     Router --> MCPTools[MCP Tools]
 
-    Static -->|execute_code| GKE[(GKE Sandbox)]
+    Static -->|orion_sandbox| GKE[(GKE Sandbox)]
     MCPTools -->|JSON-RPC| MCP[(MCP Servers)]
 
     Loop --> Memory[Memory System]
@@ -168,7 +168,7 @@ graph TD
 
     Router -->|Priority 1| S1[summarize]
     Router -->|Priority 1| S2[memory]
-    Router -->|Priority 1| S3[execute_code]
+    Router -->|Priority 1| S3[orion_sandbox]
 
     Router -->|Priority 2| SK1[Skill Tools]
 
@@ -182,7 +182,7 @@ graph TD
 
     Exec --> Result([ToolResult])
 
-    S3 -->|sandbox| GKE[(GKE)]
+    S3 -->|sandbox| GKE[(GKE Sandbox)]
     M1 -->|JSON-RPC| MCP[(MCP Servers)]
 ```
 
@@ -190,8 +190,8 @@ graph TD
 
 | Tier | Priority | Tools | Source |
 |------|----------|-------|--------|
-| **Static** | 1st | summarize, memory, execute_code | Built-in at startup |
-| **Skill** | 2nd | skillName__toolName | .orion/agents/*.md |
+| **Static** | 1st | summarize, memory, orion_sandbox | Built-in at startup |
+| **Skill** | 2nd | skillName__toolName | .skills/*/SKILL.md |
 | **MCP** | 3rd | serverName__toolName | External servers |
 
 ### Executor Settings
@@ -205,7 +205,7 @@ graph TD
 ### Key Points
 - **Priority order** — Static (built-in) → Skill (loaded) → MCP (external)
 - **Static tools** are registered at startup
-- **Skill tools** are loaded on-demand from `.orion/agents/` directory
+- **Skill tools** are loaded on-demand from `.skills/` directory
 - **MCP tools** connect to external servers via HTTP JSON-RPC
 - **Executor** applies consistent timeout, retry, and error handling
 
@@ -372,7 +372,7 @@ graph TB
 | Agent loop | `src/agent/loop.ts` |
 | User message handler | `src/slack/handlers/user-message.ts` |
 | Tool router | `src/tools/router.ts` |
-| Tool executor | `src/tools/execution.ts` |
+| Tool executor | `src/tools/executor.ts` |
 | MCP client | `src/tools/mcp/client.ts` |
 | Memory system | `src/memory/index.ts` |
 | Streaming | `src/utils/streaming.ts` |

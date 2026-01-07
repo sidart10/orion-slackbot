@@ -15,7 +15,7 @@ project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-17'
 last_updated: '2026-01-04'
-course_correction: 'Claude Agent SDK → Direct Anthropic API migration; Epic 4 (Subagents) removed in favor of native parallel tool_use; GKE Agent Sandbox for code execution (2026-01-03)'
+course_correction: 'Claude Agent SDK → Direct Anthropic API migration; Epic 4 (Subagents) removed in favor of native parallel tool_use; GKE Agent Sandbox for code execution (2026-01-03); Anthropic Skills + Files API adoption, GKE becomes fallback (2026-01-07)'
 prd_version: '1.4'
 ---
 
@@ -535,12 +535,12 @@ Orion connects to enterprise systems through a unified tool layer:
 
 ### Code Generation & Execution
 
-*Note: GKE Agent Sandbox adopted 2026-01-03 for network-enabled code execution. FR20-22 are MVP; FR19/FR23 remain Phase 2.*
+*Note: Anthropic's code execution container adopted 2026-01-07 as primary execution environment. Skills + PTC + MCP work together via `allowed_callers`. GKE sandbox retained for edge cases. FR20-22 are MVP; FR19/FR23 remain Phase 2.*
 
 - FR19: System generates executable code when pre-built integrations don't exist *(Phase 2 — Claude generates code naturally; explicit patterns deferred)*
-- FR20: System executes generated code in sandboxed environments *(MVP — GKE Agent Sandbox)*
-- FR21: System can call external APIs via generated code *(MVP — GKE sandbox has network access)*
-- FR22: System processes and transforms data via generated code *(MVP — Python execution in sandbox)*
+- FR20: System executes generated code in sandboxed environments *(MVP — Anthropic container primary, GKE fallback)*
+- FR21: System can call external APIs via generated code *(MVP — MCP tools via `allowed_callers`)*
+- FR22: System processes and transforms data via generated code *(MVP — Python execution in Anthropic container)*
 - FR23: System validates generated code output before returning results *(Phase 2 — output validation deferred)*
 
 ### Composable Extensions
