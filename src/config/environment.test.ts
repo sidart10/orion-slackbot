@@ -38,7 +38,7 @@ describe('environment config', () => {
     delete process.env.ANTHROPIC_MODEL;
 
     const { config } = await import('./environment.js');
-    expect(config.anthropicModel).toBe('claude-sonnet-4-20250514');
+    expect(config.anthropicModel).toBe('claude-sonnet-4-5-20250929');
   });
 
   it('should validate required variables in production', async () => {
@@ -61,5 +61,100 @@ describe('environment config', () => {
 
     const { config } = await import('./environment.js');
     expect(config.nodeEnv).toBe('production');
+  });
+
+  // ==========================================================================
+  // Story 6.2: Consolidated Beta Headers (AC#5)
+  // ==========================================================================
+
+  describe('anthropic.allBetas (Story 6.2 AC#5)', () => {
+    it('should have consolidated allBetas array', async () => {
+      process.env.NODE_ENV = 'development';
+      const { config } = await import('./environment.js');
+
+      // THEN: config.anthropic.allBetas should exist and be an array
+      expect(config.anthropic).toBeDefined();
+      expect(config.anthropic.allBetas).toBeDefined();
+      expect(Array.isArray(config.anthropic.allBetas)).toBe(true);
+    });
+
+    it('should include existing betas (context-management, advanced-tool-use)', async () => {
+      process.env.NODE_ENV = 'development';
+      const { config } = await import('./environment.js');
+
+      // THEN: Should include Story 5.1 (Memory) and Story 6.3 (PTC) betas
+      expect(config.anthropic.allBetas).toContain('context-management-2025-06-27');
+      expect(config.anthropic.allBetas).toContain('advanced-tool-use-2025-11-20');
+    });
+
+    it('should include new skills-related betas', async () => {
+      process.env.NODE_ENV = 'development';
+      const { config } = await import('./environment.js');
+
+      // THEN: Should include Story 6.2 betas
+      expect(config.anthropic.allBetas).toContain('code-execution-2025-08-25');
+      expect(config.anthropic.allBetas).toContain('skills-2025-10-02');
+      expect(config.anthropic.allBetas).toContain('files-api-2025-04-14');
+    });
+
+    it('should have exactly 5 consolidated betas', async () => {
+      process.env.NODE_ENV = 'development';
+      const { config } = await import('./environment.js');
+
+      // THEN: Should have all 5 required betas
+      expect(config.anthropic.allBetas).toHaveLength(5);
+    });
+
+    it('should produce valid comma-separated header string', async () => {
+      process.env.NODE_ENV = 'development';
+      const { config } = await import('./environment.js');
+
+      // THEN: Joining should produce valid header format
+      const headerValue = config.anthropic.allBetas.join(',');
+      expect(headerValue).toMatch(/^[a-z0-9-]+(-\d{4}-\d{2}-\d{2})?(,[a-z0-9-]+(-\d{4}-\d{2}-\d{2})?)*$/);
+      expect(headerValue).toContain('skills-2025-10-02');
+    });
+  });
+
+  // ==========================================================================
+  // Story 6.2: Skills Enabled Config (AC#7)
+  // ==========================================================================
+
+  describe('anthropic.skillsEnabled (Story 6.2 AC#7)', () => {
+    it('should default skillsEnabled to true', async () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.ANTHROPIC_SKILLS_ENABLED;
+      const { config } = await import('./environment.js');
+
+      // THEN: Skills should be enabled by default
+      expect(config.anthropic.skillsEnabled).toBe(true);
+    });
+
+    it('should disable skills when ANTHROPIC_SKILLS_ENABLED=false', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.ANTHROPIC_SKILLS_ENABLED = 'false';
+      const { config } = await import('./environment.js');
+
+      // THEN: Skills should be disabled
+      expect(config.anthropic.skillsEnabled).toBe(false);
+    });
+
+    it('should enable skills when ANTHROPIC_SKILLS_ENABLED=true', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.ANTHROPIC_SKILLS_ENABLED = 'true';
+      const { config } = await import('./environment.js');
+
+      // THEN: Skills should be enabled
+      expect(config.anthropic.skillsEnabled).toBe(true);
+    });
+
+    it('should treat non-false values as true', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.ANTHROPIC_SKILLS_ENABLED = '1';
+      const { config } = await import('./environment.js');
+
+      // THEN: Non-false values should enable skills
+      expect(config.anthropic.skillsEnabled).toBe(true);
+    });
   });
 });

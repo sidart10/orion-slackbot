@@ -1,7 +1,7 @@
 /**
  * Tests for GKE Sandbox Client with K8s SandboxClaim Lifecycle.
  *
- * @see Story 6.2 - execute_code Tool (GKE Agent Sandbox)
+ * @see Story 6.2 - orion_sandbox Tool (GKE Agent Sandbox)
  * @see Tech-Spec: Fix Sandbox Client K8s Lifecycle
  * @see AC#1, AC#2, AC#3 - SandboxClaim lifecycle, headers, request format
  */

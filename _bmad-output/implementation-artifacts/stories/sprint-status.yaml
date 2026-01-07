@@ -1,0 +1,145 @@
+# generated: 2026-01-07
+# project: 2025-12 orion-slack-agent
+# project_key: orion-slack-agent
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts/stories
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+# CURRENT FOCUS:
+# ==============
+# Epic 6: SKILLS & EXTENSIONS - Major restructure (2026-01-07)
+# - Stories 6.2-6.3 archived, replaced by 6.2-6.13 (Skills migration to Anthropic container)
+# - 6-1 done, 6-2 ready-for-review (implementation complete)
+#
+# NEXT ACTION: Code review for stories 6-2 and 6-3, then implement 6-4 (Skill Registry Service)
+
+generated: 2026-01-07
+project: 2025-12 orion-slack-agent
+project_key: orion-slack-agent
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts/stories
+
+development_status:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Epic 1: Foundation & Deployment ✅ COMPLETE
+  # ═══════════════════════════════════════════════════════════════════════════
+  epic-1: done
+  1-1-project-scaffolding: done
+  1-2-langfuse-instrumentation: done
+  1-3-slack-bolt-app-setup: done
+  1-4-assistant-class-thread-handling: done
+  1-5-response-streaming: done
+  1-6-docker-cloud-run-deployment: done
+  1-7-cicd-pipeline: done
+  1-8-feedback-button-infrastructure: done
+  epic-1-retrospective: done
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Epic 2: Agent Core Loop ✅ COMPLETE
+  # ═══════════════════════════════════════════════════════════════════════════
+  epic-2: done
+  2-1-anthropic-api-integration: done
+  2-2-agent-loop-implementation: done
+  2-3-response-verification-retry: done
+  2-4-orion-error-graceful-degradation: done
+  2-5-thread-context-history: done
+  2-6-context-compaction: done
+  2-7-source-citations: done
+  2-8-app-mention-handler: done
+  2-9-streaming-input-accumulation: done
+  epic-2-retrospective: optional
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Epic 3: Tool Connectivity (MCP) ✅ COMPLETE
+  # ═══════════════════════════════════════════════════════════════════════════
+  epic-3: done
+  3-1-generic-mcp-client: done
+  3-2-tool-discovery-registration: done
+  3-3-tool-execution-error-handling: done
+  3-4-channel-tool-feedback: done
+  3-5-mcp-session-lifecycle: done
+  epic-3-retrospective: optional
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Epic 4: Subagents — REMOVED (2025-12-31)
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Reason: Over-engineering. Claude's native parallel tool_use pattern achieves
+  # the same outcome without a separate orchestration layer.
+  # See: sprint-change-proposal-2025-12-31-epic4-removal.md
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Epic 5: Persistent Memory ✅ COMPLETE
+  # ═══════════════════════════════════════════════════════════════════════════
+  epic-5: done
+  5-1-memory-tool-handler: done
+  5-2-memory-scopes-path-builders: review
+  5-3-memory-auto-check: done
+  epic-5-retrospective: optional
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Epic 6: Skills & Extensions Framework 🔄 IN PROGRESS
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Sprint Change (2026-01-07): Skills migration to Anthropic container
+  # - Archived: 6-2-execute-code-gke-sandbox, 6-3-anthropic-managed-ptc
+  # - Added: 6.2-6.13 (Skills API integration + PTC)
+  # See: sprint-change-proposal-2026-01-07-skills-migration-to-anthropic.md
+  epic-6: in-progress
+  6-1-agent-skills-loader: done
+  # Phase 1: API Integration Foundation
+  6-2-skills-api-client: review
+  6-3-skills-container-config: dev-complete
+  6-4-skill-registry-service: done
+  6-5-files-api-client: dev-complete
+  6-6-files-api-slack-integration: ready-for-dev
+  # Phase 2: PTC & Skill Migration
+  6-7-programmatic-tool-calling-core: done  # Already implemented in 6.2/6.3
+  6-8-ptc-observability: backlog
+  6-9-upload-custom-skills-script: backlog
+  6-10-skill-migration-testing: backlog
+  6-11-prompt-builder-cleanup: backlog
+  # Phase 3: Cleanup
+  6-12-gke-sandbox-scope-reduction: backlog
+  6-13-documentation-update: backlog
+  epic-6-retrospective: optional
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Epic 7: Slack Polish ✅ COMPLETE
+  # ═══════════════════════════════════════════════════════════════════════════
+  epic-7: done
+  7-1-dynamic-suggested-prompts: done
+  7-2-thread-summarization: cancelled
+  7-3-contextual-tool-feedback: done
+  7-4-response-completion-indicators: done
+  7-5-duplicate-response-bug: done
+  7-6-conversation-summarization: done
+  epic-7-retrospective: optional
+
+  # ════════════════════���══════════════════════════════════════════════════════
+  # Epic 8: Code Generation & Execution (Phase 2 - Deferred)
+  # ═══════════════════════════════════════════════════════════════════════════
+  # epic-8: phase-2
+  # Stories TBD - deferred to Phase 2

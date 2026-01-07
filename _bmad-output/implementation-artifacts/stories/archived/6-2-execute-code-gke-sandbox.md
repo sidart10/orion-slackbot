@@ -1,6 +1,15 @@
 # Story 6.2: execute_code Tool (GKE Agent Sandbox)
 
-Status: review
+Status: archived
+
+---
+**Archived:** 2026-01-07
+**Reason:** GKE sandbox implemented successfully. Scope changed — now fallback only for webapp-testing and web-artifacts-builder. Replaced by Story 6.12 (GKE Sandbox Scope Reduction).
+**See:** `sprint-change-proposal-2026-01-07-skills-migration-to-anthropic.md`
+
+---
+
+Original Status: review
 
 ## TL;DR
 

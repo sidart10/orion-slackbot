@@ -1,18 +1,18 @@
 /**
- * Tests for execute_code tool.
+ * Tests for orion_sandbox tool.
  *
- * @see Story 6.2 - execute_code Tool (GKE Agent Sandbox)
+ * @see Story 6.2 - orion_sandbox Tool (GKE Agent Sandbox)
  * @see AC#1 - Code runs in GKE Agent Sandbox
  * @see AC#3 - MCP tools accessible via SDK or HTTP
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  executeCodeHandler,
-  executeCodeToolDefinition,
-  registerExecuteCodeTool,
-  setExecuteCodeContext,
-  clearExecuteCodeContext,
+  orionSandboxHandler,
+  orionSandboxToolDefinition,
+  registerOrionSandboxTool,
+  setOrionSandboxContext,
+  clearOrionSandboxContext,
   __resetCacheForTests,
 } from './tool.js';
 import { toolRegistry } from '../registry.js';
@@ -45,13 +45,13 @@ vi.mock('../../config/environment.js', () => ({
   },
 }));
 
-describe('executeCodeToolDefinition', () => {
+describe('orionSandboxToolDefinition', () => {
   it('has correct tool name (snake_case)', () => {
-    expect(executeCodeToolDefinition.name).toBe('execute_code');
+    expect(orionSandboxToolDefinition.name).toBe('orion_sandbox');
   });
 
   it('has required input schema properties', () => {
-    const schema = executeCodeToolDefinition.input_schema;
+    const schema = orionSandboxToolDefinition.input_schema;
     expect(schema.type).toBe('object');
     expect(schema.properties).toHaveProperty('code');
     expect(schema.properties).toHaveProperty('skill_script');
@@ -61,12 +61,12 @@ describe('executeCodeToolDefinition', () => {
   });
 
   it('describes code execution purpose', () => {
-    expect(executeCodeToolDefinition.description).toContain('Python');
-    expect(executeCodeToolDefinition.description).toContain('sandbox');
+    expect(orionSandboxToolDefinition.description).toContain('Python');
+    expect(orionSandboxToolDefinition.description).toContain('sandbox');
   });
 });
 
-describe('executeCodeHandler', () => {
+describe('orionSandboxHandler', () => {
   const mockContext = { traceId: 'test-trace-123' };
 
   beforeEach(() => {
@@ -86,7 +86,7 @@ describe('executeCodeHandler', () => {
         return_code: 0,
       });
 
-      const result = await executeCodeHandler(
+      const result = await orionSandboxHandler(
         { code: 'print(2 + 2)' },
         mockContext
       );
@@ -107,7 +107,7 @@ describe('executeCodeHandler', () => {
         return_code: 0,
       });
 
-      await executeCodeHandler({ code: 'x = 1' }, mockContext);
+      await orionSandboxHandler({ code: 'x = 1' }, mockContext);
 
       // Code should include MCP bootstrap and the user code
       const callArgs = vi.mocked(sandboxClient.executeSandbox).mock.calls[0][0];
@@ -123,7 +123,7 @@ describe('executeCodeHandler', () => {
         return_code: 0,
       });
 
-      await executeCodeHandler({ code: 'pass' }, mockContext);
+      await orionSandboxHandler({ code: 'pass' }, mockContext);
 
       expect(sandboxClient.executeSandbox).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -137,7 +137,7 @@ describe('executeCodeHandler', () => {
 
   describe('input validation', () => {
     it('returns error when neither code, skill_script, nor skill_doc provided', async () => {
-      const result = await executeCodeHandler({}, mockContext);
+      const result = await orionSandboxHandler({}, mockContext);
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -149,7 +149,7 @@ describe('executeCodeHandler', () => {
     });
 
     it('returns error for invalid skill_script format', async () => {
-      const result = await executeCodeHandler(
+      const result = await orionSandboxHandler(
         { skill_script: 'invalid_format' },
         mockContext
       );
@@ -170,7 +170,7 @@ describe('executeCodeHandler', () => {
         return_code: 0,
       });
 
-      await executeCodeHandler({ code: 'pass' }, mockContext);
+      await orionSandboxHandler({ code: 'pass' }, mockContext);
 
       expect(sandboxClient.executeSandbox).toHaveBeenCalledWith(
         expect.objectContaining({ timeout: 30 })
@@ -184,7 +184,7 @@ describe('executeCodeHandler', () => {
         return_code: 0,
       });
 
-      await executeCodeHandler({ code: 'pass', timeout: 60 }, mockContext);
+      await orionSandboxHandler({ code: 'pass', timeout: 60 }, mockContext);
 
       expect(sandboxClient.executeSandbox).toHaveBeenCalledWith(
         expect.objectContaining({ timeout: 60 })
@@ -198,7 +198,7 @@ describe('executeCodeHandler', () => {
         return_code: 0,
       });
 
-      await executeCodeHandler({ code: 'pass', timeout: 300 }, mockContext);
+      await orionSandboxHandler({ code: 'pass', timeout: 300 }, mockContext);
 
       expect(sandboxClient.executeSandbox).toHaveBeenCalledWith(
         expect.objectContaining({ timeout: 120 })
@@ -212,7 +212,7 @@ describe('executeCodeHandler', () => {
         new Error('Sandbox connection failed')
       );
 
-      const result = await executeCodeHandler({ code: 'pass' }, mockContext);
+      const result = await orionSandboxHandler({ code: 'pass' }, mockContext);
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -229,7 +229,7 @@ describe('executeCodeHandler', () => {
 
       // Should not throw
       await expect(
-        executeCodeHandler({ code: 'pass' }, mockContext)
+        orionSandboxHandler({ code: 'pass' }, mockContext)
       ).resolves.toBeDefined();
     });
 
@@ -239,7 +239,7 @@ describe('executeCodeHandler', () => {
         new sandboxClient.SandboxTimeoutError(30)
       );
 
-      const result = await executeCodeHandler({ code: 'pass' }, mockContext);
+      const result = await orionSandboxHandler({ code: 'pass' }, mockContext);
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -258,7 +258,7 @@ describe('executeCodeHandler', () => {
         return_code: 1,
       });
 
-      const result = await executeCodeHandler({ code: 'print("x")' }, mockContext);
+      const result = await orionSandboxHandler({ code: 'print("x")' }, mockContext);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -275,7 +275,7 @@ describe('executeCodeHandler', () => {
         return_code: 0,
       });
 
-      const result = await executeCodeHandler({ code: 'pass' }, mockContext);
+      const result = await orionSandboxHandler({ code: 'pass' }, mockContext);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -314,7 +314,7 @@ describe('skill script execution (AC#4)', () => {
     // Mock readFile for the script
     (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('print("hello from skill")');
 
-    const result = await executeCodeHandler(
+    const result = await orionSandboxHandler(
       { skill_script: 'skill:test_skill/process.py' },
       mockContext
     );
@@ -333,7 +333,7 @@ describe('skill script execution (AC#4)', () => {
 
     (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('pass');
 
-    const result = await executeCodeHandler(
+    const result = await orionSandboxHandler(
       { skill_script: 'test_skill/process.py' },
       mockContext
     );
@@ -344,7 +344,7 @@ describe('skill script execution (AC#4)', () => {
   it('returns error when skill not found', async () => {
     vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([]);
 
-    const result = await executeCodeHandler(
+    const result = await orionSandboxHandler(
       { skill_script: 'skill:nonexistent/script.py' },
       mockContext
     );
@@ -363,7 +363,7 @@ describe('skill script execution (AC#4)', () => {
     };
     vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([skillWithoutScripts]);
 
-    const result = await executeCodeHandler(
+    const result = await orionSandboxHandler(
       { skill_script: 'skill:test_skill/script.py' },
       mockContext
     );
@@ -377,7 +377,7 @@ describe('skill script execution (AC#4)', () => {
   it('returns error when script not found in skill', async () => {
     vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockSkillWithScripts]);
 
-    const result = await executeCodeHandler(
+    const result = await orionSandboxHandler(
       { skill_script: 'skill:test_skill/missing.py' },
       mockContext
     );
@@ -399,7 +399,7 @@ describe('skill script execution (AC#4)', () => {
 
     (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('print(ARGS)');
 
-    await executeCodeHandler(
+    await orionSandboxHandler(
       {
         skill_script: 'skill:test_skill/process.py',
         args: { query: 'test' },
@@ -442,7 +442,7 @@ describe('skill doc execution (Story 6.1 on-demand SKILL.md)', () => {
 
     (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('SKILL CONTENT');
 
-    const result = await executeCodeHandler({ skill_doc: 'skill:test_skill' }, mockContext);
+    const result = await orionSandboxHandler({ skill_doc: 'skill:test_skill' }, mockContext);
     expect(result.success).toBe(true);
 
     // Ensure sandbox executed code with base64 decode helper
@@ -452,7 +452,7 @@ describe('skill doc execution (Story 6.1 on-demand SKILL.md)', () => {
 
   it('returns TOOL_NOT_FOUND when skill_doc skill is missing', async () => {
     vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([]);
-    const result = await executeCodeHandler({ skill_doc: 'skill:nope' }, mockContext);
+    const result = await orionSandboxHandler({ skill_doc: 'skill:nope' }, mockContext);
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.code).toBe('TOOL_NOT_FOUND');
@@ -461,7 +461,7 @@ describe('skill doc execution (Story 6.1 on-demand SKILL.md)', () => {
 
   it('returns TOOL_INVALID_INPUT for empty skill_doc format', async () => {
     // Test edge case: "skill:" with nothing after it
-    const result = await executeCodeHandler({ skill_doc: 'skill:' }, mockContext);
+    const result = await orionSandboxHandler({ skill_doc: 'skill:' }, mockContext);
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.code).toBe('TOOL_INVALID_INPUT');
@@ -470,30 +470,30 @@ describe('skill doc execution (Story 6.1 on-demand SKILL.md)', () => {
   });
 });
 
-describe('registerExecuteCodeTool', () => {
+describe('registerOrionSandboxTool', () => {
   beforeEach(() => {
     toolRegistry.__resetForTests();
   });
 
-  it('registers execute_code tool with registry', () => {
-    registerExecuteCodeTool();
+  it('registers orion_sandbox tool with registry', () => {
+    registerOrionSandboxTool();
 
-    const tool = toolRegistry.getStaticTool('execute_code');
+    const tool = toolRegistry.getStaticTool('orion_sandbox');
     expect(tool).toBeDefined();
-    expect(tool?.claudeTool.name).toBe('execute_code');
+    expect(tool?.claudeTool.name).toBe('orion_sandbox');
   });
 });
 
 describe('context management (AC#8 traceId fix)', () => {
   beforeEach(() => {
-    clearExecuteCodeContext();
+    clearOrionSandboxContext();
   });
 
   afterEach(() => {
-    clearExecuteCodeContext();
+    clearOrionSandboxContext();
   });
 
-  it('setExecuteCodeContext stores traceId for handler', async () => {
+  it('setOrionSandboxContext stores traceId for handler', async () => {
     vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
       stdout: '',
       stderr: '',
@@ -501,14 +501,14 @@ describe('context management (AC#8 traceId fix)', () => {
     });
 
     // Set context before registering and calling tool
-    setExecuteCodeContext({ traceId: 'custom-trace-id' });
+    setOrionSandboxContext({ traceId: 'custom-trace-id' });
 
     // The handler should use the set context
     // This is tested indirectly via the registry wrapper
     toolRegistry.__resetForTests();
-    registerExecuteCodeTool();
+    registerOrionSandboxTool();
 
-    const tool = toolRegistry.getStaticTool('execute_code');
+    const tool = toolRegistry.getStaticTool('orion_sandbox');
     expect(tool).toBeDefined();
 
     // Execute via registry wrapper
@@ -519,9 +519,9 @@ describe('context management (AC#8 traceId fix)', () => {
     expect(sandboxClient.executeSandbox).toHaveBeenCalled();
   });
 
-  it('clearExecuteCodeContext resets to unknown', () => {
-    setExecuteCodeContext({ traceId: 'some-trace' });
-    clearExecuteCodeContext();
+  it('clearOrionSandboxContext resets to unknown', () => {
+    setOrionSandboxContext({ traceId: 'some-trace' });
+    clearOrionSandboxContext();
     // Context is cleared - subsequent calls will use 'unknown'
     // This is a simple state test
     expect(true).toBe(true); // Context cleared without error

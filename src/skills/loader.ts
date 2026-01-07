@@ -504,7 +504,7 @@ export function reloadSkillMetadata(): void {
  *
  * This is called when a skill is invoked and the agent needs to read
  * the full SKILL.md instructions. In the GKE sandbox, this will be done
- * via execute_code reading from /skills/{skill-name}/SKILL.md.
+ * via orion_sandbox reading from /skills/{skill-name}/SKILL.md.
  *
  * @param skillPath - Path to skill directory (from SkillMetadata.skillPath)
  * @param traceId - Required for log correlation

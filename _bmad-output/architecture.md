@@ -14,7 +14,7 @@ project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
 last_updated: '2026-01-04'
-course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22); MCP SDK adoption (2025-12-31); GKE Agent Sandbox for code execution (2026-01-03)'
+course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22); MCP SDK adoption (2025-12-31); GKE Agent Sandbox for code execution (2026-01-03); Anthropic Skills + Files API adoption, GKE becomes fallback (2026-01-07)'
 hasProjectContext: false
 ---
 
@@ -211,6 +211,15 @@ orion-slack-agent/
 **Notes:**
 - Use `@anthropic-ai/sdk` (base SDK), NOT `@anthropic-ai/claude-agent-sdk`
 - MCP session management via native HTTP headers (ADR-2025-12-31, revised 2025-01-02)
+
+**Beta Headers Required:**
+```typescript
+betas: [
+  'code-execution-2025-08-25',   // PTC code_execution tool
+  'skills-2025-10-02',           // Skills API + container.skills
+  'files-api-2025-04-14',        // Files API upload/download
+]
+```
 
 ### Architectural Decisions Established by Starter
 
@@ -411,9 +420,111 @@ infra/gke-sandbox/
 ### Status
 
 - **Decision Date:** 2026-01-03
-- **Status:** Deployed & Verified
-- **Implementation:** Pending `execute_code` tool in `src/tools/code-execution/`
+- **Status:** Deployed & Verified → **Demoted to Fallback (2026-01-07)**
+- **Implementation:** `src/tools/gke-sandbox/` — fallback for webapp-testing, web-artifacts-builder only
 - **Reference:** `_bmad-output/sprint-change-proposal-2026-01-03-gke-agent-sandbox.md`
+
+---
+
+## Anthropic Skills + Files API Adoption (ADR-2026-01-07)
+
+### Context
+
+After implementing GKE Agent Sandbox (ADR-2026-01-03), we discovered that Anthropic's code execution container supports **Skills + PTC + MCP together** via `allowed_callers`. This eliminates the need for GKE for most use cases.
+
+**Key Insight:** "No network access" in Anthropic's container means no arbitrary HTTP calls. But MCP tool calls via `allowed_callers` ARE supported because **Anthropic routes them** — they don't go over the network from inside the container.
+
+### Decision
+
+**Adopt Anthropic Skills API + Files API** as primary skill execution environment. GKE sandbox becomes fallback for edge cases only.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Orion Slack Agent (Cloud Run)                                  │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                    ANTHROPIC API                          │  │
+│  │  ┌────────────────────────────────────────────────────┐  │  │
+│  │  │           CODE EXECUTION CONTAINER                  │  │  │
+│  │  │                                                    │  │  │
+│  │  │  ┌─────────────────┐  ┌─────────────────────────┐ │  │  │
+│  │  │  │  Custom Skills  │  │  PTC (code_execution)   │ │  │  │
+│  │  │  │  (Skills API)   │  │  + allowed_callers      │ │  │  │
+│  │  │  └────────┬────────┘  └───────────┬─────────────┘ │  │  │
+│  │  │           └───────────┬───────────┘               │  │  │
+│  │  │                       ▼                           │  │  │
+│  │  │             MCP Tools (Anthropic routes)          │  │  │
+│  │  └────────────────────────────────────────────────────┘  │  │
+│  │                                                          │  │
+│  │  ┌────────────────────────────────────────────────────┐  │  │
+│  │  │  FILES API                                          │  │  │
+│  │  │  - Download generated files (xlsx, pdf, pptx)      │  │  │
+│  │  │  - Upload input files for processing               │  │  │
+│  │  └────────────────────────────────────────────────────┘  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  GKE SANDBOX (FALLBACK ONLY)                              │  │
+│  │  - webapp-testing (Playwright + local servers)           │  │
+│  │  - web-artifacts-builder (local filesystem builds)       │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### What Changes
+
+| Component | Before (GKE Primary) | After (Anthropic Primary) |
+|-----------|---------------------|---------------------------|
+| **Skill Storage** | `.skills/` baked into Docker | Uploaded via Skills API |
+| **Skill Reference** | Filesystem path | `skill_id` from API |
+| **Skill Loading** | `orion_sandbox({ skill_doc })` | `container: { skills: [...] }` |
+| **Generated Files** | stdout parsing | Files API download |
+| **Container Lifecycle** | Per-execution SandboxClaim | Reusable `container.id` |
+| **Beta Headers** | `code-execution-2025-08-25` | + `skills-2025-10-02`, `files-api-2025-04-14` |
+
+### Skills Migration
+
+| Skill | Destination | Reason |
+|-------|-------------|--------|
+| xlsx, pdf, docx | Anthropic built-in | Use Anthropic's versions |
+| summarize, algorithmic-art, skill-creator, frontend-design, mcp-builder, d3js-visualization, example | Anthropic custom | Upload via Skills API |
+| webapp-testing, web-artifacts-builder | GKE (keep) | Need Playwright / local filesystem |
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `src/services/skills-api.ts` | Skills API client |
+| `src/services/files-api.ts` | Files API client |
+| `src/services/skill-registry.ts` | Map skill names → skill_ids |
+| `.orion/skills.yaml` | Skill ID configuration |
+| `scripts/upload-skills.ts` | CI/CD skill upload script |
+
+### Rationale
+
+| Option | Verdict |
+|--------|---------|
+| **Keep GKE primary** | ❌ Unnecessary complexity for 90% of use cases |
+| **Anthropic primary + GKE fallback** | ✅ Best of both worlds |
+| **Drop GKE entirely** | ❌ Blocks webapp-testing, web-artifacts-builder |
+
+### Benefits
+
+- No K8s lifecycle management for most skills
+- No port-forward issues on local dev
+- Lower latency (Anthropic manages container)
+- Container reuse across conversation turns
+- Generated files via clean Files API
+- Skills versioning via Anthropic API
+
+### Status
+
+- **Decision Date:** 2026-01-07
+- **Status:** Approved
+- **Implementation:** Epic 6 Stories 6.2-6.13
+- **Reference:** `sprint-change-proposal-2026-01-07-skills-migration-to-anthropic.md`, `tech-spec-skills-migration-to-anthropic-container.md`
 
 ---
 

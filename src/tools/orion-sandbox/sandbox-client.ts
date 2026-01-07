@@ -7,7 +7,7 @@
  * 3. Execute code with proper headers
  * 4. Delete SandboxClaim (cleanup)
  *
- * @see Story 6.2 - execute_code Tool (GKE Agent Sandbox)
+ * @see Story 6.2 - orion_sandbox Tool (GKE Agent Sandbox)
  * @see Tech-Spec: Fix Sandbox Client K8s Lifecycle
  * @see infra/gke-sandbox/ for deployment manifests
  */
@@ -65,6 +65,22 @@ export class ClaimCreationError extends Error {
   constructor(message: string, public readonly statusCode?: number) {
     super(message);
     this.name = 'ClaimCreationError';
+  }
+}
+
+/**
+ * Custom error for sandbox router connectivity issues.
+ * Provides helpful message for local development setup.
+ */
+export class SandboxRouterConnectionError extends Error {
+  readonly isConnectionError = true;
+  constructor(routerUrl: string, cause?: Error) {
+    const isLocalhost = routerUrl.includes('localhost');
+    const helpMessage = isLocalhost
+      ? `\n\nFor local development, run: ./scripts/dev-sandbox-tunnel.sh`
+      : `\n\nCheck that the sandbox router is deployed and accessible.`;
+    super(`Cannot connect to sandbox router at ${routerUrl}${helpMessage}`, { cause });
+    this.name = 'SandboxRouterConnectionError';
   }
 }
 
@@ -495,17 +511,31 @@ async function executeInSandbox(
   // Build command with env vars if provided
   const command = buildShellCommand(options.code, options.env);
 
-  const response = await deps.fetch(`${routerUrl}/execute`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Sandbox-ID': claimName,
-      'X-Sandbox-Namespace': SANDBOX_NAMESPACE,
-      'X-Sandbox-Port': SANDBOX_PORT,
-    },
-    body: JSON.stringify({ command }),
-    signal: AbortSignal.timeout(options.timeout * 1000 + 5000),
-  });
+  let response: Response;
+  try {
+    response = await deps.fetch(`${routerUrl}/execute`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Sandbox-ID': claimName,
+        'X-Sandbox-Namespace': SANDBOX_NAMESPACE,
+        'X-Sandbox-Port': SANDBOX_PORT,
+      },
+      body: JSON.stringify({ command }),
+      signal: AbortSignal.timeout(options.timeout * 1000 + 5000),
+    });
+  } catch (fetchError) {
+    // Detect connection refused / network errors
+    const err = fetchError instanceof Error ? fetchError : new Error(String(fetchError));
+    if (
+      err.message.includes('ECONNREFUSED') ||
+      err.message.includes('fetch failed') ||
+      err.cause?.toString().includes('ECONNREFUSED')
+    ) {
+      throw new SandboxRouterConnectionError(routerUrl, err);
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => 'unknown');

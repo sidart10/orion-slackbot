@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { executeSandbox } from '../../src/tools/code-execution/sandbox-client.js';
+import { executeSandbox } from '../../src/tools/orion-sandbox/sandbox-client.js';
 import { GoogleAuth } from 'google-auth-library';
 import { config } from '../../src/config/environment.js';
 
