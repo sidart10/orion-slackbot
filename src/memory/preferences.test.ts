@@ -5,7 +5,6 @@
  *
  * @see Story 2.8 - File-Based Memory
  * @see AC#3 - User preferences stored in orion-context/user-preferences/
- * @see Task 10: Migrate Preferences to Vercel KV
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -18,29 +17,13 @@ vi.mock('fs/promises', () => ({
   readdir: vi.fn().mockResolvedValue([]),
 }));
 
-// Mock Vercel KV storage
-const mockSaveToKV = vi.fn().mockResolvedValue(undefined);
-const mockLoadFromKV = vi.fn().mockResolvedValue(null);
-
-vi.mock('./vercel-kv-storage.js', () => ({
-  saveToKV: mockSaveToKV,
-  loadFromKV: mockLoadFromKV,
-}));
-
 describe('memory/preferences', () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    // Clear KV env vars so file-based tests run correctly
-    process.env = { ...originalEnv };
-    delete process.env.KV_REST_API_URL;
-    delete process.env.KV_REST_API_TOKEN;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    process.env = originalEnv;
   });
 
   describe('UserPreference interface', () => {
@@ -154,7 +137,6 @@ updatedAt: 2025-01-01T00:00:00.000Z
       const { writeFile } = await import('fs/promises');
       const { saveUserPreference } = await import('./preferences.js');
 
-      const before = new Date().toISOString();
       await saveUserPreference('U123', { theme: 'light' });
 
       const writtenContent = vi.mocked(writeFile).mock.calls[0][1] as string;
@@ -250,130 +232,4 @@ updatedAt: 2025-01-01T00:00:00.000Z
       expect(path).toMatch(/\.yaml$/);
     });
   });
-
-  describe('Vercel KV Backend (Task 10)', () => {
-    const originalEnv = process.env;
-
-    beforeEach(() => {
-      vi.clearAllMocks();
-      // Enable Vercel KV by setting the environment variable
-      process.env = { ...originalEnv, KV_REST_API_URL: 'https://kv.vercel.com' };
-    });
-
-    afterEach(() => {
-      process.env = originalEnv;
-    });
-
-    it('should use Vercel KV when KV_REST_API_URL is set', async () => {
-      // Need to reimport to pick up env change
-      vi.resetModules();
-      const { loadUserPreference } = await import('./preferences.js');
-
-      await loadUserPreference('U123');
-
-      expect(mockLoadFromKV).toHaveBeenCalledWith('preference', 'U123');
-    });
-
-    it('should save to Vercel KV when KV_REST_API_URL is set', async () => {
-      vi.resetModules();
-      const { saveUserPreference } = await import('./preferences.js');
-
-      await saveUserPreference('U123', { theme: 'dark' });
-
-      expect(mockSaveToKV).toHaveBeenCalledWith(
-        'preference',
-        'U123',
-        expect.objectContaining({
-          userId: 'U123',
-          preferences: expect.objectContaining({ theme: 'dark' }),
-        })
-      );
-    });
-
-    it('should load and merge existing preferences from KV', async () => {
-      vi.resetModules();
-
-      mockLoadFromKV.mockResolvedValueOnce({
-        data: {
-          userId: 'U123',
-          preferences: { theme: 'dark' },
-        },
-        createdAt: '2025-01-01T00:00:00.000Z',
-        updatedAt: '2025-01-01T00:00:00.000Z',
-      });
-
-      const { saveUserPreference } = await import('./preferences.js');
-
-      await saveUserPreference('U123', { formatting: 'bullet-points' });
-
-      expect(mockSaveToKV).toHaveBeenCalledWith(
-        'preference',
-        'U123',
-        expect.objectContaining({
-          preferences: expect.objectContaining({
-            theme: 'dark',
-            formatting: 'bullet-points',
-          }),
-        })
-      );
-    });
-
-    it('should return preference from KV when loaded', async () => {
-      vi.resetModules();
-
-      mockLoadFromKV.mockResolvedValueOnce({
-        data: {
-          userId: 'U123',
-          preferences: { theme: 'light' },
-        },
-        createdAt: '2025-01-01T00:00:00.000Z',
-        updatedAt: '2025-01-02T00:00:00.000Z',
-      });
-
-      const { loadUserPreference } = await import('./preferences.js');
-      const pref = await loadUserPreference('U123');
-
-      expect(pref?.userId).toBe('U123');
-      expect(pref?.preferences.theme).toBe('light');
-      expect(pref?.createdAt).toBe('2025-01-01T00:00:00.000Z');
-    });
-  });
-
-  describe('File Backend (Local Development)', () => {
-    const originalEnv = process.env;
-
-    beforeEach(() => {
-      vi.clearAllMocks();
-      // Disable Vercel KV by removing the environment variable
-      process.env = { ...originalEnv };
-      delete process.env.KV_REST_API_URL;
-    });
-
-    afterEach(() => {
-      process.env = originalEnv;
-    });
-
-    it('should use file backend when KV_REST_API_URL is not set', async () => {
-      vi.resetModules();
-      const { readFile } = await import('fs/promises');
-      const { loadUserPreference } = await import('./preferences.js');
-
-      await loadUserPreference('U123');
-
-      expect(readFile).toHaveBeenCalled();
-      expect(mockLoadFromKV).not.toHaveBeenCalled();
-    });
-
-    it('should save to file when KV_REST_API_URL is not set', async () => {
-      vi.resetModules();
-      const { writeFile } = await import('fs/promises');
-      const { saveUserPreference } = await import('./preferences.js');
-
-      await saveUserPreference('U123', { theme: 'dark' });
-
-      expect(writeFile).toHaveBeenCalled();
-      expect(mockSaveToKV).not.toHaveBeenCalled();
-    });
-  });
 });
-

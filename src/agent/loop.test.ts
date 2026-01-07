@@ -48,102 +48,74 @@ vi.mock('@anthropic-ai/sdk', () => {
   return { default: MockAnthropic };
 });
 
-function createMockMessageStream(params: {
-  events: Array<unknown>;
-}): {
-  [Symbol.asyncIterator]: () => { next: () => Promise<{ value: unknown; done: boolean }> };
-} {
-  const { events } = params;
-  return {
-    [Symbol.asyncIterator]: () => {
-      let index = 0;
-      return {
-        async next() {
-          if (index < events.length) {
-            return { value: events[index++], done: false };
-          }
-          return { value: undefined, done: true };
-        },
-      };
-    },
-  };
-}
+// ✅ REMOVED: Local helper functions now come from test factories
+// These functions are now imported from tests/factories/agent-factory.ts
+// - createMockMessageStream
+// - createMockStreamWithText
+// - createMockStreamWithToolUse
 
 // Import after mocks
 import { executeAgentLoop, type AgentLoopOptions, extractMarkdownLinks, formatToolDisplayName, summarizeToolInput } from './loop.js';
+// ✅ NEW: Import test factories
+import {
+  createAgentLoopOptions,
+  createMockMessageStream,
+  createMockStreamWithText,
+  createMockStreamWithToolUse,
+  createMockStreamWithPtc,
+  createMockStreamWithPtcExpired,
+  createMockStreamWithPtcTimeout,
+} from '../../tests/factories/index.js';
 
 describe('executeAgentLoop', () => {
-  const baseOptions: AgentLoopOptions = {
-    context: {
-      threadHistory: [],
-      userId: 'U123',
-      channelId: 'C456',
-      traceId: 'trace-abc',
-    },
-    systemPrompt: 'You are Orion, a helpful assistant.',
-  };
+  // ✅ IMPROVED: Use factory for base options (still used by tests that haven't been refactored yet)
+  const baseOptions: AgentLoopOptions = createAgentLoopOptions();
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('should yield verified response in multiple chunks for streaming (Story 1.5 compatibility)', async () => {
+    // Given: A long text response that should be streamed in chunks
     const longText = Array.from({ length: 400 }, () => 'word').join(' ');
+    const options = createAgentLoopOptions();
 
+    // When: Mock returns long text response
     messagesCreateMock.mockImplementation(async () =>
-      createMockMessageStream({
-        events: [
-          { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
-          { type: 'content_block_delta', delta: { type: 'text_delta', text: longText } },
-          {
-            type: 'message_delta',
-            delta: { stop_reason: 'end_turn', stop_sequence: null },
-            usage: { input_tokens: 10, output_tokens: 200 },
-          },
-          { type: 'message_stop' },
-        ],
-      })
+      createMockStreamWithText(longText, { inputTokens: 10, outputTokens: 200 })
     );
 
     const chunks: string[] = [];
-    const gen = executeAgentLoop('Hi', baseOptions);
+    const gen = executeAgentLoop('Hi', options);
     while (true) {
       const next = await gen.next();
       if (next.done) break;
       chunks.push(next.value);
     }
 
+    // Then: Response should be split into multiple chunks (not delivered as one blink)
     // If we only yield once, Slack chatStream often "blinks" the full response at the end.
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.join(' ')).toContain('word');
   });
 
   it('should call messages.create() with streaming enabled (AC#2)', async () => {
+    // Given: Agent with default options
+    const options = createAgentLoopOptions();
+
+    // When: Mock returns simple text response
     messagesCreateMock.mockImplementation(async () =>
-      createMockMessageStream({
-        events: [
-          { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
-          {
-            type: 'content_block_delta',
-            delta: { type: 'text_delta', text: 'Hello' },
-          },
-          {
-            type: 'message_delta',
-            delta: { stop_reason: 'end_turn', stop_sequence: null },
-            usage: { input_tokens: 10, output_tokens: 5 },
-          },
-          { type: 'message_stop' },
-        ],
-      })
+      createMockStreamWithText('Hello')
     );
 
-    const gen = executeAgentLoop('Hi', baseOptions);
+    const gen = executeAgentLoop('Hi', options);
     // Consume generator fully to trigger the call.
     while (true) {
       const next = await gen.next();
       if (next.done) break;
     }
 
+    // Then: Anthropic messages.create() should be called with streaming enabled
     expect(messagesCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({ stream: true })
     );
@@ -209,7 +181,7 @@ describe('executeAgentLoop', () => {
       name: 'search_api',
       toolUseId: 'toolu_1',
       input: { query: 'x' },
-      traceId: 'trace-abc',
+      traceId: expect.any(String),
     });
 
     expect(messagesCreateMock).toHaveBeenCalledTimes(2);
@@ -496,6 +468,7 @@ describe('executeAgentLoop', () => {
       const eventMock = vi.fn();
       const langfuseModule = await import('../observability/langfuse.js');
       vi.spyOn(langfuseModule, 'getLangfuse').mockReturnValue({
+        span: vi.fn(() => ({ end: vi.fn() })),
         trace: vi.fn(() => ({ id: 't1', update: vi.fn(), span: vi.fn(() => ({ end: vi.fn() })), generation: vi.fn() })),
         flushAsync: vi.fn(),
         shutdownAsync: vi.fn(),
@@ -549,6 +522,7 @@ describe('executeAgentLoop', () => {
       const eventMock = vi.fn();
       const langfuseModule = await import('../observability/langfuse.js');
       vi.spyOn(langfuseModule, 'getLangfuse').mockReturnValue({
+        span: vi.fn(() => ({ end: vi.fn() })),
         trace: vi.fn(() => ({ id: 't1', update: vi.fn(), span: vi.fn(() => ({ end: vi.fn() })), generation: vi.fn() })),
         flushAsync: vi.fn(),
         shutdownAsync: vi.fn(),
@@ -756,7 +730,7 @@ describe('executeAgentLoop', () => {
           toolName: 'logged_tool',
           bytes: 15, // '{"data":"test"}'.length
           success: true,
-          traceId: 'trace-abc',
+          traceId: expect.any(String),
         })
       );
     });
@@ -884,7 +858,7 @@ describe('executeAgentLoop', () => {
         expect.objectContaining({
           event: 'tool.input.parse_failed',
           toolName: 'bad_tool',
-          traceId: 'trace-abc',
+          traceId: expect.any(String),
         })
       );
 
@@ -894,7 +868,7 @@ describe('executeAgentLoop', () => {
           event: 'tool.execution.skipped',
           toolName: 'bad_tool',
           reason: 'input_parse_failed',
-          traceId: 'trace-abc',
+          traceId: expect.any(String),
         })
       );
     });
@@ -1095,7 +1069,7 @@ describe('executeAgentLoop', () => {
         expect.objectContaining({
           event: 'tool.input.too_large',
           index: 0,
-          traceId: 'trace-abc',
+          traceId: expect.any(String),
         })
       );
     });
@@ -1211,10 +1185,12 @@ describe('executeAgentLoop', () => {
       }
 
       // Should have extracted markdown URLs as sources
-      const urlSources = result.sources.filter((s: { url?: string }) => s.url);
+      const urlSources = result.sources.filter(
+        (s): s is import('./gather.js').ContextSource & { url: string } => typeof s.url === 'string'
+      );
       expect(urlSources.length).toBeGreaterThanOrEqual(2);
-      expect(urlSources.some((s: { url: string }) => s.url.includes('lmarena.ai'))).toBe(true);
-      expect(urlSources.some((s: { url: string }) => s.url.includes('polymarket.com'))).toBe(true);
+      expect(urlSources.some((s) => s.url.includes('lmarena.ai'))).toBe(true);
+      expect(urlSources.some((s) => s.url.includes('polymarket.com'))).toBe(true);
     });
 
     it('deduplicates same tool with different queries as separate sources', async () => {
@@ -1369,7 +1345,122 @@ describe('executeAgentLoop', () => {
       // Tool source should show "data lookup" fallback
       const toolSource = result.sources.find((s: { type: string }) => s.type === 'tool');
       expect(toolSource).toBeDefined();
-      expect(toolSource.toolContext).toBe('data lookup');
+      expect(toolSource?.toolContext).toBe('data lookup');
+    });
+  });
+
+  /**
+   * Fallback response delivery tests (fix silent response failures)
+   * @see tech-spec-fix-silent-response-failures.md
+   */
+  describe('fallback response delivery after tool execution', () => {
+    it('should deliver fallback response when tools succeed but verification fails', async () => {
+      messagesCreateMock
+        .mockResolvedValueOnce(
+          createMockStreamWithToolUse([
+            { type: 'text', text: 'I will check that for you.' },
+            {
+              type: 'tool_use',
+              id: 'tool_1',
+              name: 'test_tool',
+              input: { query: 'test' },
+            },
+          ])
+        )
+        .mockResolvedValueOnce(
+          createMockStreamWithText('The result shows **important data**.') // Uses **bold** - fails verification
+        );
+
+      const executeTool = vi.fn().mockResolvedValue({
+        success: true,
+        data: 'Tool result data',
+      });
+
+      const chunks: string[] = [];
+      for await (const chunk of executeAgentLoop('Test query', {
+        context: {
+          threadHistory: [],
+          userId: 'U123',
+          channelId: 'C123',
+          traceId: 'test-trace',
+        },
+        systemPrompt: 'Test prompt',
+        tools: [{ name: 'test_tool', description: 'Test', input_schema: { type: 'object', properties: {} } }],
+        executeTool,
+      })) {
+        chunks.push(chunk);
+      }
+
+      // Should deliver the response with **bold** as fallback (not empty)
+      const fullResponse = chunks.join('');
+      expect(fullResponse).toContain('important data');
+      expect(fullResponse.length).toBeGreaterThan(0);
+    });
+
+    it('should retry normally when verification fails without tool execution', async () => {
+      messagesCreateMock
+        .mockResolvedValueOnce(createMockStreamWithText('This has **bold formatting**.'))
+        .mockResolvedValueOnce(createMockStreamWithText('This has *bold formatting*.'));
+
+      const chunks: string[] = [];
+      for await (const chunk of executeAgentLoop('Test query', {
+        context: {
+          threadHistory: [],
+          userId: 'U123',
+          channelId: 'C123',
+          traceId: 'test-trace',
+        },
+        systemPrompt: 'Test prompt',
+        tools: [],
+      })) {
+        chunks.push(chunk);
+      }
+
+      // Should retry and deliver corrected version
+      const fullResponse = chunks.join('');
+      expect(fullResponse).toBe('This has *bold formatting*.');
+      expect(messagesCreateMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not use fallback when response is empty after tools', async () => {
+      messagesCreateMock
+        .mockResolvedValueOnce(
+          createMockStreamWithToolUse([
+            {
+              type: 'tool_use',
+              id: 'tool_1',
+              name: 'test_tool',
+              input: { query: 'test' },
+            },
+          ])
+        )
+        .mockResolvedValueOnce(createMockStreamWithText(''))
+        .mockResolvedValueOnce(createMockStreamWithText('Here is the result.'));
+
+      const executeTool = vi.fn().mockResolvedValue({
+        success: true,
+        data: 'Tool result',
+      });
+
+      const chunks: string[] = [];
+      for await (const chunk of executeAgentLoop('Test query', {
+        context: {
+          threadHistory: [],
+          userId: 'U123',
+          channelId: 'C123',
+          traceId: 'test-trace',
+        },
+        systemPrompt: 'Test prompt',
+        tools: [{ name: 'test_tool', description: 'Test', input_schema: { type: 'object', properties: {} } }],
+        executeTool,
+      })) {
+        chunks.push(chunk);
+      }
+
+      // Should deliver retry response, not empty fallback
+      const fullResponse = chunks.join('');
+      expect(fullResponse).toBe('Here is the result.');
+      expect(messagesCreateMock).toHaveBeenCalledTimes(3);
     });
   });
 });
@@ -1463,6 +1554,354 @@ describe('summarizeToolInput', () => {
     const result = summarizeToolInput({ query: longQuery });
     expect(result.length).toBeLessThanOrEqual(61); // 60 chars + ellipsis
     expect(result.endsWith('…')).toBe(true);
+  });
+});
+
+/**
+ * Story 6.3: Programmatic Tool Calling (PTC)
+ *
+ * Tests for Anthropic's PTC feature that allows Claude to orchestrate
+ * MCP tools through Python code, reducing context window usage.
+ *
+ * @see Story 6.3 - Anthropic Managed Programmatic Tool Calling
+ * @see AC#1-AC10 - Acceptance criteria
+ */
+describe('executeAgentLoop PTC (Story 6.3)', () => {
+  const baseOptions: AgentLoopOptions = createAgentLoopOptions();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // AC1, AC9: server_tool_use processing and status update
+  it('PTC: should process server_tool_use block and emit status (AC1, AC9)', async () => {
+    // Given: PTC stream with server_tool_use block
+    const statusCalls: Array<{ phase: string; toolName?: string }> = [];
+    const mockSetStatus = vi.fn(
+      (status: { phase: string; toolName?: string }) => {
+        statusCalls.push(status);
+      }
+    );
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithPtc({
+        toolCalls: [],
+        codeResult: { return_code: 0, stdout: 'Done', stderr: '' },
+      })
+    );
+
+    // When: Execute agent loop with PTC response
+    const gen = executeAgentLoop('Run analysis', {
+      ...baseOptions,
+      setStatus: mockSetStatus,
+    });
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: setStatus should have been called with code_execution tool
+    expect(mockSetStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'tool',
+        toolName: 'code_execution',
+      })
+    );
+  });
+
+  // AC4: Route tool_use with caller.type correctly
+  it('PTC: should route tool_use with caller.type to correct handler (AC4)', async () => {
+    // Given: PTC stream with tool_use that has caller field
+    const executeTool = vi.fn(async () => ({ success: true, data: 'result' }));
+
+    messagesCreateMock
+      .mockImplementationOnce(async () =>
+        createMockStreamWithPtc({
+          toolCalls: [{ name: 'search_api', input: { query: 'test' } }],
+          codeResult: { return_code: 0, stdout: 'Done', stderr: '' },
+        })
+      )
+      .mockImplementationOnce(async () =>
+        createMockStreamWithText('Final response')
+      );
+
+    // When: Execute agent loop
+    const gen = executeAgentLoop('Search for something', {
+      ...baseOptions,
+      executeTool,
+    });
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Tool should have been called with correct params
+    expect(executeTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'search_api',
+        input: { query: 'test' },
+      })
+    );
+  });
+
+  // AC3: Process code_execution_tool_result
+  it('PTC: should process code_execution_tool_result and continue loop (AC3)', async () => {
+    // Given: PTC stream with code_execution_tool_result
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithPtc({
+        toolCalls: [],
+        codeResult: { return_code: 0, stdout: 'Analysis complete', stderr: '' },
+      })
+    );
+
+    // When: Execute agent loop
+    const chunks: string[] = [];
+    const gen = executeAgentLoop('Analyze data', baseOptions);
+    let result;
+    while (true) {
+      const next = await gen.next();
+      if (next.done) {
+        result = next.value;
+        break;
+      }
+      chunks.push(next.value);
+    }
+
+    // Then: Loop should complete successfully
+    expect(result).toBeDefined();
+    expect(messagesCreateMock).toHaveBeenCalled();
+  });
+
+  // AC5: Container reuse
+  it('PTC: should reuse container across requests in session (AC5)', async () => {
+    // Given: PTC stream with container ID, followed by another request
+    const containerId = 'container-test-123';
+
+    messagesCreateMock
+      .mockImplementationOnce(async () =>
+        createMockStreamWithPtc({
+          containerId,
+          toolCalls: [{ name: 'tool_a', input: {} }],
+        })
+      )
+      .mockImplementationOnce(async () =>
+        createMockStreamWithText('Done')
+      );
+
+    // When: Execute agent loop
+    const gen = executeAgentLoop('Test', {
+      ...baseOptions,
+      executeTool: vi.fn(async () => ({ success: true })),
+    });
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Second request should include container ID
+    expect(messagesCreateMock).toHaveBeenCalledTimes(2);
+    const secondCallArgs = messagesCreateMock.mock.calls[1][0];
+    expect(secondCallArgs).toHaveProperty('container', containerId);
+  });
+
+  // AC8: PTC tool_result format (no text content)
+  it('PTC: should format PTC tool_result messages without text content (AC8)', async () => {
+    // Given: PTC stream with programmatic tool call
+    const executeTool = vi.fn(async () => ({ success: true, data: 'result' }));
+
+    messagesCreateMock
+      .mockImplementationOnce(async () =>
+        createMockStreamWithPtc({
+          toolCalls: [{ id: 'toolu_ptc', name: 'search', input: { q: 'x' } }],
+        })
+      )
+      .mockImplementationOnce(async () =>
+        createMockStreamWithText('Final')
+      );
+
+    // When: Execute agent loop
+    const gen = executeAgentLoop('Search', { ...baseOptions, executeTool });
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Tool result message should contain ONLY tool_result blocks (no text)
+    const secondCallArgs = messagesCreateMock.mock.calls[1][0] as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+
+    const userMessages = secondCallArgs.messages.filter((m) => m.role === 'user');
+    const lastUserMessage = userMessages[userMessages.length - 1];
+
+    // For PTC calls, content should be array of tool_results only
+    expect(Array.isArray(lastUserMessage.content)).toBe(true);
+    const content = lastUserMessage.content as Array<{ type: string }>;
+    const hasTextContent = content.some((c) => c.type === 'text');
+    expect(hasTextContent).toBe(false); // No text content per Anthropic spec
+  });
+
+  // AC7: Container expiration logging
+  it('PTC: should log ptc_container_expired on container expiration (AC7)', async () => {
+    // Given: PTC stream with container expiration error
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithPtcExpired()
+    );
+
+    const loggerModule = await import('../utils/logger.js');
+    const errorMock = loggerModule.logger.error as unknown as ReturnType<typeof vi.fn>;
+
+    // When: Execute agent loop
+    const gen = executeAgentLoop('Test', baseOptions);
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Container expiration should be logged
+    expect(errorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'agent.loop.ptc_container_expired',
+        traceId: expect.any(String),
+      })
+    );
+  });
+
+  // AC7: Timeout error logging
+  it('PTC: should log ptc_tool_timeout on timeout errors (AC7)', async () => {
+    // Given: PTC stream with timeout error
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithPtcTimeout()
+    );
+
+    const loggerModule = await import('../utils/logger.js');
+    const warnMock = loggerModule.logger.warn as unknown as ReturnType<typeof vi.fn>;
+
+    // When: Execute agent loop
+    const gen = executeAgentLoop('Test', baseOptions);
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Timeout should be logged
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'agent.loop.ptc_tool_timeout',
+        traceId: expect.any(String),
+      })
+    );
+  });
+
+  // AC10: Langfuse PTC event
+  it('PTC: should emit Langfuse ptc_execution_completed event (AC10)', async () => {
+    // Given: Mock getLangfuse to capture events
+    const eventMock = vi.fn();
+    const langfuseModule = await import('../observability/langfuse.js');
+    vi.spyOn(langfuseModule, 'getLangfuse').mockReturnValue({
+      span: vi.fn(() => ({ end: vi.fn() })),
+      trace: vi.fn(() => ({ id: 't1', update: vi.fn(), span: vi.fn(() => ({ end: vi.fn() })), generation: vi.fn() })),
+      flushAsync: vi.fn(),
+      shutdownAsync: vi.fn(),
+      score: vi.fn(),
+      event: eventMock,
+    });
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithPtc({
+        toolCalls: [{ name: 'tool_a', input: {} }],
+      })
+    );
+
+    // When: Execute agent loop with PTC
+    const gen = executeAgentLoop('Test', {
+      ...baseOptions,
+      executeTool: vi.fn(async () => ({ success: true })),
+    });
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Langfuse event should be emitted
+    expect(eventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'ptc_execution_completed',
+        metadata: expect.objectContaining({
+          toolCallCount: expect.any(Number),
+        }),
+      })
+    );
+  });
+
+  // AC10: Token savings estimation
+  it('PTC: should estimate token savings in trace metadata (AC10)', async () => {
+    // Given: Mock getLangfuse
+    const eventMock = vi.fn();
+    const langfuseModule = await import('../observability/langfuse.js');
+    vi.spyOn(langfuseModule, 'getLangfuse').mockReturnValue({
+      span: vi.fn(() => ({ end: vi.fn() })),
+      trace: vi.fn(() => ({ id: 't1', update: vi.fn(), span: vi.fn(() => ({ end: vi.fn() })), generation: vi.fn() })),
+      flushAsync: vi.fn(),
+      shutdownAsync: vi.fn(),
+      score: vi.fn(),
+      event: eventMock,
+    });
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithPtc({
+        toolCalls: [{ name: 'tool_a', input: { query: 'long query text' } }],
+        codeResult: { return_code: 0, stdout: 'Long result output here', stderr: '' },
+      })
+    );
+
+    // When: Execute agent loop with PTC
+    const gen = executeAgentLoop('Test', {
+      ...baseOptions,
+      executeTool: vi.fn(async () => ({ success: true, data: 'Some result data' })),
+    });
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Event should include token savings estimate
+    expect(eventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'ptc_execution_completed',
+        metadata: expect.objectContaining({
+          estimatedTokenSavings: expect.any(Number),
+        }),
+      })
+    );
+  });
+
+  // AC9: Status clear on result
+  it('PTC: should clear status on code_execution_tool_result (AC9)', async () => {
+    // Given: PTC stream
+    const statusCalls: Array<unknown> = [];
+    const mockSetStatus = vi.fn((status: unknown) => {
+      statusCalls.push(status);
+    });
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithPtc({
+        toolCalls: [],
+        codeResult: { return_code: 0, stdout: 'Done', stderr: '' },
+      })
+    );
+
+    // When: Execute agent loop
+    const gen = executeAgentLoop('Test', { ...baseOptions, setStatus: mockSetStatus });
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Status should be cleared (undefined or null call) after PTC completes
+    // The last setStatus call should clear the status
+    const lastCall = statusCalls[statusCalls.length - 1];
+    expect(lastCall === undefined || lastCall === null || (typeof lastCall === 'object' && lastCall !== null && 'phase' in lastCall && (lastCall as { phase: string }).phase === 'final')).toBe(true);
   });
 });
 

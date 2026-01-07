@@ -140,4 +140,57 @@ describe('buildLoadingMessages', () => {
       expect(msgs[0]).toBe('Using Test: Action…');
     });
   });
+
+  /**
+   * Story 6.3: PTC status messages
+   *
+   * Tests for Programmatic Tool Calling (PTC) status message.
+   * When Claude uses PTC, status should show "Running multi-tool analysis..."
+   *
+   * @see Story 6.3 - Anthropic Managed Programmatic Tool Calling
+   * @see AC#9 - Slack status updates for PTC
+   */
+  describe('Story 6.3: PTC status messages (AC9)', () => {
+    // AC9: PTC status message for code_execution tool
+    it('PTC: should return PTC status for code_execution tool (AC9)', () => {
+      // Given: Tool phase with code_execution tool
+      const msgs = buildLoadingMessages({
+        phase: 'tool',
+        toolName: 'code_execution',
+      });
+
+      // Then: Should show PTC-specific message
+      expect(msgs[0]).toBe('Running multi-tool analysis…');
+    });
+
+    // AC9: PTC mode input handling
+    it('PTC: should handle PTC mode input (AC9)', () => {
+      // Given: Tool phase with code_execution and programmatic_batch mode
+      const msgs = buildLoadingMessages({
+        phase: 'tool',
+        toolName: 'code_execution',
+        toolInput: { mode: 'programmatic_batch' },
+      });
+
+      // Then: Should show PTC-specific message
+      expect(msgs[0]).toBe('Running multi-tool analysis…');
+    });
+
+    // AC9: Differentiate from regular tool messages
+    it('PTC: should differ from regular tool messages', () => {
+      // Given: PTC tool vs regular tool
+      const ptcMsgs = buildLoadingMessages({
+        phase: 'tool',
+        toolName: 'code_execution',
+      });
+      const regularMsgs = buildLoadingMessages({
+        phase: 'tool',
+        toolName: 'search__web',
+      });
+
+      // Then: Messages should be different
+      expect(ptcMsgs[0]).not.toBe(regularMsgs[0]);
+      expect(ptcMsgs[0]).toContain('multi-tool');
+    });
+  });
 });

@@ -323,12 +323,8 @@ export const handleThreadStarted: AssistantThreadStartedMiddleware = async ({
   // Format for context injection
   const memoryContext = formatMemoriesForContext(memories);
   
-  // Store in thread context for agent loop
-  await saveThreadContext({
-    memoryContext,
-    memoryLoadedAt: new Date().toISOString(),
-    scopesLoaded: memories.scopesFound,
-  });
+  // Persist thread context (Slack-managed; custom payload is not supported)
+  await saveThreadContext();
   
   // Personalized greeting if we have user preferences
   const greeting = memories.user
@@ -341,34 +337,11 @@ export const handleThreadStarted: AssistantThreadStartedMiddleware = async ({
 };
 ```
 
-### Agent Loop Integration (Epic 2)
+### Agent Loop Integration (Implemented)
 
-When Epic 2 (Agent Loop) is implemented, integrate memory context:
-
-```typescript
-// src/agent/loop.ts (future implementation)
-export async function runAgentLoop(params: {
-  message: string;
-  threadContext?: { memoryContext?: string };
-  traceId: string;
-}) {
-  const { message, threadContext, traceId } = params;
-  
-  const messages: Anthropic.MessageParam[] = [];
-  
-  // Inject memory context if available
-  if (threadContext?.memoryContext) {
-    messages.push({
-      role: 'user',
-      content: `${threadContext.memoryContext}\n\n---\n\nUser message: ${message}`,
-    });
-  } else {
-    messages.push({ role: 'user', content: message });
-  }
-  
-  // ... agent loop implementation
-}
-```
+Memory injection is **stateless** (Cloud Run friendly):
+- `thread-started.ts` loads memories (best-effort) for greeting + prompts.
+- `user-message.ts` reloads memories from GCS (best-effort) and prepends the formatted memory context into the system prompt when a bucket is configured.
 
 ### Session Memory Auto-Save (Post-Conversation)
 
@@ -435,12 +408,12 @@ export async function saveSessionMemory(
 - All 7 tasks completed with 29 new tests (14 loader tests + 11 thread-started tests + 4 user-message memory tests)
 - Memory loads in parallel across global, user, and session scopes
 - Graceful fallback returns empty context on errors or timeout
-- Thread context stores `memoryContext`, `memoryLoadedAt`, and `scopesLoaded`
+- Slack thread context is **Slack-managed**; Orion does **not** store custom payload (no `memoryContext`/`scopesLoaded` stored via `saveThreadContext`)
 - Personalized greeting shown when user preferences exist
-- **Code Review Fix (2026-01-03):** Memory context now actually injected into Claude's system prompt via `user-message.ts` handler
+- **Code Review Fix (2026-01-03):** Memory context is injected into Claude's system prompt by re-loading memories (stateless) in `user-message.ts` when a GCS bucket is configured
 
 ### Code Review Fixes Applied (2026-01-03)
-1. **[HIGH] Memory context injection**: Added `getThreadContext()` call in `user-message.ts` to retrieve saved memory context and prepend it to system prompt
+1. **[HIGH] Memory context injection**: `user-message.ts` re-loads memories from GCS (stateless) and prepends formatted memory context to the system prompt
 2. **[MEDIUM] Module exports**: Added `loadRelevantMemories`, `formatMemoriesForContext`, `MemoryContext`, `LoadedMemories` exports to `index.ts`
 3. **[MEDIUM] Redundant Langfuse trace**: Removed duplicate `langfuse.trace()` creation that was creating orphaned traces
 

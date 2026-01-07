@@ -66,7 +66,17 @@ def call_tool(server: str, tool: str, args: dict) -> dict:
         result = call_tool('confluence', 'search_content', {'query': 'requirements'})
     """
     import asyncio
-    return asyncio.run(call_mcp_tool(server, tool, args))
+    try:
+        # Try to get existing event loop (e.g., in Jupyter/async context)
+        loop = asyncio.get_running_loop()
+        # If we're in a running loop, use nest_asyncio pattern or run in thread
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(asyncio.run, call_mcp_tool(server, tool, args))
+            return future.result()
+    except RuntimeError:
+        # No running loop, safe to use asyncio.run()
+        return asyncio.run(call_mcp_tool(server, tool, args))
 
 
 def list_mcp_servers() -> list[str]:

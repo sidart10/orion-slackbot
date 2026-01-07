@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseSkillMd } from './parser.js';
+import { parseSkillMd, parseSkillFrontmatterOnly } from './parser.js';
 
 describe('parseSkillMd', () => {
   it('parses valid skill with minimal frontmatter', () => {
@@ -184,6 +184,125 @@ description: Minimal skill
     const skill = parseSkillMd(content, '/path/SKILL.md');
 
     expect(skill.instructions).toBe('');
+  });
+});
+
+describe('parseSkillFrontmatterOnly', () => {
+  it('parses valid skill metadata without loading instructions', () => {
+    const content = `---
+name: test_skill
+description: A test skill
+version: 1.0.0
+author: Test Author
+---
+
+# Test Skill
+
+This is a long instruction body that should NOT be loaded at startup.
+It could be thousands of tokens that we want to defer until on-demand loading.`;
+
+    const metadata = parseSkillFrontmatterOnly(
+      content,
+      '.skills/test/SKILL.md',
+      '.skills/test'
+    );
+
+    expect(metadata.name).toBe('test_skill');
+    expect(metadata.description).toBe('A test skill');
+    expect(metadata.version).toBe('1.0.0');
+    expect(metadata.author).toBe('Test Author');
+    expect(metadata.filePath).toBe('.skills/test/SKILL.md');
+    expect(metadata.skillPath).toBe('.skills/test');
+    expect(metadata.hasExecutableScripts).toBe(false);
+    // Critical: instructions should NOT be present
+    expect('instructions' in metadata).toBe(false);
+  });
+
+  it('includes skillPath for on-demand instruction loading', () => {
+    const content = `---
+name: deep_research
+description: Research skill
+---
+
+Instructions here.`;
+
+    const metadata = parseSkillFrontmatterOnly(
+      content,
+      '.skills/deep-research/SKILL.md',
+      '.skills/deep-research'
+    );
+
+    expect(metadata.skillPath).toBe('.skills/deep-research');
+    // Can use skillPath to construct path to SKILL.md for on-demand loading
+    expect(`${metadata.skillPath}/SKILL.md`).toBe('.skills/deep-research/SKILL.md');
+  });
+
+  it('parses tools from frontmatter', () => {
+    const content = `---
+name: search_skill
+description: Search things
+tools:
+  - name: initiate_search
+    description: Start a search
+    parameters:
+      query:
+        type: string
+        description: Search query
+        required: true
+---
+
+Instructions.`;
+
+    const metadata = parseSkillFrontmatterOnly(
+      content,
+      '.skills/search/SKILL.md',
+      '.skills/search'
+    );
+
+    expect(metadata.tools).toHaveLength(1);
+    expect(metadata.tools![0].name).toBe('initiate_search');
+    expect(metadata.tools![0].description).toBe('Start a search');
+    expect(metadata.tools![0].parameters.query.required).toBe(true);
+  });
+
+  it('throws on missing name', () => {
+    const content = `---
+description: No name
+---
+
+Content`;
+
+    expect(() =>
+      parseSkillFrontmatterOnly(content, '/path/SKILL.md', '/path')
+    ).toThrow('SKILL.md missing required field: name');
+  });
+
+  it('throws on missing description', () => {
+    const content = `---
+name: no_desc
+---
+
+Content`;
+
+    expect(() =>
+      parseSkillFrontmatterOnly(content, '/path/SKILL.md', '/path')
+    ).toThrow('SKILL.md missing required field: description');
+  });
+
+  it('validates tool names as snake_case', () => {
+    const content = `---
+name: test
+description: test
+tools:
+  - name: BadToolName
+    description: Invalid
+---
+
+Content`;
+
+    expect(() =>
+      parseSkillFrontmatterOnly(content, '/path/SKILL.md', '/path')
+    ).toThrow('Tool name "BadToolName" invalid. Must be snake_case');
   });
 });
 

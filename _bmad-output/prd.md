@@ -14,16 +14,16 @@ lastStep: 11
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-17'
-last_updated: '2025-12-31'
-course_correction: 'Claude Agent SDK → Direct Anthropic API migration; Epic 4 (Subagents) removed in favor of native parallel tool_use'
-prd_version: '1.3'
+last_updated: '2026-01-04'
+course_correction: 'Claude Agent SDK → Direct Anthropic API migration; Epic 4 (Subagents) removed in favor of native parallel tool_use; GKE Agent Sandbox for code execution (2026-01-03)'
+prd_version: '1.4'
 ---
 
 # Product Requirements Document - 2025-12 orion-slack-agent
 
 **Author:** Sid
 **Date:** 2025-12-17
-**Last Updated:** 2025-12-31 (v1.3: Removed subagent pattern; FR3/FR4 reworded for native parallel tool_use)
+**Last Updated:** 2026-01-04 (v1.4: GKE Agent Sandbox for code execution; FR20-22 moved to MVP)
 
 ## Executive Summary
 
@@ -130,10 +130,10 @@ Orion's responses must be accurate, grounded, and verified before delivery.
 | **LLM Runtime (pluggable)** | Anthropic API `messages.create()` with tool_use for agent loop; model/provider selected via config |
 | **Agent Loop** | Complete Gather → Act → Verify cycle with iterative refinement |
 | **Parallel Tools** | Native Claude tool_use pattern with `Promise.all()` execution |
-| **Unified Tool Layer** | Generic MCP client (HTTP streamable), code generation—all tools invoked via Claude tool_use |
-| **Code Generation** | On-the-fly integrations, data processing, API calls |
-| **Skills Framework** | Infrastructure for `.claude/skills/` packages |
-| **Commands Framework** | Infrastructure for `/command` workflows |
+| **Unified Tool Layer** | Generic MCP client (HTTP streamable), code execution—all tools invoked via Claude tool_use |
+| **Code Execution** | GKE Agent Sandbox for Python execution with network access (FR20-22) |
+| **Skills Framework** | Agent Skills loader (`.skills/` directory with SKILL.md files) |
+| **Persistent Memory** | Anthropic Memory Tool + GCS backend for cross-session context |
 | **Thread Compaction** | Context management for long conversations |
 | **Langfuse Observability** | Tracing, prompt versioning, evaluations, cost tracking |
 | **Cloud Run Deployment** | HTTP mode, auto-scaling, secrets management |
@@ -190,7 +190,8 @@ Orion's responses must be accurate, grounded, and verified before delivery.
 
 The following are **not** included in MVP:
 
-- **Sandbox code execution** — Deferred to Phase 2; MVP uses MCP-based integrations only
+- **Output validation for generated code (FR23)** — Deferred to Phase 2; Claude's native verification sufficient for MVP
+- **Commands framework (FR25)** — Deferred to post-MVP; Skills + execute_code provide equivalent extensibility
 - **Multi-tenant deployment** — Single-tenant internal tool for SambaTV only
 - **Custom LLM fine-tuning** — Uses off-the-shelf Claude models
 - **Voice/audio input** — Text-only Slack interface
@@ -493,6 +494,8 @@ Orion connects to enterprise systems through a unified tool layer:
 - Generic MCP client connects to any HTTP streamable MCP server at runtime
 - Parallel tool execution via native Claude `tool_use` pattern with `Promise.all()`
 
+**Course Correction (2026-01-03):** GKE Agent Sandbox adopted for code execution. Anthropic's built-in sandbox has no network access, blocking MCP tool calls from generated code. GKE sandbox provides network-enabled Python execution with gVisor isolation. See: `sprint-change-proposal-2026-01-03-gke-agent-sandbox.md`
+
 ## Functional Requirements
 
 ### Agent Core Execution
@@ -530,20 +533,20 @@ Orion connects to enterprise systems through a unified tool layer:
 - FR49: System logs user feedback (positive/negative) to Langfuse for quality tracking and improvement
 - FR50: System provides contextual error messages to users when processing fails, with suggested next steps
 
-### Code Generation & Execution (Phase 2)
+### Code Generation & Execution
 
-*Note: Code execution capabilities deferred to Phase 2 per 2025-12-22 architecture decision. MVP focuses on MCP-based integrations.*
+*Note: GKE Agent Sandbox adopted 2026-01-03 for network-enabled code execution. FR20-22 are MVP; FR19/FR23 remain Phase 2.*
 
-- FR19: System generates executable code when pre-built integrations don't exist *(Phase 2)*
-- FR20: System executes generated code in sandboxed environments *(Phase 2)*
-- FR21: System can call external APIs via generated code *(Phase 2)*
-- FR22: System processes and transforms data via generated code *(Phase 2)*
-- FR23: System validates generated code output before returning results *(Phase 2)*
+- FR19: System generates executable code when pre-built integrations don't exist *(Phase 2 — Claude generates code naturally; explicit patterns deferred)*
+- FR20: System executes generated code in sandboxed environments *(MVP — GKE Agent Sandbox)*
+- FR21: System can call external APIs via generated code *(MVP — GKE sandbox has network access)*
+- FR22: System processes and transforms data via generated code *(MVP — Python execution in sandbox)*
+- FR23: System validates generated code output before returning results *(Phase 2 — output validation deferred)*
 
 ### Composable Extensions
 
 - FR24: Developers can add new Skills via Agent Skills open standard ([agentskills.io](https://agentskills.io)) — `SKILL.md` files in `.skills/` directory
-- FR25: Developers can add new Commands via file-based workflow definitions in `.orion/commands/`
+- FR25: Developers can add new Commands via file-based workflow definitions in `.orion/commands/` *(Post-MVP — deferred)*
 - FR26: System connects to MCP servers via generic HTTP streamable client (runtime-configurable)
 - FR27: System can invoke multiple MCP servers within a single response (tools merged into unified registry)
 - FR28: System selects appropriate tools from available options for each task

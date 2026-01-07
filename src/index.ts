@@ -21,6 +21,7 @@ import { handleAppMention } from './slack/handlers/app-mention.js';
 import { config } from './config/environment.js';
 import { logger } from './utils/logger.js';
 import { registerSummarizeTool } from './tools/summarize/index.js';
+import { registerExecuteCodeTool } from './tools/code-execution/index.js';
 import { shutdown as shutdownLangfuse } from './observability/langfuse.js';
 
 // Note: Memory tool uses SDK betaMemoryTool helper — passed directly to messages.create()
@@ -42,6 +43,8 @@ export async function startApp(): Promise<void> {
   // Register static tools before app start (Story 7.6)
   // Note: Memory tool (Story 5.1) uses SDK helper, passed directly in agent loop
   registerSummarizeTool();
+  // Story 6.2: execute_code tool registration (required for skill on-demand workflows)
+  registerExecuteCodeTool();
 
   // Create and configure Slack app with ExpressReceiver
   const { app } = createSlackApp();

@@ -319,3 +319,75 @@ describe('parseClaudeToolName', () => {
   });
 });
 
+/**
+ * Story 6.3: PTC allowed_callers tests
+ *
+ * Tests for Anthropic's Programmatic Tool Calling (PTC) feature.
+ * MCP tools must include allowed_callers to be callable from code execution.
+ *
+ * @see Story 6.3 - Anthropic Managed Programmatic Tool Calling
+ * @see AC#2 - MCP tools with allowed_callers callable from Python
+ */
+describe('mcpToolToClaude PTC (Story 6.3)', () => {
+  const createBasicMcpTool = (): McpTool => ({
+    name: 'search',
+    description: 'Search the web',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+      },
+    },
+  });
+
+  // AC2: allowed_callers for PTC
+  it('PTC: should include allowed_callers for PTC (AC2)', () => {
+    // Given: A basic MCP tool
+    const mcpTool = createBasicMcpTool();
+
+    // When: Converting to Anthropic format
+    const result = mcpToolToClaude('brave', mcpTool);
+
+    // Then: allowed_callers should be present
+    expect(result).toHaveProperty('allowed_callers');
+    expect(Array.isArray((result as { allowed_callers?: string[] }).allowed_callers)).toBe(true);
+  });
+
+  // AC2: Correct caller mode
+  it('PTC: should set allowed_callers to code_execution_20250825 (AC2)', () => {
+    // Given: A basic MCP tool
+    const mcpTool = createBasicMcpTool();
+
+    // When: Converting to Anthropic format
+    const result = mcpToolToClaude('brave', mcpTool);
+
+    // Then: allowed_callers should contain the PTC caller
+    expect((result as { allowed_callers?: string[] }).allowed_callers).toContain('code_execution_20250825');
+  });
+
+  // AC2: allowed_callers with defaults
+  it('PTC: should include allowed_callers even with server defaults', () => {
+    // Given: MCP tool with server defaults
+    const mcpTool = createBasicMcpTool();
+
+    // When: Converting with defaults
+    const result = mcpToolToClaude('brave', mcpTool, { apiKey: 'test-key' });
+
+    // Then: allowed_callers should still be present
+    expect((result as { allowed_callers?: string[] }).allowed_callers).toContain('code_execution_20250825');
+  });
+
+  // AC2: Single caller mode
+  it('PTC: should use single caller mode (only code_execution)', () => {
+    // Given: MCP tool
+    const mcpTool = createBasicMcpTool();
+
+    // When: Converting to Anthropic format
+    const result = mcpToolToClaude('server', mcpTool);
+
+    // Then: Should have exactly one allowed caller
+    expect((result as { allowed_callers?: string[] }).allowed_callers).toHaveLength(1);
+    expect((result as { allowed_callers?: string[] }).allowed_callers?.[0]).toBe('code_execution_20250825');
+  });
+});
+

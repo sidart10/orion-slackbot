@@ -32,12 +32,32 @@ describe('MemoryPath Branded Type', () => {
     });
 
     // TypeScript compile-time check - raw strings not assignable to MemoryPath
-    // This test documents the expected behavior; actual enforcement is at compile time
-    it('should have readonly properties', () => {
+    // This is enforced at compile time; these tests verify runtime behavior
+    it('should have readonly properties via Object.freeze()', () => {
       const path = Memory.global('test.json');
-      // Branded types are enforced at compile time, not runtime
-      // This test just verifies the path is created successfully
-      expect(getPath(path)).toBe('/memories/global/test.json');
+
+      // Verify the object is frozen (immutable)
+      expect(Object.isFrozen(path)).toBe(true);
+
+      // Verify structure matches branded type
+      expect(path.__brand).toBe('MemoryPath');
+      expect(typeof path.path).toBe('string');
+
+      // In strict mode (which Vitest uses), modifying frozen object throws
+      const originalPath = path.path;
+      expect(() => {
+        // @ts-expect-error - Testing runtime immutability
+        path.path = '/hacked';
+      }).toThrow(TypeError);
+      expect(path.path).toBe(originalPath); // Value unchanged
+    });
+
+    it('should not be creatable with plain object literal', () => {
+      // This compiles but the type system prevents assignment:
+      // const fake: MemoryPath = { __brand: 'MemoryPath', path: '/bad' };
+      // The branded type pattern ensures only Memory.* builders create valid paths
+      const realPath = Memory.global('test.json');
+      expect(realPath.__brand).toBe('MemoryPath');
     });
   });
 });
@@ -203,10 +223,16 @@ describe('Path Validation', () => {
       expect(result.error).toContain('extension');
     });
 
-    it('should accept files without extension in directories', () => {
+    it('should accept directory paths (no extension needed)', () => {
       // Directory paths don't need extension validation
       const result = validateMemoryPath('/memories/global/');
       expect(result.valid).toBe(true);
+    });
+
+    it('should reject files without extension', () => {
+      const result = validateMemoryPath('/memories/global/noextension');
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('extension');
     });
   });
 });

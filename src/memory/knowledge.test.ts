@@ -179,7 +179,7 @@ Information about targeting segments.
       vi.mocked(readdir).mockResolvedValue([
         { name: 'item1.md', isFile: () => true, parentPath: './orion-context/knowledge' },
         { name: 'item2.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       vi.mocked(readFile).mockResolvedValue(`---
 type: knowledge
@@ -204,7 +204,7 @@ Content
       vi.mocked(readdir).mockResolvedValue([
         { name: 'item1.md', isFile: () => true, parentPath: './orion-context/knowledge' },
         { name: 'item2.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       vi.mocked(readFile)
         .mockResolvedValueOnce(`---
@@ -253,7 +253,7 @@ Product content
 
       vi.mocked(readdir).mockResolvedValue([
         { name: 'segments.md', isFile: () => true, parentPath: './orion-context/knowledge' },
-      ] as unknown as import('fs').Dirent[]);
+      ] as unknown as import('fs').Dirent<NonSharedBuffer>[]);
 
       vi.mocked(readFile).mockResolvedValue(`---
 type: knowledge

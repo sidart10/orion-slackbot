@@ -10,6 +10,7 @@
  */
 
 import { readFile, writeFile, deleteFile, listFiles } from './storage.js';
+import { validateMemoryPath, MAX_MEMORY_FILE_SIZE } from './paths.js';
 import { getLangfuse, type LangfuseSpan } from '../../observability/langfuse.js';
 import { logger } from '../../utils/logger.js';
 import type { ToolResult } from '../../utils/tool-result.js';
@@ -38,12 +39,6 @@ export interface MemoryToolContext {
   traceId: string;
   bucket: string;
 }
-
-/**
- * Maximum content size for memory files (100KB).
- * @see project-context.md - Memory Path Rules / Constraints
- */
-const MAX_CONTENT_SIZE_BYTES = 100 * 1024;
 
 /**
  * Determine if a GCS error is retryable.
@@ -91,24 +86,14 @@ export async function handleMemoryTool(
   const startTime = Date.now();
 
   try {
-    // Basic path validation (full validation in Story 5.2)
-    if (!input.path.startsWith('/memories/')) {
+    // Full path validation via Story 5.2 validateMemoryPath()
+    const pathValidation = validateMemoryPath(input.path);
+    if (!pathValidation.valid) {
       return {
         success: false,
         error: {
           code: 'MEMORY_NOT_FOUND',
-          message: 'Path must start with /memories/',
-          retryable: false,
-        },
-      };
-    }
-
-    if (input.path.includes('..')) {
-      return {
-        success: false,
-        error: {
-          code: 'MEMORY_WRITE_FAILED',
-          message: 'Path traversal not allowed',
+          message: pathValidation.error || 'Invalid memory path',
           retryable: false,
         },
       };
@@ -140,12 +125,12 @@ export async function handleMemoryTool(
           };
         }
         // M3 fix: Validate content size (100KB max per project-context.md)
-        if (Buffer.byteLength(input.content, 'utf-8') > MAX_CONTENT_SIZE_BYTES) {
+        if (Buffer.byteLength(input.content, 'utf-8') > MAX_MEMORY_FILE_SIZE) {
           return {
             success: false,
             error: {
               code: 'MEMORY_WRITE_FAILED',
-              message: `Content exceeds maximum size of ${MAX_CONTENT_SIZE_BYTES / 1024}KB`,
+              message: `Content exceeds maximum size of ${MAX_MEMORY_FILE_SIZE / 1024}KB`,
               retryable: false,
             },
           };

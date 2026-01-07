@@ -7,19 +7,39 @@
  */
 
 // Types
-export type { Skill, SkillTool, SkillToolParameter, SkillScript, SkillLoadResult } from './types.js';
+export type {
+  Skill,
+  SkillMetadata,
+  SkillTool,
+  SkillToolParameter,
+  SkillScript,
+  SkillLoadResult,
+  SkillMetadataLoadResult,
+} from './types.js';
 export { TOOL_NAME_PATTERN } from './types.js';
 
 // Loader
-export { loadSkills, loadSkillsWithResult, getSkills, reloadSkills } from './loader.js';
+export {
+  loadSkills,
+  loadSkillsWithResult,
+  getSkills,
+  reloadSkills,
+  // Metadata-only loading (progressive disclosure)
+  loadSkillMetadata,
+  loadSkillMetadataWithResult,
+  getSkillMetadata,
+  reloadSkillMetadata,
+  // On-demand instruction loading
+  loadSkillInstructions,
+} from './loader.js';
 
 // Parser
-export { parseSkillMd } from './parser.js';
+export { parseSkillMd, parseSkillFrontmatterOnly } from './parser.js';
 
 // Prompt Builder
-export { buildSkillsPrompt } from './prompt-builder.js';
+export { buildSkillsPrompt, buildSkillsHint } from './prompt-builder.js';
 
 // Tool Handler
-export { executeSkillTool, parseSkillToolName } from './tool-handler.js';
-export type { SkillToolResult } from './tool-handler.js';
+export { executeSkillTool, parseSkillToolName, registerSkillTools } from './tool-handler.js';
+// Note: executeSkillTool returns the canonical ToolResult type (see src/utils/tool-result.ts)
 

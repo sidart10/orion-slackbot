@@ -124,7 +124,7 @@ export async function loadKnowledge(name: string): Promise<Knowledge | null> {
  */
 export async function listKnowledge(category?: string): Promise<Knowledge[]> {
   try {
-    const entries = await readdir(KNOWLEDGE_DIR, { withFileTypes: true });
+    const entries = await readdir(KNOWLEDGE_DIR, { withFileTypes: true, encoding: 'utf8' });
     const mdFiles = entries.filter((e) => e.isFile() && e.name.endsWith('.md'));
 
     const items: Knowledge[] = [];

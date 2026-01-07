@@ -3,7 +3,7 @@
 
 # Default Anthropic model (used if ANTHROPIC_MODEL env var is not set)
 model:
-  default: "claude-sonnet-4-20250514"
+  default: "claude-sonnet-4-5-20250929"
 
 # MCP Server Configuration
 # Loaded by src/tools/mcp/config.ts

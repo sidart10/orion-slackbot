@@ -141,7 +141,7 @@ async function loadAllScopes(context: MemoryContext): Promise<LoadedMemories> {
 
   for (const result of results) {
     if (result.content) {
-      (memories as Record<string, unknown>)[result.scope] = result.content;
+      (memories as unknown as Record<string, unknown>)[result.scope] = result.content;
       memories.scopesFound.push(result.scope);
     }
   }

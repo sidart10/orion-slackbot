@@ -40,11 +40,8 @@ import {
   setSummarizeToolContext,
   clearSummarizeToolContext,
 } from '../../tools/summarize/index.js';
-import {
-  setMemoryToolContext,
-  clearMemoryToolContext,
-} from '../../tools/memory/index.js';
-import { getSkills, buildSkillsPrompt } from '../../skills/index.js';
+import { clearMemoryToolContext } from '../../tools/memory/index.js';
+import { getSkillMetadata, buildSkillsHint } from '../../skills/index.js';
 
 /**
  * Extract message text by stripping the leading bot mention.
@@ -281,23 +278,24 @@ export async function handleAppMention({
             'You are Orion, a helpful AI assistant. Use Slack mrkdwn formatting: *bold* for emphasis, _italic_ for secondary emphasis. Never use blockquotes.';
         }
 
-        // Story 6.1: Inject skills into system prompt (AC#4)
+        // Story 6.1: Inject skills hint into system prompt (AC#4)
+        // Uses metadata-only loading for token efficiency (~100 tokens/skill vs ~5000)
         try {
-          const skills = await getSkills(trace.id);
-          if (skills.length > 0) {
-            const skillsPrompt = buildSkillsPrompt(skills);
-            systemPrompt = `${systemPrompt}\n\n${skillsPrompt}`;
+          const skillMetadata = await getSkillMetadata(trace.id ?? 'no-trace');
+          if (skillMetadata.length > 0) {
+            const skillsHint = buildSkillsHint(skillMetadata);
+            systemPrompt = `${systemPrompt}\n\n${skillsHint}`;
             logger.info({
-              event: 'skills_injected',
-              skillCount: skills.length,
-              skillNames: skills.map((s) => s.name),
+              event: 'skills_hint_injected',
+              skillCount: skillMetadata.length,
+              skillNames: skillMetadata.map((s) => s.name),
               traceId: trace.id,
             });
           }
         } catch (skillsError) {
           // Best-effort: log and continue without skills
           logger.warn({
-            event: 'skills_injection_failed',
+            event: 'skills_hint_injection_failed',
             reason: skillsError instanceof Error ? skillsError.message : String(skillsError),
             traceId: trace.id,
           });
@@ -324,9 +322,6 @@ export async function handleAppMention({
           threadTs,
           messageTs: mentionEvent.ts,
         });
-
-        // Set memory tool context (Story 5.1)
-        setMemoryToolContext(trace.id ?? '');
 
         const agentResponse = runOrionAgent(messageText, {
           context: {
@@ -404,7 +399,28 @@ export async function handleAppMention({
         generation.end();
 
         // Stop streaming and get metrics
-        const streamMetrics = await streamer.stop();
+        let streamMetrics;
+        try {
+          streamMetrics = await streamer.stop();
+        } catch (stopError) {
+          logger.error({
+            event: 'stream_delivery_failed',
+            channel: channelId,
+            threadTs,
+            userId: body.event.user,
+            error: stopError instanceof Error ? stopError.message : String(stopError),
+            traceId,
+          });
+
+          // Notify user of delivery failure
+          await client.chat.postMessage({
+            channel: channelId,
+            thread_ts: threadTs,
+            text: '⚠️ *Message delivery failed*\n\nI generated a response but couldn\'t deliver it to Slack. Please try again.',
+          });
+
+          throw stopError;
+        }
 
         // Story 3.4: Delete status message now that streaming is complete
         await deleteStatusMessage();
@@ -461,7 +477,8 @@ export async function handleAppMention({
             client,
             channelId,
             threadTs,
-            allUrls
+            allUrls,
+            trace.id
           );
           if (imageResults.length > 0) {
             logger.info({
@@ -595,7 +612,18 @@ export async function handleAppMention({
         await deleteStatusMessage();
 
         // Ensure stream is stopped even on error
-        await streamer.stop().catch(() => {});
+        try {
+          await streamer.stop();
+        } catch (stopError) {
+          // Log but don't throw - we're already in error path
+          logger.warn({
+            event: 'stream_stop_failed_during_error_cleanup',
+            channel: channelId,
+            threadTs,
+            error: stopError instanceof Error ? stopError.message : String(stopError),
+            traceId,
+          });
+        }
 
         // End agentSpan if it was created
         if (agentSpan) {

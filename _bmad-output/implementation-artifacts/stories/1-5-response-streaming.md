@@ -658,7 +658,7 @@ src/
 
 From Story 1-4 (Assistant Class):
 - `userMessage` handler receives `client` for API calls
-- Thread context available via `getThreadContext()`
+- Slack thread utilities include `getThreadContext()` / `saveThreadContext()` (Slack-managed; not a custom payload store)
 - `context.userId` and `context.teamId` available for streaming
 
 From Story 1-2 (Langfuse):

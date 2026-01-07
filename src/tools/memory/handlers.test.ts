@@ -53,27 +53,27 @@ describe('createMemoryHandlers', () => {
 
       const result = await handlers.view({
         command: 'view',
-        path: '/memories/test.md',
+        path: '/memories/global/test.md',
       });
 
       expect(result).toBe('     1\tline 1\n     2\tline 2');
-      expect(readFile).toHaveBeenCalledWith(bucket, 'test.md');
+      expect(readFile).toHaveBeenCalledWith(bucket, 'global/test.md');
     });
 
     it('returns directory listing for paths ending with /', async () => {
       vi.mocked(listFiles).mockResolvedValue([
-        { path: '/memories/users/a.txt', size: 1024 },
-        { path: '/memories/users/b.txt', size: 2048 },
+        { path: '/memories/users/U123/a.txt', size: 1024 },
+        { path: '/memories/users/U123/b.txt', size: 2048 },
       ]);
 
       const result = await handlers.view({
         command: 'view',
-        path: '/memories/users/',
+        path: '/memories/users/U123/',
       });
 
-      expect(result).toContain('/memories/users/a.txt');
+      expect(result).toContain('/memories/users/U123/a.txt');
       expect(result).toContain('1.0K');
-      expect(listFiles).toHaveBeenCalledWith(bucket, 'users/');
+      expect(listFiles).toHaveBeenCalledWith(bucket, 'users/U123/');
     });
 
     it('supports view_range parameter', async () => {
@@ -81,7 +81,7 @@ describe('createMemoryHandlers', () => {
 
       const result = await handlers.view({
         command: 'view',
-        path: '/memories/test.md',
+        path: '/memories/global/test.md',
         view_range: [2, 4],
       });
 
@@ -107,12 +107,12 @@ describe('createMemoryHandlers', () => {
 
       const result = await handlers.create({
         command: 'create',
-        path: '/memories/new.md',
+        path: '/memories/global/new.md',
         file_text: 'new content',
       });
 
-      expect(result).toBe('File created at /memories/new.md');
-      expect(writeFile).toHaveBeenCalledWith(bucket, 'new.md', 'new content');
+      expect(result).toBe('File created at /memories/global/new.md');
+      expect(writeFile).toHaveBeenCalledWith(bucket, 'global/new.md', 'new content');
     });
 
     it('rejects content exceeding 100KB', async () => {
@@ -121,7 +121,7 @@ describe('createMemoryHandlers', () => {
       await expect(
         handlers.create({
           command: 'create',
-          path: '/memories/large.md',
+          path: '/memories/global/large.md',
           file_text: largeContent,
         })
       ).rejects.toThrow('exceeds maximum size');
@@ -135,13 +135,13 @@ describe('createMemoryHandlers', () => {
 
       const result = await handlers.str_replace({
         command: 'str_replace',
-        path: '/memories/test.md',
+        path: '/memories/global/test.md',
         old_str: 'world',
         new_str: 'universe',
       });
 
-      expect(result).toBe('Replaced text in /memories/test.md');
-      expect(writeFile).toHaveBeenCalledWith(bucket, 'test.md', 'hello universe');
+      expect(result).toBe('Replaced text in /memories/global/test.md');
+      expect(writeFile).toHaveBeenCalledWith(bucket, 'global/test.md', 'hello universe');
     });
 
     it('throws when old_str not found', async () => {
@@ -150,7 +150,7 @@ describe('createMemoryHandlers', () => {
       await expect(
         handlers.str_replace({
           command: 'str_replace',
-          path: '/memories/test.md',
+          path: '/memories/global/test.md',
           old_str: 'notfound',
           new_str: 'replacement',
         })
@@ -165,15 +165,15 @@ describe('createMemoryHandlers', () => {
 
       const result = await handlers.insert({
         command: 'insert',
-        path: '/memories/test.md',
+        path: '/memories/global/test.md',
         insert_line: 1,
         insert_text: 'inserted line',
       });
 
-      expect(result).toBe('Inserted text at line 1 in /memories/test.md');
+      expect(result).toBe('Inserted text at line 1 in /memories/global/test.md');
       expect(writeFile).toHaveBeenCalledWith(
         bucket,
-        'test.md',
+        'global/test.md',
         'line 1\ninserted line\nline 2\nline 3'
       );
     });
@@ -184,7 +184,7 @@ describe('createMemoryHandlers', () => {
       await expect(
         handlers.insert({
           command: 'insert',
-          path: '/memories/test.md',
+          path: '/memories/global/test.md',
           insert_line: 10,
           insert_text: 'too far',
         })
@@ -198,11 +198,11 @@ describe('createMemoryHandlers', () => {
 
       const result = await handlers.delete({
         command: 'delete',
-        path: '/memories/todelete.md',
+        path: '/memories/global/todelete.md',
       });
 
-      expect(result).toBe('Deleted /memories/todelete.md');
-      expect(deleteFile).toHaveBeenCalledWith(bucket, 'todelete.md');
+      expect(result).toBe('Deleted /memories/global/todelete.md');
+      expect(deleteFile).toHaveBeenCalledWith(bucket, 'global/todelete.md');
     });
   });
 
@@ -213,13 +213,13 @@ describe('createMemoryHandlers', () => {
 
       const result = await handlers.rename({
         command: 'rename',
-        old_path: '/memories/old.md',
-        new_path: '/memories/new.md',
+        old_path: '/memories/global/old.md',
+        new_path: '/memories/global/new.md',
       });
 
-      expect(result).toBe('Renamed /memories/old.md to /memories/new.md');
-      expect(copyFile).toHaveBeenCalledWith(bucket, 'old.md', 'new.md');
-      expect(deleteFile).toHaveBeenCalledWith(bucket, 'old.md');
+      expect(result).toBe('Renamed /memories/global/old.md to /memories/global/new.md');
+      expect(copyFile).toHaveBeenCalledWith(bucket, 'global/old.md', 'global/new.md');
+      expect(deleteFile).toHaveBeenCalledWith(bucket, 'global/old.md');
     });
 
     it('validates both paths', async () => {
@@ -227,7 +227,7 @@ describe('createMemoryHandlers', () => {
         handlers.rename({
           command: 'rename',
           old_path: '/other/old.md',
-          new_path: '/memories/new.md',
+          new_path: '/memories/global/new.md',
         })
       ).rejects.toThrow('Path must start with /memories/');
     });

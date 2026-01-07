@@ -191,11 +191,11 @@ export async function executeToolWithTimeout<T>(
     const duration = Date.now() - startTime;
 
     // Convert to OrionError if not already
-    // Use TOOL_FAILED for generic errors, preserve TOOL_TIMEOUT for actual timeouts
+    // Use TOOL_EXECUTION_FAILED for generic errors, preserve TOOL_TIMEOUT for actual timeouts
     const orionError = isOrionError(error)
       ? error
       : createOrionError(
-          ErrorCode.TOOL_FAILED,
+          ErrorCode.TOOL_EXECUTION_FAILED,
           `Tool "${toolName}" failed: ${error instanceof Error ? error.message : String(error)}`,
           {
             userMessage: `Unable to complete "${toolName}". Continuing with other tools.`,
@@ -267,7 +267,7 @@ export async function executeToolsInParallel(
         success: false,
         toolName: call.toolName,
         error: createOrionError(
-          ErrorCode.TOOL_FAILED,
+          ErrorCode.TOOL_EXECUTION_FAILED,
           `Tool executor not found for "${call.toolName}"`,
           {
             userMessage: `Tool "${call.toolName}" is not available.`,
@@ -354,7 +354,7 @@ export function handleToolFailure(
   const orionError = isOrionError(error)
     ? error
     : createOrionError(
-        ErrorCode.TOOL_FAILED,
+        ErrorCode.TOOL_EXECUTION_FAILED,
         `Tool "${toolName}" failed: ${error.message}`,
         {
           userMessage: `Unable to complete "${toolName}".`,

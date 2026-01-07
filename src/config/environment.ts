@@ -72,6 +72,11 @@ export const config = {
     process.env.GKE_SANDBOX_ROUTER_URL ??
     'http://sandbox-router-svc.default.svc.cluster.local:8080',
 
+  // GKE Cluster Configuration (Tech-Spec: Fix Sandbox Client K8s Lifecycle)
+  gcpProjectId: process.env.GCP_PROJECT_ID ?? 'ai-workflows-459123',
+  gkeClusterName: process.env.GKE_CLUSTER_NAME ?? 'orion-sandbox-cluster',
+  gkeClusterRegion: process.env.GKE_CLUSTER_REGION ?? 'us-central1',
+
   // MCP servers for injection into sandbox (Story 6.2)
   mcpServersJson: process.env.MCP_SERVERS_JSON ?? '{}',
 } as const;

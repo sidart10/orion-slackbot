@@ -46,7 +46,6 @@ export {
 
 // Memory Tool (Story 5.1)
 export {
-  registerMemoryTool,
   setMemoryToolContext,
   clearMemoryToolContext,
   MEMORY_TOOL_NAME,

@@ -3,7 +3,7 @@
 **Created:** 2026-01-02  
 **Status:** ✅ COMPLETE (Auth + Timeout + Defaults implemented)  
 **Author:** Barry (Quick Flow Solo Dev)  
-**Last Review:** 2026-01-03 (Extended implementation for local dev + Slack integration)  
+**Last Review:** 2026-01-03 (Adversarial code review - robustness hardening + tests added)  
 **Deployed:** 2026-01-03
 
 ---
@@ -285,7 +285,9 @@ gcloud run services add-iam-policy-binding mcp-veo \
 | `src/tools/mcp/types.ts` | Added defaults, authType, audience fields to MCP config types |
 | `src/tools/mcp/config.ts` | Added passthrough for authType, defaults, requestTimeoutMs in transformToSdkConfig |
 | `src/tools/mcp/client.ts` | Added dynamic GCP identity token auth via getAuthHeader() |
+| `src/tools/mcp/client.test.ts` | Updated to keep init-timeout tests deterministic (fake timers) |
 | `src/tools/mcp/gcp-auth.ts` | **NEW:** GCP identity token fetching with service account impersonation |
+| `src/tools/mcp/gcp-auth.test.ts` | **NEW:** Unit tests for GCP auth (google-auth + gcloud fallback) |
 | `src/tools/mcp/discovery.ts` | Pass server.defaults to mcpToolToClaude for schema injection |
 | `src/tools/mcp/schema-converter.ts` | Inject server defaults into tool descriptions, remove from required |
 | `src/tools/mcp/manager.ts` | Added debug logging for requestTimeoutMs on client creation |
@@ -294,6 +296,7 @@ gcloud run services add-iam-policy-binding mcp-veo \
 | `src/agent/orion.ts` | Look up server-specific timeout for MCP tools |
 | `src/agent/loop.ts` | Added extractPlainUrls for GCS URL extraction from tool results |
 | `src/slack/utils/image-upload.ts` | **NEW:** Download images from GCS and upload to Slack |
+| `src/slack/utils/image-upload.test.ts` | **NEW:** URL extraction tests (gs:// + signed URLs) |
 | `src/slack/handlers/app-mention.ts` | Integrated image upload for tool results |
 | `src/slack/handlers/user-message.ts` | Integrated image upload for tool results |
 | `package.json` | Added google-auth-library, execa dependencies |
@@ -324,6 +327,14 @@ gcloud run services add-iam-policy-binding mcp-veo \
 | 2026-01-03 | Barry | **DEFAULTS:** Remove defaulted params from required list |
 | 2026-01-03 | Barry | **VALIDATION:** Auto-correct invalid Veo duration to nearest valid |
 | 2026-01-03 | Barry | **SLACK:** Added image download/upload utility (partial - needs review) |
+| 2026-01-03 | Barry (Code Review) | **REVIEW:** Adversarial review completed - 2 CRITICAL, 4 MEDIUM, 3 LOW issues identified |
+| 2026-01-03 | Barry (Code Review) | **ACTION ITEMS:** Created 9 follow-up tasks in Review Follow-ups section |
+| 2026-01-03 | Barry (Quick-Dev) | **CRITICAL FIXES:** Replaced console.log with logger.debug, added traceId to auth logs |
+| 2026-01-03 | Barry (Quick-Dev) | **GCS IMAGE FIX:** Added gs:// URL pattern and GCS client auth for image downloads |
+| 2026-01-03 | Barry (Quick-Dev) | **VEO FIX:** Extended duration validation to cover veo_i2v |
+| 2026-01-03 | Barry (Quick-Dev) | **AUTH TIMEOUT:** Added 10s timeout to tryGoogleAuthLibrary() |
+| 2026-01-03 | Barry (Quick-Dev) | **SA HARDCODE FIX:** Removed hardcoded SA fallback, now requires GCP_IMPERSONATE_SA env |
+| 2026-01-03 | Barry (Code Review) | **HARDENING:** `gcp-auth` now uses `execFile` (no shell interpolation), base64url JWT expiry parsing, traceId propagation, and added unit tests for auth + image URL extraction |
 
 ---
 
@@ -487,16 +498,42 @@ genmedia-veo:
 
 | Issue | Status | Notes |
 |-------|--------|-------|
-| Image inline display | ⚠️ Partial | URL extraction works, upload may need debugging |
+| Image inline display | ✅ Fixed | Added gs:// URL pattern + GCS client auth for downloads |
 | Video inline display | ❌ Not implemented | Would need video download + Slack video upload |
 | Multiple processes | ⚠️ Manual | Must `pkill -f orion-slack-agent` before restart |
 | Token caching | ✅ Working | 5-min buffer before expiry refresh |
+| Console.log in router | ✅ Fixed | Replaced with logger.debug() |
+| GCP auth timeout | ✅ Fixed | Added 10s timeout to tryGoogleAuthLibrary() |
 
 ### Review Follow-ups (AI)
 
 - [x] [AI-Review][MEDIUM] Commit `infra/` directory to git ✅ Committed as 7bb2f4b
 - [x] [AI-Review][LOW] Migrated from GCR to Artifact Registry (`us-central1-docker.pkg.dev/$PROJECT_ID/orion/`)
 - [x] [AI-Review][LOW] Increased Veo memory from 1Gi → 2Gi for video processing
+
+### Review Follow-ups (AI) - 2026-01-03 Code Review
+
+**Critical:**
+- [x] [AI-Review][CRITICAL] Remove `console.log` debug statements in `src/tools/router.ts:71-74` — violates project-context.md, use `logger.debug()` instead ✅ Fixed 2026-01-03
+- [x] [AI-Review][CRITICAL] Add `traceId` parameter to auth failure log in `src/tools/mcp/client.ts:138-145` ✅ Fixed 2026-01-03
+
+**Medium:**
+- [x] [AI-Review][MEDIUM] Fix image download auth for GCS URLs in `src/slack/utils/image-upload.ts` — either ensure signed URLs or add GCS auth; likely root cause of "images showing as links" ✅ Fixed 2026-01-03 (added GCS client for gs:// downloads)
+- [x] [AI-Review][MEDIUM] Extend Veo duration validation to include `veo_i2v` in `src/tools/router.ts:78` — same [4,6,8] constraint applies ✅ Fixed 2026-01-03
+- [x] [AI-Review][MEDIUM] Add timeout to `tryGoogleAuthLibrary()` in `src/tools/mcp/gcp-auth.ts` — can hang forever on metadata server issues ✅ Fixed 2026-01-03 (10s timeout)
+- [x] [AI-Review][MEDIUM] Update `IMAGE_URL_PATTERN` regex in `src/slack/utils/image-upload.ts` to match `gs://` URLs — Imagen/Veo return GCS paths not HTTP URLs ✅ Fixed 2026-01-03 (added GCS_URI_PATTERN)
+
+**Low:**
+- [x] [AI-Review][LOW] Add test coverage for `src/tools/mcp/gcp-auth.ts` — critical auth code with no tests ✅ Fixed 2026-01-03 (added `src/tools/mcp/gcp-auth.test.ts`)
+- [x] [AI-Review][LOW] Remove hardcoded service account fallback in `src/tools/mcp/gcp-auth.ts:80` — should require env var ✅ Fixed 2026-01-03 (now requires GCP_IMPERSONATE_SA)
+- [x] [AI-Review][LOW] Verify `extractPlainUrls` function exists in `src/agent/loop.ts` or update tech spec File List — function mentioned but not found ✅ Verified: exists as `extractPlainImageUrls` at line 205
+
+### Additional Hardening (AI) - 2026-01-03
+
+- [x] [AI-Review][HIGH] Avoid shell injection in `src/tools/mcp/gcp-auth.ts` by using `execFile` (not `exec` string interpolation)
+- [x] [AI-Review][MEDIUM] Fix JWT expiry parsing in `src/tools/mcp/gcp-auth.ts` to use base64url decoding
+- [x] [AI-Review][MEDIUM] Prevent timer leaks in `tryGoogleAuthLibrary()` / GCS download timeout guards
+- [x] [AI-Review][MEDIUM] Propagate `traceId` into GCP auth + Slack image upload logs (project-context.md rule)
 
 ---
 

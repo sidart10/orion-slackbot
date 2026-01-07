@@ -1,4 +1,4 @@
-# generated: 2026-01-02
+# generated: 2026-01-06
 # project: 2025-12 orion-slack-agent
 # project_key: orion-slack-agent
 # tracking_system: file-system
@@ -31,16 +31,12 @@
 
 # CURRENT FOCUS:
 # ==============
-# 🎯 EPIC 5: PERSISTENT MEMORY - completing remaining stories
-# 🎯 EPIC 6: SKILLS - 6-1 complete, 6-2 ready
+# Epic 5: PERSISTENT MEMORY - All stories done (5-1, 5-2, 5-3)
+# Epic 6: SKILLS & EXTENSIONS - 6-1 done, 6-2 in review, 6-3 DONE
 #
-# PRIORITY ORDER (work in sequence):
-#   1. 5-2-memory-scopes-path-builders → in review
-#   2. 6-2-commands-framework → ready-for-dev
-#
-# COMPLETED: Epic 7 (Slack Polish) ✅, Story 6-1 (Agent Skills Loader) ✅
+# NEXT ACTION: Complete code review for 6-2-execute-code-tool
 
-generated: 2026-01-02
+generated: 2026-01-06
 project: 2025-12 orion-slack-agent
 project_key: orion-slack-agent
 tracking_system: file-system
@@ -66,26 +62,25 @@ development_status:
   # ═══════════════════════════════════════════════════════════════════════════
   epic-2: done
   2-1-anthropic-api-integration: done
-  2-2-agent-loop-implementation: done          # ✅ Code review passed
+  2-2-agent-loop-implementation: done
   2-3-response-verification-retry: done
-  2-4-orion-error-graceful-degradation: done   # Fixed: was 'complete'
-  2-5-thread-context-history: done             # ✅ Code review fixes applied; tests passing
-  2-6-context-compaction: done                 # Code review fixes applied; tests passing
-  2-7-source-citations: done                   # ✅ Code review fixes applied; tests passing
-  2-8-app-mention-handler: done                # ✅ Code review fixes applied 2025-12-31
-  2-9-streaming-input-accumulation: done     # ✅ Code review passed 2025-01-02
+  2-4-orion-error-graceful-degradation: done
+  2-5-thread-context-history: done
+  2-6-context-compaction: done
+  2-7-source-citations: done
+  2-8-app-mention-handler: done
+  2-9-streaming-input-accumulation: done
   epic-2-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Epic 3: Tool Connectivity (MCP) ✅ COMPLETE
   # ═══════════════════════════════════════════════════════════════════════════
-  # Completed 2026-01-02: All stories including 3.5 (MCP lifecycle) done
   epic-3: done
-  3-1-generic-mcp-client: done                  # ✅ Code review passed 2025-01-02
-  3-2-tool-discovery-registration: done         # ✅ Code review passed 2025-01-02
-  3-3-tool-execution-error-handling: done       # ✅ Code review passed 2025-01-02
-  3-4-channel-tool-feedback: done               # ✅ Code review fixes applied 2025-01-02
-  3-5-mcp-session-lifecycle: done               # ✅ Code review fixes applied; tests passing
+  3-1-generic-mcp-client: done
+  3-2-tool-discovery-registration: done
+  3-3-tool-execution-error-handling: done
+  3-4-channel-tool-feedback: done
+  3-5-mcp-session-lifecycle: done
   epic-3-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -94,45 +89,37 @@ development_status:
   # Reason: Over-engineering. Claude's native parallel tool_use pattern achieves
   # the same outcome without a separate orchestration layer.
   # See: sprint-change-proposal-2025-12-31-epic4-removal.md
-  #
-  # epic-4: removed
-  # 4-1-subagent-spawner: removed
-  # 4-2-result-aggregation: removed
-  # 4-3-deep-research-workflow: removed
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 7: Slack Polish ✅ COMPLETE
+  # Epic 5: Persistent Memory ✅ COMPLETE
   # ═══════════════════════════════════════════════════════════════════════════
-  # Completed 2026-01-03: All UX improvements done (7.1, 7.3-7.6); 7.2 cancelled/merged
-  epic-7: done
-  # WORK ORDER (by priority):
-  7-5-duplicate-response-bug: done               # ✅ P0 BUG: Fixed 2026-01-02 (race condition in SDK + loop reset)
-  7-3-contextual-tool-feedback: done               # ✅ P1: Rich tool status messages - Code review passed 2026-01-02
-  7-4-response-completion-indicators: done  # P2: ✅ on answered messages - Code review passed 2026-01-02; manual Slack verification pending
-  7-1-dynamic-suggested-prompts: done              # ✅ P2: Discovery prompts - Code review passed 2026-01-02
-  7-2-thread-summarization: cancelled            # Merged into 7-6 (conversation summarization handles threads too)
-  7-6-conversation-summarization: done    # ✅ P1: Code review fixes applied 2026-01-03 (61 tests passing); manual Slack verification pending
-  epic-7-retrospective: optional
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 5: Persistent Memory 🔄 IN PROGRESS
-  # ═══════════════════════════════════════════════════════════════════════════
-  epic-5: in-progress
-  5-1-memory-tool-handler: done               # ✅ Code review #3 passed 2026-01-02; 107 tests passing
-  5-2-memory-scopes-path-builders: review
-  5-3-memory-auto-check: done                # ✅ Code review fixed 2026-01-03; memory context injection now complete
+  epic-5: done
+  5-1-memory-tool-handler: done
+  5-2-memory-scopes-path-builders: done
+  5-3-memory-auto-check: done
   epic-5-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Epic 6: Skills & Extensions Framework 🔄 IN PROGRESS
   # ═══════════════════════════════════════════════════════════════════════════
-  # COURSE CORRECTION (2026-01-02): 6-1 implemented wrong pattern (full content
-  # injection vs progressive disclosure). Refactor required per Agent Skills
-  # open standard (agentskills.io). See: sprint-change-proposal-2026-01-02-skills-architecture-fix.md
+  # Sprint Change (2026-01-06): Added Story 6-3 for Anthropic Managed PTC
   epic-6: in-progress
-  6-1-agent-skills-loader: refactor-needed    # ⚠️ Course correction: metadata-only loading required
-  6-2-execute-code-tool: in-progress          # Adding skill filesystem sync to sandbox
+  6-1-agent-skills-loader: done
+  6-2-execute-code-tool: review
+  6-3-anthropic-managed-ptc: done
   epic-6-retrospective: optional
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Epic 7: Slack Polish ✅ COMPLETE
+  # ═══════════════════════════════════════════════════════════════════════════
+  epic-7: done
+  7-1-dynamic-suggested-prompts: done
+  7-2-thread-summarization: cancelled
+  7-3-contextual-tool-feedback: done
+  7-4-response-completion-indicators: done
+  7-5-duplicate-response-bug: done
+  7-6-conversation-summarization: done
+  epic-7-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Epic 8: Code Generation & Execution (Phase 2 - Deferred)

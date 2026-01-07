@@ -13,6 +13,7 @@ completedAt: '2025-12-22'
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
+last_updated: '2026-01-04'
 course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22); MCP SDK adoption (2025-12-31); GKE Agent Sandbox for code execution (2026-01-03)'
 hasProjectContext: false
 ---
@@ -108,26 +109,43 @@ Orion's 43 functional requirements span 7 architectural domains:
 | Skill loading | Custom skill loader reading `SKILL.md` files |
 | Context compaction | Sliding window on messages array |
 
-### Agent Skills Implementation (Direct API)
+### Agent Skills Implementation (Progressive Disclosure)
 
-Agent Skills is an open standard from [agentskills.io](https://agentskills.io/home) — folders of instructions, scripts, and resources that agents can discover and use. Implementation pattern:
+Agent Skills is an open standard from [agentskills.io](https://agentskills.io/home) — folders of instructions, scripts, and resources that agents can discover and use.
+
+**Three-Level Progressive Disclosure:**
+
+| Level | When Loaded | Token Cost | Content |
+|-------|-------------|------------|---------|
+| **Level 1: Metadata** | Always (startup) | ~100 tokens/skill | `name` + `description` from YAML frontmatter |
+| **Level 2: Instructions** | When triggered | Variable | Full SKILL.md body (read via execute_code) |
+| **Level 3: Resources** | As needed | Unlimited | Bundled scripts executed in GKE sandbox |
+
+**Implementation pattern:**
 
 ```typescript
-// Load skills from .skills/ directory
-async function loadSkills(): Promise<Skill[]> {
+// Load ONLY metadata from .skills/ directory
+async function loadSkillMetadata(): Promise<SkillMetadata[]> {
   const skillDirs = await glob('.skills/*/SKILL.md');
-  return Promise.all(skillDirs.map(parseSkillMd));
+  return Promise.all(skillDirs.map(parseSkillFrontmatterOnly));
 }
 
-// Include in system prompt or as tool definitions
-function buildSystemPrompt(skills: Skill[]): string {
-  const skillInstructions = skills.map(s => 
-    `## Skill: ${s.name}\n${s.description}\n${s.instructions}`
-  ).join('\n\n');
+// System prompt contains ONLY hints (~100 tokens/skill)
+function buildSkillsHint(skills: SkillMetadata[]): string {
+  const hints = skills.map(s => `- ${s.name}: ${s.description}`).join('\n');
   
-  return `${BASE_SYSTEM_PROMPT}\n\n# Available Skills\n${skillInstructions}`;
+  return `# Available Skills
+
+${hints}
+
+When a task matches a skill's description, read the full instructions:
+  execute_code({ code: "cat /skills/{skill-name}/SKILL.md" })
+
+Then follow the instructions in that file.`;
 }
 ```
+
+**Key Principle:** System prompt contains metadata only. Full content loaded on-demand via `execute_code` reading from sandbox filesystem (`/skills/`). This follows the pattern used by Cursor, Claude Code, and VS Code.
 
 ### Project Structure
 
@@ -878,15 +896,16 @@ tests/
 
 | Epic | Description | Primary Directory | Phase |
 |------|-------------|-------------------|-------|
-| **Epic 1** | Slack Integration | `src/slack/` | MVP |
-| **Epic 2** | Agent Loop | `src/agent/` | MVP |
-| **Epic 3** | MCP Integration | `src/tools/mcp/` | MVP |
+| **Epic 1** | Foundation & Deployment | `src/slack/`, `docker/` | MVP |
+| **Epic 2** | Agent Core Loop | `src/agent/` | MVP |
+| **Epic 3** | Tool Connectivity (MCP) | `src/tools/mcp/` | MVP |
 | **Epic 4** | ~~Subagents~~ REMOVED | N/A | Removed 2025-12-31 |
-| **Epic 5** | Skills & Extensions | `.orion/` + `src/skills/` | MVP |
-| **Epic 6** | UX & Polish | `src/slack/` (suggested prompts) | MVP |
-| **Epic 7** | Knowledge & Q&A | `src/tools/` (search tools) | MVP |
-| **Epic 8** | Observability | `src/observability/` | MVP |
-| **Epic 9** | Sandbox/Code Execution | `src/tools/sandbox/` | Phase 2 |
+| **Epic 5** | Persistent Memory | `src/tools/memory/`, `src/memory/` | MVP |
+| **Epic 6** | Skills & Extensions | `.skills/`, `src/skills/`, `src/tools/code-execution/` | MVP |
+| **Epic 7** | Slack Polish | `src/slack/` (suggested prompts, summarization) | MVP |
+| **Epic 8** | Code Generation (reduced) | N/A (FR19/FR23 only) | Phase 2 |
+
+*Note: Observability is cross-cutting, implemented via `src/observability/` across all epics.*
 
 ### Complete Project Directory Structure
 
@@ -911,16 +930,14 @@ orion-slack-agent/
 │   └── workflows/
 │       └── ci.yaml                        # Test + lint on PR
 │
-├── .orion/                                # Agent definitions (BMAD-inspired)
-│   ├── agent.yaml                         # Main agent config
-│   ├── skills/                            # Skill definitions
-│   │   └── example-skill/
-│   │       └── SKILL.md                   # Agent Skills format
-│   ├── commands/                          # Custom slash commands
-│   │   └── deep-research.yaml
-│   └── prompts/                           # System prompts
-│       ├── system.md                      # Core system prompt
-│       └── verification.md                # Verification prompt
+├── .skills/                               # Agent Skills (agentskills.io standard)
+│   └── example-skill/
+│       ├── SKILL.md                       # Skill definition + instructions
+│       └── scripts/                       # Optional executable scripts
+│
+├── orion/                                 # Orion configuration
+│   └── workflows/                         # Workflow definitions
+│       └── example.md
 │
 ├── orion-context/                         # Agentic search context
 │   ├── conversations/                     # Thread context cache
@@ -970,11 +987,15 @@ orion-slack-agent/
 │   │   │   ├── discovery.test.ts
 │   │   │   └── servers.ts                 # MCP server configurations
 │   │   │
-│   │   ├── sandbox/                       # Epic 9: Code execution (Phase 2)
-│   │   │   ├── executor.ts                # Rube workbench wrapper
-│   │   │   └── executor.test.ts
+│   │   ├── code-execution/                # Epic 6: Code execution (GKE sandbox)
+│   │   │   ├── tool.ts                    # execute_code tool
+│   │   │   ├── tool.test.ts
+│   │   │   ├── sandbox-client.ts          # GKE sandbox HTTP client
+│   │   │   ├── sandbox-client.test.ts
+│   │   │   ├── types.ts
+│   │   │   └── index.ts
 │   │   │
-│   │   └── search/                        # Epic 7: Knowledge search
+│   │   └── search/                        # Knowledge search
 │   │       ├── slack.ts                   # Slack search
 │   │       ├── web.ts                     # Web search via MCP
 │   │       └── confluence.ts              # Confluence via MCP
@@ -1085,8 +1106,8 @@ Internal:
 | FR3-4 (Parallel tools) | Native Claude tool_use + Promise.all() execution |
 | FR5 (Context compaction) | `src/agent/compaction.ts` |
 | FR13-18 (Slack) | `src/slack/*` |
-| FR19-23 (Code gen) | `src/tools/sandbox/executor.ts` *(Phase 2)* |
-| FR24-29 (Extensions) | `.orion/skills/`, `src/skills/loader.ts` |
+| FR19-23 (Code execution) | `src/tools/code-execution/*.ts` *(FR20-22 MVP, FR19/FR23 Phase 2)* |
+| FR24-29 (Extensions) | `.skills/`, `src/skills/loader.ts` |
 | FR26-28 (MCP) | `src/tools/mcp/client.ts` (native session management) |
 | FR35-40 (Observability) | `src/observability/langfuse.ts` |
 | AR29-31 (Memory) | `src/tools/memory/handler.ts` |
@@ -1243,13 +1264,12 @@ Project structure supports all decisions with clear boundaries.
 |------|-------------|----------------|
 | Epic 1 | Slack Integration | ✅ `src/slack/` |
 | Epic 2 | Agent Loop | ✅ `src/agent/` |
-| Epic 3 | MCP Integration | ✅ `src/tools/mcp/` |
+| Epic 3 | Tool Connectivity (MCP) | ✅ `src/tools/mcp/` |
 | Epic 4 | ~~Subagents~~ | ❌ Removed 2025-12-31 |
-| Epic 5 | Skills & Extensions | ✅ `.orion/` + `src/skills/` |
-| Epic 6 | UX & Polish | ✅ `src/slack/suggested-prompts.ts` |
-| Epic 7 | Slack AI App (FR47-50) | ✅ `src/slack/feedback.ts`, handlers |
-| Epic 8 | Observability | ✅ `src/observability/` |
-| Epic 9 | Sandbox/Code Execution | ⏳ `src/tools/sandbox/` (Phase 2) |
+| Epic 5 | Persistent Memory | ✅ `src/tools/memory/`, `src/memory/` |
+| Epic 6 | Skills & Extensions | ✅ `.skills/`, `src/skills/`, `src/tools/code-execution/` |
+| Epic 7 | Slack Polish | ✅ `src/slack/suggested-prompts.ts`, handlers |
+| Epic 8 | Code Generation (reduced) | ⏳ FR19/FR23 only (Phase 2) |
 
 **Functional Requirements Coverage:** 50/50 FRs covered (FR1-46 + FR47-50)
 

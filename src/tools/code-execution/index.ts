@@ -6,7 +6,7 @@
  * @see Story 6.2 - execute_code Tool
  */
 
-export { executeSandbox } from './sandbox-client.js';
+export { executeSandbox, SandboxTimeoutError } from './sandbox-client.js';
 export {
   executeCodeHandler,
   executeCodeToolDefinition,

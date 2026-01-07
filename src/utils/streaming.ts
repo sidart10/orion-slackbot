@@ -27,6 +27,8 @@ export interface StreamerConfig {
 export interface StreamMetrics {
   totalDuration: number;
   totalChars: number;
+  deliverySuccess: boolean;
+  deliveryError?: string;
 }
 
 // Type for the chatStream return value
@@ -94,6 +96,12 @@ export class SlackStreamer {
    * @see tech-spec-duplicate-response-fix.md - Race condition analysis
    */
   private flushInProgress: Promise<void> | null = null;
+
+  /**
+   * Tracks the first delivery error encountered during streaming.
+   * Used to surface errors in stop() that were suppressed during append.
+   */
+  private deliveryError: Error | null = null;
 
   constructor(config: StreamerConfig) {
     this.client = config.client;
@@ -245,6 +253,11 @@ export class SlackStreamer {
         error: error instanceof Error ? error.message : String(error),
         attempt,
       });
+
+      // Capture first error for surfacing in stop()
+      if (!this.deliveryError) {
+        this.deliveryError = error instanceof Error ? error : new Error(String(error));
+      }
     }
   }
 
@@ -299,11 +312,27 @@ export class SlackStreamer {
       totalChars: this.totalChars,
     });
 
-    await this.streamer.stop();
+    // Wrap SDK stop() to catch errors
+    let stopError: Error | null = null;
+    try {
+      await this.streamer.stop();
+    } catch (error) {
+      stopError = error instanceof Error ? error : new Error(String(error));
+      logger.error({
+        event: 'stream_sdk_stop_failed',
+        channel: this.channel,
+        threadTs: this.threadTs,
+        error: stopError.message,
+      });
+    }
 
+    // Determine delivery success and build metrics
+    const deliverySuccess = !this.deliveryError && !stopError;
     const metrics: StreamMetrics = {
       totalDuration: Date.now() - this.startTime,
       totalChars: this.totalChars,
+      deliverySuccess,
+      deliveryError: this.deliveryError?.message || stopError?.message,
     };
 
     logger.info({
@@ -312,6 +341,12 @@ export class SlackStreamer {
       threadTs: this.threadTs,
       ...metrics,
     });
+
+    // Throw if delivery failed to force handler error handling
+    if (!deliverySuccess) {
+      const errorMsg = this.deliveryError?.message || stopError?.message || 'Unknown error';
+      throw new Error(`Stream delivery failed: ${errorMsg}`);
+    }
 
     return metrics;
   }

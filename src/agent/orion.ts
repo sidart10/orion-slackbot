@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { executeTool as executeToolWithPolicies } from '../tools/executor.js';
 import { executeToolCall } from '../tools/router.js';
 import { getMcpServerConfigs } from '../config/mcp-servers.js';
+import { setExecuteCodeContext, clearExecuteCodeContext } from '../tools/code-execution/index.js';
 
 /**
  * Context for agent execution.
@@ -144,17 +145,23 @@ export async function* runOrionAgent(
         }
       }
 
-      const result = await executeToolWithPolicies(
-        name,
-        toolUseId,
-        args,
-        executeToolCall,
-        { traceId: effectiveTraceId, timeoutMs }
-      );
+      const isExecuteCode = name === 'execute_code';
+      if (isExecuteCode) setExecuteCodeContext({ traceId: effectiveTraceId });
+      try {
+        const result = await executeToolWithPolicies(
+          name,
+          toolUseId,
+          args,
+          executeToolCall,
+          { traceId: effectiveTraceId, timeoutMs }
+        );
 
-      // The agent loop expects tool_result.content to always be a string.
-      // We pass success payload or formatted error message (AC#6).
-      return result.success ? result.data : result.error.message;
+        // The agent loop expects tool_result.content to always be a string.
+        // We pass success payload or formatted error message (AC#6).
+        return result.success ? result.data : result.error.message;
+      } finally {
+        if (isExecuteCode) clearExecuteCodeContext();
+      }
     },
   });
 

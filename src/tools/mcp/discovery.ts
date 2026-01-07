@@ -8,7 +8,7 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
-import type { ToolResult } from '../../utils/tool-result.js';
+import type { ToolError, ToolResult } from '../../utils/tool-result.js';
 import { isRetryable } from '../../utils/tool-result.js';
 import { logger } from '../../utils/logger.js';
 import { getMcpServerConfigs } from '../../config/mcp-servers.js';
@@ -51,7 +51,7 @@ export async function discoverAllTools(
   const results = await Promise.allSettled(discoveries);
 
   let registered = 0;
-  let firstError: ToolResult<never>['error'] | null = null;
+  let firstError: ToolError | null = null;
 
   for (const r of results) {
     if (r.status === 'fulfilled') {

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { VerificationResult, VerificationIssue } from '../agent/loop.js';
+import type { VerificationResult, VerificationIssue } from '../agent/verification.js';
 
 // Hoist mocks
 const { mockLogger, mockLangfuse } = vi.hoisted(() => ({
@@ -130,7 +130,7 @@ describe('Verification Metrics Module', () => {
       const result: VerificationResult = {
         passed: false,
         feedback: 'Failed',
-        issues: [{ rule: 'not_empty', severity: 'error', feedback: 'Empty' }],
+        issues: [{ code: 'EMPTY_RESPONSE', message: 'Empty', severity: 'error' }],
       };
 
       trackVerification(result, 3);
@@ -144,9 +144,9 @@ describe('Verification Metrics Module', () => {
       resetMetrics();
 
       const issues: VerificationIssue[] = [
-        { rule: 'not_empty', severity: 'error', feedback: 'Empty' },
-        { rule: 'no_markdown_bold', severity: 'error', feedback: 'Bold' },
-        { rule: 'not_empty', severity: 'error', feedback: 'Empty again' },
+        { code: 'EMPTY_RESPONSE', message: 'Empty', severity: 'error' },
+        { code: 'MARKDOWN_BOLD', message: 'Bold', severity: 'error' },
+        { code: 'EMPTY_RESPONSE', message: 'Empty again', severity: 'error' },
       ];
 
       const result: VerificationResult = {
@@ -158,8 +158,8 @@ describe('Verification Metrics Module', () => {
       trackVerification(result, 1);
 
       const metrics = getMetrics();
-      expect(metrics.issuesByType['not_empty']).toBe(2);
-      expect(metrics.issuesByType['no_markdown_bold']).toBe(1);
+      expect(metrics.issuesByType['EMPTY_RESPONSE']).toBe(2);
+      expect(metrics.issuesByType['MARKDOWN_BOLD']).toBe(1);
     });
 
     it('should log verification event', async () => {
@@ -217,7 +217,10 @@ describe('Verification Metrics Module', () => {
 
       // Add some metrics
       trackVerification({ passed: true, feedback: '', issues: [] }, 1);
-      trackVerification({ passed: false, feedback: '', issues: [{ rule: 'test', severity: 'error', feedback: '' }] }, 3);
+      trackVerification(
+        { passed: false, feedback: '', issues: [{ code: 'TEST', message: '', severity: 'error' }] },
+        3
+      );
 
       // Reset
       resetMetrics();

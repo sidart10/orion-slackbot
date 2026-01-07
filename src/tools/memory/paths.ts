@@ -100,10 +100,10 @@ function validateThreadTs(threadTs: string): void {
 }
 
 /**
- * Sanitize thread_ts for GCS paths (replace . with -).
+ * Sanitize thread_ts for GCS paths (replace all . with -).
  */
 function sanitizeThreadTs(threadTs: string): string {
-  return threadTs.replace('.', '-');
+  return threadTs.replaceAll('.', '-');
 }
 
 // =============================================================================
@@ -212,10 +212,15 @@ export function validateMemoryPath(rawPath: string): PathValidation {
     return { valid: false, error: 'Path must be within global/, users/, or sessions/ scope' };
   }
 
-  // Validate extension if it's a file (not directory)
-  if (!rawPath.endsWith('/')) {
+  // Validate extension if it's a file (not directory or root listing)
+  // /memories and /memories/ are special root listing paths
+  if (!rawPath.endsWith('/') && rawPath !== '/memories') {
     const ext = path.extname(rawPath).toLowerCase();
-    if (ext && !ALLOWED_EXTENSIONS.includes(ext as AllowedExtension)) {
+    // Files must have a valid extension (consistent with builders)
+    if (!ext) {
+      return { valid: false, error: 'File must have an extension' };
+    }
+    if (!ALLOWED_EXTENSIONS.includes(ext as AllowedExtension)) {
       return { valid: false, error: `Invalid extension: ${ext}` };
     }
   }
