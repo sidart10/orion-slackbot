@@ -13,6 +13,7 @@ import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { executeSandbox, SandboxTimeoutError } from './sandbox-client.js';
+import { isGkeOnlySkill, GKE_ONLY_SKILLS } from './allowed-skills.js';
 import { getSkillMetadata } from '../../skills/loader.js';
 import { getLangfuse } from '../../observability/langfuse.js';
 import { logger } from '../../utils/logger.js';
@@ -35,6 +36,16 @@ def call_tool(server, tool, args):
 def list_mcp_servers():
     return list(MCP_SERVERS.keys())
 `;
+
+/**
+ * Extract skill name from skill_doc or skill_script input.
+ * @example "skill:webapp-testing" → "webapp-testing"
+ * @example "skill:webapp-testing/script.py" → "webapp-testing"
+ */
+function extractSkillName(input: string): string {
+  const withoutPrefix = input.replace(/^skill:/, '');
+  return withoutPrefix.split('/')[0];
+}
 
 /**
  * Load MCP bootstrap script for injection into sandbox.
@@ -161,6 +172,19 @@ export async function orionSandboxHandler(
 
     // Handle skill script execution (aligned with Story 6.1)
     if (input.skill_script) {
+      // Validate GKE-only skills BEFORE processing (Story 6.12)
+      const skillNameForValidation = extractSkillName(input.skill_script);
+      if (!isGkeOnlySkill(skillNameForValidation)) {
+        return {
+          success: false,
+          error: {
+            code: 'SKILL_NOT_GKE',
+            message: `Skill "${skillNameForValidation}" should use Anthropic container (PTC), not GKE sandbox. GKE is only for: ${GKE_ONLY_SKILLS.join(', ')}`,
+            retryable: false,
+          },
+        };
+      }
+
       // Parse skill: prefix if present (Story 6.1 format)
       const scriptPath = input.skill_script.replace(/^skill:/, '');
       const [skillName, scriptFile] = scriptPath.split('/');
@@ -223,6 +247,19 @@ export async function orionSandboxHandler(
         codeToExecute = `import os, json\nARGS = json.loads(os.environ.get('ARGS', '{}'))\n${codeToExecute}`;
       }
     } else if (input.skill_doc) {
+      // Validate GKE-only skills BEFORE processing (Story 6.12)
+      const skillNameForValidation = extractSkillName(input.skill_doc);
+      if (!isGkeOnlySkill(skillNameForValidation)) {
+        return {
+          success: false,
+          error: {
+            code: 'SKILL_NOT_GKE',
+            message: `Skill "${skillNameForValidation}" should use Anthropic container (PTC), not GKE sandbox. GKE is only for: ${GKE_ONLY_SKILLS.join(', ')}`,
+            retryable: false,
+          },
+        };
+      }
+
       // On-demand SKILL.md loading (progressive disclosure, Story 6.1)
       // This reads the SKILL.md from the Orion filesystem (not from inside the sandbox)
       // and prints it in the sandbox as stdout for Claude to consume.

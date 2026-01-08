@@ -24,3 +24,9 @@ export type {
 
 export const EXECUTE_CODE_TOOL_NAME = 'orion_sandbox';
 
+export {
+  GKE_ONLY_SKILLS,
+  isGkeOnlySkill,
+  type GkeOnlySkill,
+} from './allowed-skills.js';
+
