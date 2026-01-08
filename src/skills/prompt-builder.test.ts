@@ -150,10 +150,10 @@ describe('buildSkillsHint (token efficient)', () => {
     expect(result).toContain('Conducts deep research across multiple sources');
     // Should NOT contain any instructions content
     expect(result).not.toContain('## Skill:');
-    // Should contain on-demand loading instruction
-    expect(result).toContain('orion_sandbox');
-    expect(result).toContain('skill_doc');
-    expect(result).toContain('skill:{skill-name}');
+    // Story 6.11: Simplified output - just skills list, no instructions
+    // Claude auto-loads skills via container parameter
+    expect(result).not.toContain('orion_sandbox');
+    expect(result).not.toContain('code execution environment');
   });
 
   it('includes tool names in hint', () => {
