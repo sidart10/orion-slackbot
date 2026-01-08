@@ -40,7 +40,7 @@ metadata:
   name: orion-sandbox-warmpool
   namespace: default
 spec:
-  replicas: 2
+  replicas: 1  # Reduced from 2 (2026-01-07) - fallback-only usage
   sandboxTemplateRef:
     name: python-runtime-template
 

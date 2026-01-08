@@ -148,9 +148,10 @@ describe('orionSandboxHandler', () => {
       }
     });
 
-    it('returns error for invalid skill_script format', async () => {
+    it('returns error for invalid skill_script format (GKE skill without script path)', async () => {
+      // Use GKE-only skill name to pass allowlist, then test format validation
       const result = await orionSandboxHandler(
-        { skill_script: 'invalid_format' },
+        { skill_script: 'webapp-testing' }, // Missing /script.py part
         mockContext
       );
 
@@ -287,11 +288,12 @@ describe('orionSandboxHandler', () => {
 
 describe('skill script execution (AC#4)', () => {
   const mockContext = { traceId: 'test-trace-skill' };
+  // NOTE: Must use GKE-only skill name to pass Story 6.12 allowlist validation
   const mockSkillWithScripts: SkillMetadata = {
-    name: 'test_skill',
+    name: 'webapp-testing', // GKE-only skill
     description: 'Test skill',
-    filePath: '.skills/test_skill/SKILL.md',
-    skillPath: '.skills/test_skill',
+    filePath: '.skills/webapp-testing/SKILL.md',
+    skillPath: '.skills/webapp-testing',
     hasExecutableScripts: true,
     scripts: [
       { name: 'process.py', path: '/mock/path/process.py' },
@@ -315,7 +317,7 @@ describe('skill script execution (AC#4)', () => {
     (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('print("hello from skill")');
 
     const result = await orionSandboxHandler(
-      { skill_script: 'skill:test_skill/process.py' },
+      { skill_script: 'skill:webapp-testing/process.py' },
       mockContext
     );
 
@@ -334,24 +336,25 @@ describe('skill script execution (AC#4)', () => {
     (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('pass');
 
     const result = await orionSandboxHandler(
-      { skill_script: 'test_skill/process.py' },
+      { skill_script: 'webapp-testing/process.py' },
       mockContext
     );
 
     expect(result.success).toBe(true);
   });
 
-  it('returns error when skill not found', async () => {
+  it('returns error when GKE-only skill not found', async () => {
+    // NOTE: Must use GKE-only skill name to pass allowlist, then test skill-not-found
     vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([]);
 
     const result = await orionSandboxHandler(
-      { skill_script: 'skill:nonexistent/script.py' },
+      { skill_script: 'skill:webapp-testing/script.py' },
       mockContext
     );
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.message).toContain('Skill not found: nonexistent');
+      expect(result.error.message).toContain('Skill not found: webapp-testing');
     }
   });
 
@@ -364,7 +367,7 @@ describe('skill script execution (AC#4)', () => {
     vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([skillWithoutScripts]);
 
     const result = await orionSandboxHandler(
-      { skill_script: 'skill:test_skill/script.py' },
+      { skill_script: 'skill:webapp-testing/script.py' },
       mockContext
     );
 
@@ -378,7 +381,7 @@ describe('skill script execution (AC#4)', () => {
     vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockSkillWithScripts]);
 
     const result = await orionSandboxHandler(
-      { skill_script: 'skill:test_skill/missing.py' },
+      { skill_script: 'skill:webapp-testing/missing.py' },
       mockContext
     );
 
@@ -401,7 +404,7 @@ describe('skill script execution (AC#4)', () => {
 
     await orionSandboxHandler(
       {
-        skill_script: 'skill:test_skill/process.py',
+        skill_script: 'skill:webapp-testing/process.py',
         args: { query: 'test' },
       },
       mockContext
@@ -420,11 +423,12 @@ describe('skill script execution (AC#4)', () => {
 
 describe('skill doc execution (Story 6.1 on-demand SKILL.md)', () => {
   const mockContext = { traceId: 'test-trace-skill-doc' };
+  // NOTE: Must use GKE-only skill name to pass Story 6.12 allowlist validation
   const mockSkill: SkillMetadata = {
-    name: 'test_skill',
+    name: 'web-artifacts-builder', // GKE-only skill
     description: 'Test skill',
-    filePath: '.skills/test_skill/SKILL.md',
-    skillPath: '.skills/test_skill',
+    filePath: '.skills/web-artifacts-builder/SKILL.md',
+    skillPath: '.skills/web-artifacts-builder',
     hasExecutableScripts: false,
   };
 
@@ -442,7 +446,7 @@ describe('skill doc execution (Story 6.1 on-demand SKILL.md)', () => {
 
     (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('SKILL CONTENT');
 
-    const result = await orionSandboxHandler({ skill_doc: 'skill:test_skill' }, mockContext);
+    const result = await orionSandboxHandler({ skill_doc: 'skill:web-artifacts-builder' }, mockContext);
     expect(result.success).toBe(true);
 
     // Ensure sandbox executed code with base64 decode helper
@@ -450,22 +454,23 @@ describe('skill doc execution (Story 6.1 on-demand SKILL.md)', () => {
     expect(callArgs.code).toContain('base64.b64decode');
   });
 
-  it('returns TOOL_NOT_FOUND when skill_doc skill is missing', async () => {
+  it('returns TOOL_NOT_FOUND when GKE-only skill_doc skill is missing', async () => {
+    // NOTE: Must use GKE-only skill name to pass allowlist, then test skill-not-found
     vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([]);
-    const result = await orionSandboxHandler({ skill_doc: 'skill:nope' }, mockContext);
+    const result = await orionSandboxHandler({ skill_doc: 'skill:webapp-testing' }, mockContext);
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.code).toBe('TOOL_NOT_FOUND');
     }
   });
 
-  it('returns TOOL_INVALID_INPUT for empty skill_doc format', async () => {
-    // Test edge case: "skill:" with nothing after it
+  it('returns SKILL_NOT_GKE for empty skill_doc format (empty = non-GKE)', async () => {
+    // Test edge case: "skill:" with nothing after it → empty string → not in GKE list
     const result = await orionSandboxHandler({ skill_doc: 'skill:' }, mockContext);
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.code).toBe('TOOL_INVALID_INPUT');
-      expect(result.error.message).toContain('Invalid skill_doc format');
+      // Empty string is not a GKE-only skill, so we get SKILL_NOT_GKE
+      expect(result.error.code).toBe('SKILL_NOT_GKE');
     }
   });
 });
@@ -525,6 +530,249 @@ describe('context management (AC#8 traceId fix)', () => {
     // Context is cleared - subsequent calls will use 'unknown'
     // This is a simple state test
     expect(true).toBe(true); // Context cleared without error
+  });
+});
+
+/**
+ * GKE-only skill enforcement tests.
+ *
+ * @see Story 6.12 - GKE Sandbox Scope Reduction
+ * @see AC#1 - Non-GKE skills rejected with SKILL_NOT_GKE
+ * @see AC#2 - GKE-only skills accepted and execute successfully
+ */
+describe('GKE-only skill enforcement (Story 6.12)', () => {
+  const mockContext = { traceId: 'test-trace-gke-enforcement' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetCacheForTests();
+  });
+
+  describe('skill_doc rejection (AC#1)', () => {
+    it('rejects non-GKE skills via skill_doc with SKILL_NOT_GKE error', async () => {
+      // GIVEN: A skill that should run in Anthropic container (not GKE)
+      const mockNonGkeSkill: SkillMetadata = {
+        name: 'summarize',
+        description: 'Summarization skill',
+        filePath: '.skills/summarize/SKILL.md',
+        skillPath: '.skills/summarize',
+        hasExecutableScripts: false,
+      };
+      vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockNonGkeSkill]);
+
+      // WHEN: Someone tries to execute it via orion_sandbox
+      const result = await orionSandboxHandler(
+        { skill_doc: 'skill:summarize' },
+        mockContext
+      );
+
+      // THEN: It's rejected with SKILL_NOT_GKE error
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.code).toBe('SKILL_NOT_GKE');
+        expect(result.error.message).toContain('Anthropic container');
+        expect(result.error.message).toContain('webapp-testing');
+        expect(result.error.message).toContain('web-artifacts-builder');
+        expect(result.error.retryable).toBe(false);
+      }
+    });
+
+    it('rejects xlsx skill via skill_doc (migrated to Anthropic)', async () => {
+      // GIVEN: xlsx skill - was GKE, now migrated to Anthropic
+      const mockXlsxSkill: SkillMetadata = {
+        name: 'xlsx',
+        description: 'XLSX processing skill',
+        filePath: '.skills/xlsx/SKILL.md',
+        skillPath: '.skills/xlsx',
+        hasExecutableScripts: true,
+        scripts: [{ name: 'process.py', path: '.skills/xlsx/scripts/process.py' }],
+      };
+      vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockXlsxSkill]);
+
+      // WHEN: Someone tries to execute xlsx in GKE
+      const result = await orionSandboxHandler(
+        { skill_doc: 'skill:xlsx' },
+        mockContext
+      );
+
+      // THEN: It's rejected (should use PTC instead)
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.code).toBe('SKILL_NOT_GKE');
+      }
+    });
+  });
+
+  describe('skill_script rejection (AC#1)', () => {
+    it('rejects non-GKE skills via skill_script with SKILL_NOT_GKE error', async () => {
+      // GIVEN: An Anthropic-hosted skill with scripts
+      const mockNonGkeSkill: SkillMetadata = {
+        name: 'algorithmic-art',
+        description: 'Art generation',
+        filePath: '.skills/algorithmic-art/SKILL.md',
+        skillPath: '.skills/algorithmic-art',
+        hasExecutableScripts: true,
+        scripts: [{ name: 'generate.py', path: '.skills/algorithmic-art/scripts/generate.py' }],
+      };
+      vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockNonGkeSkill]);
+
+      // WHEN: Someone tries to execute the script via orion_sandbox
+      const result = await orionSandboxHandler(
+        { skill_script: 'skill:algorithmic-art/generate.py' },
+        mockContext
+      );
+
+      // THEN: It's rejected with SKILL_NOT_GKE error
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.code).toBe('SKILL_NOT_GKE');
+        expect(result.error.message).toContain('Anthropic container');
+        expect(result.error.retryable).toBe(false);
+      }
+    });
+
+    it('rejects skill_script without skill: prefix for non-GKE skills', async () => {
+      // GIVEN: Non-GKE skill
+      const mockSkill: SkillMetadata = {
+        name: 'example',
+        description: 'Example skill',
+        filePath: '.skills/example/SKILL.md',
+        skillPath: '.skills/example',
+        hasExecutableScripts: true,
+        scripts: [{ name: 'run.py', path: '.skills/example/scripts/run.py' }],
+      };
+      vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockSkill]);
+
+      // WHEN: Using path without skill: prefix
+      const result = await orionSandboxHandler(
+        { skill_script: 'example/run.py' },
+        mockContext
+      );
+
+      // THEN: Still rejected (prefix is optional per existing behavior)
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.code).toBe('SKILL_NOT_GKE');
+      }
+    });
+  });
+
+  describe('GKE-only skill acceptance (AC#2)', () => {
+    it('accepts webapp-testing via skill_doc', async () => {
+      // GIVEN: webapp-testing skill (requires Playwright + local servers)
+      const mockGkeSkill: SkillMetadata = {
+        name: 'webapp-testing',
+        description: 'Web app testing with Playwright',
+        filePath: '.skills/webapp-testing/SKILL.md',
+        skillPath: '.skills/webapp-testing',
+        hasExecutableScripts: false,
+      };
+      vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockGkeSkill]);
+      vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
+        stdout: 'skill doc content',
+        stderr: '',
+        return_code: 0,
+      });
+      (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('# Webapp Testing\n\nPlaywright-based testing.');
+
+      // WHEN: Executing via orion_sandbox
+      const result = await orionSandboxHandler(
+        { skill_doc: 'skill:webapp-testing' },
+        mockContext
+      );
+
+      // THEN: It executes successfully
+      expect(result.success).toBe(true);
+      expect(sandboxClient.executeSandbox).toHaveBeenCalled();
+    });
+
+    it('accepts web-artifacts-builder via skill_doc', async () => {
+      // GIVEN: web-artifacts-builder skill (requires local filesystem)
+      const mockGkeSkill: SkillMetadata = {
+        name: 'web-artifacts-builder',
+        description: 'Build web artifacts',
+        filePath: '.skills/web-artifacts-builder/SKILL.md',
+        skillPath: '.skills/web-artifacts-builder',
+        hasExecutableScripts: false,
+      };
+      vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockGkeSkill]);
+      vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
+        stdout: 'artifact built',
+        stderr: '',
+        return_code: 0,
+      });
+      (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('# Web Artifacts Builder');
+
+      // WHEN: Executing via orion_sandbox
+      const result = await orionSandboxHandler(
+        { skill_doc: 'skill:web-artifacts-builder' },
+        mockContext
+      );
+
+      // THEN: It executes successfully
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts webapp-testing via skill_script', async () => {
+      // GIVEN: webapp-testing with scripts
+      const mockGkeSkill: SkillMetadata = {
+        name: 'webapp-testing',
+        description: 'Web app testing',
+        filePath: '.skills/webapp-testing/SKILL.md',
+        skillPath: '.skills/webapp-testing',
+        hasExecutableScripts: true,
+        scripts: [{ name: 'test.py', path: '.skills/webapp-testing/scripts/test.py' }],
+      };
+      vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockGkeSkill]);
+      vi.mocked(sandboxClient.executeSandbox).mockResolvedValue({
+        stdout: 'tests passed',
+        stderr: '',
+        return_code: 0,
+      });
+      (readFileFn as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('print("running tests")');
+
+      // WHEN: Executing script via orion_sandbox
+      const result = await orionSandboxHandler(
+        { skill_script: 'skill:webapp-testing/test.py' },
+        mockContext
+      );
+
+      // THEN: It executes successfully
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.stdout).toBe('tests passed');
+      }
+    });
+  });
+
+  describe('error message quality (AC#1)', () => {
+    it('includes helpful migration guidance in error message', async () => {
+      // GIVEN: Non-GKE skill
+      const mockSkill: SkillMetadata = {
+        name: 'summarize',
+        description: 'Summary',
+        filePath: '.skills/summarize/SKILL.md',
+        skillPath: '.skills/summarize',
+        hasExecutableScripts: false,
+      };
+      vi.mocked(skillsLoader.getSkillMetadata).mockResolvedValue([mockSkill]);
+
+      // WHEN: Rejected
+      const result = await orionSandboxHandler(
+        { skill_doc: 'skill:summarize' },
+        mockContext
+      );
+
+      // THEN: Error message guides user to PTC
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        // Should mention PTC as alternative
+        expect(result.error.message.toLowerCase()).toContain('ptc');
+        // Should list the valid GKE skills
+        expect(result.error.message).toContain('webapp-testing');
+        expect(result.error.message).toContain('web-artifacts-builder');
+      }
+    });
   });
 });
 
