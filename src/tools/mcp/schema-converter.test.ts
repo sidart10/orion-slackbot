@@ -7,8 +7,8 @@
  * @see AC#3 - mcpToolToClaude() returns Anthropic tool with name server__tool
  */
 
-import { describe, it, expect } from 'vitest';
-import { mcpToolToClaude, parseClaudeToolName } from './schema-converter.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mcpToolToClaude, parseClaudeToolName, isPtcEnabled } from './schema-converter.js';
 import type { McpTool } from './types.js';
 
 describe('mcpToolToClaude', () => {
@@ -396,6 +396,147 @@ describe('mcpToolToClaude PTC (Story 6.3)', () => {
     // Then: Should have exactly one allowed caller
     expect((result as { allowed_callers?: string[] }).allowed_callers).toHaveLength(1);
     expect((result as { allowed_callers?: string[] }).allowed_callers?.[0]).toBe('code_execution_20250825');
+  });
+});
+
+/**
+ * Story 6.7: isPtcEnabled() function tests
+ *
+ * Tests for PTC auto-detection based on model and environment variables.
+ *
+ * @see Story 6.7 - Programmatic Tool Calling Core
+ * @see AC#8 - PTC disabled routes through normal tool_use
+ */
+describe('isPtcEnabled (Story 6.7)', () => {
+  // Store original env values
+  let originalPtcEnabled: string | undefined;
+  let originalModel: string | undefined;
+
+  beforeEach(() => {
+    originalPtcEnabled = process.env.PTC_ENABLED;
+    originalModel = process.env.ANTHROPIC_MODEL;
+    // Clear env vars for clean test state
+    delete process.env.PTC_ENABLED;
+    delete process.env.ANTHROPIC_MODEL;
+  });
+
+  afterEach(() => {
+    // Restore original values
+    if (originalPtcEnabled !== undefined) {
+      process.env.PTC_ENABLED = originalPtcEnabled;
+    } else {
+      delete process.env.PTC_ENABLED;
+    }
+    if (originalModel !== undefined) {
+      process.env.ANTHROPIC_MODEL = originalModel;
+    } else {
+      delete process.env.ANTHROPIC_MODEL;
+    }
+  });
+
+  // AC8: Explicit disable via env var
+  it('should return false when PTC_ENABLED=false (AC8)', () => {
+    // Given: PTC explicitly disabled
+    process.env.PTC_ENABLED = 'false';
+    process.env.ANTHROPIC_MODEL = 'claude-opus-4-5-20251101'; // Would otherwise enable
+
+    // When: Checking if PTC is enabled
+    const result = isPtcEnabled();
+
+    // Then: Should be disabled despite supported model
+    expect(result).toBe(false);
+  });
+
+  // AC8: Model auto-detection for supported models
+  it('should auto-enable for supported models (Opus 4.5)', () => {
+    // Given: Supported model without explicit PTC_ENABLED
+    process.env.ANTHROPIC_MODEL = 'claude-opus-4-5-20251101';
+
+    // When: Checking if PTC is enabled
+    const result = isPtcEnabled();
+
+    // Then: Should be enabled based on model
+    expect(result).toBe(true);
+  });
+
+  // AC8: Model auto-detection for unsupported models
+  it('should return false for unsupported models (Haiku)', () => {
+    // Given: Unsupported model without explicit PTC_ENABLED
+    process.env.ANTHROPIC_MODEL = 'claude-3-haiku-20240307';
+
+    // When: Checking if PTC is enabled
+    const result = isPtcEnabled();
+
+    // Then: Should be disabled for non-PTC model
+    expect(result).toBe(false);
+  });
+
+  // Edge case: Missing ANTHROPIC_MODEL
+  it('should return false when ANTHROPIC_MODEL is not set', () => {
+    // Given: No model or PTC env vars set
+    // (already cleared in beforeEach)
+
+    // When: Checking if PTC is enabled
+    const result = isPtcEnabled();
+
+    // Then: Should default to disabled
+    expect(result).toBe(false);
+  });
+});
+
+/**
+ * Story 6.7: PTC Disabled Mode tests
+ *
+ * Tests verifying tool behavior when PTC is disabled.
+ *
+ * @see Story 6.7 - Programmatic Tool Calling Core
+ * @see AC#8 - PTC disabled routes through normal tool_use
+ */
+describe('mcpToolToClaude PTC Disabled (Story 6.7 AC8)', () => {
+  beforeEach(() => {
+    // Explicitly disable PTC
+    process.env.PTC_ENABLED = 'false';
+  });
+
+  afterEach(() => {
+    delete process.env.PTC_ENABLED;
+  });
+
+  const createBasicMcpTool = (): McpTool => ({
+    name: 'search',
+    description: 'Search the web',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+      },
+    },
+  });
+
+  // AC8: No allowed_callers when PTC disabled
+  it('should NOT include allowed_callers when PTC is disabled (AC8)', () => {
+    // Given: PTC is disabled and a basic MCP tool
+    const mcpTool = createBasicMcpTool();
+
+    // When: Converting to Anthropic format
+    const result = mcpToolToClaude('brave', mcpTool);
+
+    // Then: allowed_callers should NOT be present
+    expect(result).not.toHaveProperty('allowed_callers');
+  });
+
+  // AC8: Tool still converts correctly without PTC
+  it('should still convert tool correctly when PTC disabled', () => {
+    // Given: PTC is disabled and a basic MCP tool
+    const mcpTool = createBasicMcpTool();
+
+    // When: Converting to Anthropic format
+    const result = mcpToolToClaude('brave', mcpTool);
+
+    // Then: Tool should have correct structure without allowed_callers
+    expect(result.name).toBe('brave__search');
+    expect(result.description).toBe('Search the web');
+    expect(result.input_schema.type).toBe('object');
   });
 });
 

@@ -409,9 +409,9 @@ export async function handleAppMention({
             event: 'stream_delivery_failed',
             channel: channelId,
             threadTs,
-            userId: body.event.user,
+            userId,
             error: stopError instanceof Error ? stopError.message : String(stopError),
-            traceId,
+            traceId: trace.id,
           });
 
           // Notify user of delivery failure
@@ -656,7 +656,7 @@ export async function handleAppMention({
             channel: channelId,
             threadTs,
             error: stopError instanceof Error ? stopError.message : String(stopError),
-            traceId,
+            traceId: trace.id,
           });
         }
 

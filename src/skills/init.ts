@@ -124,7 +124,7 @@ export async function initializeSkills(traceId: string): Promise<void> {
   }
 
   const langfuse = getLangfuse();
-  const span = langfuse?.span?.({ name: 'skills.init', input: { traceId } });
+  const span = langfuse?.span?.({ traceId, name: 'skills.init', input: { traceId } });
 
   try {
     // Sync skills to API

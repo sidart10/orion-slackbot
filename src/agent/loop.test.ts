@@ -1925,6 +1925,95 @@ describe('executeAgentLoop PTC (Story 6.3)', () => {
     const lastCall = statusCalls[statusCalls.length - 1];
     expect(lastCall === undefined || lastCall === null || (typeof lastCall === 'object' && lastCall !== null && 'phase' in lastCall && (lastCall as { phase: string }).phase === 'final')).toBe(true);
   });
+
+  // Story 6.7 AC3: Multiple tool calls in single PTC container
+  it('PTC: should count multiple tool calls in single container (AC3)', async () => {
+    // Given: PTC stream with multiple server_tool_use blocks
+    const eventMock = vi.fn();
+    const langfuseModule = await import('../observability/langfuse.js');
+    vi.spyOn(langfuseModule, 'getLangfuse').mockReturnValue({
+      span: vi.fn(() => ({ end: vi.fn() })),
+      trace: vi.fn(() => ({ id: 't1', update: vi.fn(), span: vi.fn(() => ({ end: vi.fn() })), generation: vi.fn() })),
+      flushAsync: vi.fn(),
+      shutdownAsync: vi.fn(),
+      score: vi.fn(),
+      event: eventMock,
+    });
+
+    // Mock stream with 3 tool calls in sequence
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithPtc({
+        toolCalls: [
+          { name: 'search_web', input: { query: 'first' } },
+          { name: 'search_api', input: { query: 'second' } },
+          { name: 'fetch_data', input: { url: 'third' } },
+        ],
+        codeResult: { return_code: 0, stdout: 'Combined results', stderr: '' },
+      })
+    );
+
+    // When: Execute agent loop
+    const gen = executeAgentLoop('Test', {
+      ...baseOptions,
+      executeTool: vi.fn(async () => ({ success: true, data: 'result' })),
+    });
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Langfuse event should report all 3 tool calls
+    expect(eventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'ptc_execution_completed',
+        metadata: expect.objectContaining({
+          toolCallCount: 3,
+        }),
+      })
+    );
+  });
+
+  // Story 6.7 Edge case: Empty stdout handling
+  it('PTC: should handle empty stdout gracefully', async () => {
+    // Given: PTC stream with empty stdout
+    const eventMock = vi.fn();
+    const langfuseModule = await import('../observability/langfuse.js');
+    vi.spyOn(langfuseModule, 'getLangfuse').mockReturnValue({
+      span: vi.fn(() => ({ end: vi.fn() })),
+      trace: vi.fn(() => ({ id: 't1', update: vi.fn(), span: vi.fn(() => ({ end: vi.fn() })), generation: vi.fn() })),
+      flushAsync: vi.fn(),
+      shutdownAsync: vi.fn(),
+      score: vi.fn(),
+      event: eventMock,
+    });
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithPtc({
+        toolCalls: [{ name: 'silent_tool', input: {} }],
+        codeResult: { return_code: 0, stdout: '', stderr: '' }, // Empty stdout
+      })
+    );
+
+    // When: Execute agent loop
+    const gen = executeAgentLoop('Test', {
+      ...baseOptions,
+      executeTool: vi.fn(async () => ({ success: true })),
+    });
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+    }
+
+    // Then: Should complete without error and report 0 token savings
+    expect(eventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'ptc_execution_completed',
+        metadata: expect.objectContaining({
+          estimatedTokenSavings: 0, // Empty stdout = 0 savings
+        }),
+      })
+    );
+  });
 });
 
 /**

@@ -1,23 +1,6 @@
 ---
-name: example_skill
+name: example-skill
 description: A sample skill demonstrating the Agent Skills format
-version: 1.0.0
-author: Orion Team
-tools:
-  - name: greet_user
-    description: Generate a personalized greeting
-    parameters:
-      name:
-        type: string
-        description: Name of the person to greet
-        required: true
-      style:
-        type: string
-        description: Greeting style (formal, casual, enthusiastic)
-        enum:
-          - formal
-          - casual
-          - enthusiastic
 ---
 
 # Example Skill

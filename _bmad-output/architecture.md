@@ -13,7 +13,7 @@ completedAt: '2025-12-22'
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-last_updated: '2026-01-04'
+last_updated: '2026-01-07'
 course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22); MCP SDK adoption (2025-12-31); GKE Agent Sandbox for code execution (2026-01-03); Anthropic Skills + Files API adoption, GKE becomes fallback (2026-01-07)'
 hasProjectContext: false
 ---
@@ -214,12 +214,11 @@ orion-slack-agent/
 
 **Beta Headers Required:**
 ```typescript
-betas: [
-  'code-execution-2025-08-25',   // PTC code_execution tool
-  'skills-2025-10-02',           // Skills API + container.skills
-  'files-api-2025-04-14',        // Files API upload/download
-]
+// See consolidated beta configuration (lines 538-544):
+betas: config.anthropic.allBetas  // All 5 required betas
 ```
+
+**Rationale:** Prevents outdated lists. Single source of truth at lines 538-544.
 
 ### Architectural Decisions Established by Starter
 
@@ -436,7 +435,7 @@ After implementing GKE Agent Sandbox (ADR-2026-01-03), we discovered that Anthro
 
 ### Decision
 
-**Adopt Anthropic Skills API + Files API** as primary skill execution environment. GKE sandbox becomes fallback for edge cases only.
+**Adopt Anthropic Skills API + Files API** as primary skill execution environment. GKE sandbox becomes fallback for edge cases only (previously GKE was primary).
 
 ### Architecture
 
@@ -475,8 +474,8 @@ After implementing GKE Agent Sandbox (ADR-2026-01-03), we discovered that Anthro
 
 ### What Changes
 
-| Component | Before (GKE Primary) | After (Anthropic Primary) |
-|-----------|---------------------|---------------------------|
+| Component | Before (GKE Was Primary) | After (Anthropic Primary, GKE Fallback) |
+|-----------|--------------------------|------------------------------------------|
 | **Skill Storage** | `.skills/` baked into Docker | Uploaded via Skills API |
 | **Skill Reference** | Filesystem path | `skill_id` from API |
 | **Skill Loading** | `orion_sandbox({ skill_doc })` | `container: { skills: [...] }` |
@@ -506,8 +505,8 @@ After implementing GKE Agent Sandbox (ADR-2026-01-03), we discovered that Anthro
 
 | Option | Verdict |
 |--------|---------|
-| **Keep GKE primary** | ❌ Unnecessary complexity for 90% of use cases |
-| **Anthropic primary + GKE fallback** | ✅ Best of both worlds |
+| **Keep GKE as primary (status quo before migration)** | ❌ Unnecessary complexity for 90% of use cases |
+| **Anthropic primary + GKE fallback** | ✅ **ADOPTED** - Best of both worlds |
 | **Drop GKE entirely** | ❌ Blocks webapp-testing, web-artifacts-builder |
 
 ### Benefits
@@ -525,6 +524,362 @@ After implementing GKE Agent Sandbox (ADR-2026-01-03), we discovered that Anthro
 - **Status:** Approved
 - **Implementation:** Epic 6 Stories 6.2-6.13
 - **Reference:** `sprint-change-proposal-2026-01-07-skills-migration-to-anthropic.md`, `tech-spec-skills-migration-to-anthropic-container.md`
+
+### Implementation Details (Added 2026-01-07)
+
+#### Beta Headers (Consolidated)
+
+All beta headers are consolidated in `config.anthropic.allBetas`:
+
+```typescript
+// src/config/environment.ts
+anthropic: {
+  allBetas: [
+    'context-management-2025-06-27', // Memory tool auto-context
+    'advanced-tool-use-2025-11-20',  // PTC - Programmatic Tool Calling
+    'code-execution-2025-08-25',     // Skills execution + container
+    'skills-2025-10-02',             // Skills API CRUD operations
+    'files-api-2025-04-14',          // File downloads from container
+  ],
+}
+```
+
+**Rule:** Always use `config.anthropic.allBetas` in `messages.create()`. Never construct beta arrays inline.
+
+#### PTC Tool Definition
+
+```typescript
+// src/agent/loop.ts - EXACT format required
+const codeExecutionTool = {
+  type: 'code_execution_20250825' as const,
+  name: 'code_execution',
+};
+
+// Add to tools array (type assertion required due to SDK types)
+const tools = [
+  ...mcpTools,
+  codeExecutionTool as unknown as Anthropic.Tool,
+  ...(memoryTool ? [memoryTool as unknown as Anthropic.Tool] : []),
+];
+```
+
+#### Container Parameter Structure
+
+```typescript
+// src/skills/container-builder.ts
+interface ContainerParameter {
+  id?: string;           // Reuse existing container (cross-turn)
+  skills: string[];      // Array of skill IDs (skl_xxx)
+  allowed_callers?: AllowedCaller[];  // MCP tools callable from code
+}
+
+// Build with skills
+const container = buildContainerParameter(['skl_abc123', 'skl_def456']);
+// Result: { skills: ['skl_abc123', 'skl_def456'], allowed_callers: [...mcpTools] }
+
+// Reuse across conversation turns
+container.id = existingContainerId;
+```
+
+#### Container Lifecycle Management
+
+```typescript
+// src/skills/container-lifecycle.ts - SINGLETON
+class ContainerLifecycleManager {
+  private containers = new Map<string, { id: string; lastUsed: number }>();
+
+  getContainerId(threadTs: string): string | undefined;
+  setContainerId(threadTs: string, containerId: string): void;
+
+  // Auto-cleanup: 30 min TTL, max 1000 entries (LRU)
+}
+
+export const containerLifecycle = new ContainerLifecycleManager();
+```
+
+**Usage in agent loop:**
+```typescript
+// Check for existing container (cross-request reuse)
+const existingId = containerLifecycle.getContainerId(threadTs);
+if (existingId) {
+  container.id = existingId;
+}
+
+// After receiving new container ID from API
+if (response.container?.id && !activeContainerId) {
+  containerLifecycle.setContainerId(threadTs, response.container.id);
+}
+```
+
+#### Skills API Client
+
+```typescript
+// src/skills/api-client.ts
+class SkillsApiClient {
+  // Create skill with .zip upload (SKILL.md + scripts/)
+  async createSkill(name: string, description: string, files: SkillFile[]): Promise<{ skillId: string; versionId: string }>;
+
+  // List all skills for account
+  async listSkills(): Promise<ApiSkill[]>;
+
+  // Get skill details
+  async getSkill(skillId: string): Promise<ApiSkill>;
+
+  // Update skill (new version)
+  async updateSkill(skillId: string, files: SkillFile[]): Promise<{ versionId: string }>;
+
+  // Delete skill
+  async deleteSkill(skillId: string): Promise<void>;
+}
+
+export const skillsApi = new SkillsApiClient();
+```
+
+#### Skills API Lifecycle
+
+**Upload Phase (Startup):**
+1. `initializeSkills()` scans `.skills/` directory for SKILL.md files
+2. For each skill:
+   - Read SKILL.md metadata (name, description)
+   - If `scripts/` exists, bundle into .zip with SKILL.md
+   - Call `createSkill(name, description, files)` via Skills API
+   - Store returned `skill_id` in memory registry
+3. Compares with remote Skills API (`GET /skills`)
+4. Uploads only new/changed skills (`POST /skills` with ZIP)
+5. Caches `skill_id` mappings in memory
+
+**Reference Phase (Per Message):**
+1. `buildContainerParameter()` builds `{ skills: [skill_ids] }`
+2. Check `containerLifecycle.getContainerId(threadTs)` for reuse
+3. Pass `container` to `messages.create()`
+4. Extract `container.id` from response for future reuse
+
+**Container Reuse:**
+- Each Slack thread (`threadTs`) maps to one `container.id`
+- Container persists across conversation turns (30min TTL)
+- Reuse eliminates skill reload overhead
+
+**File Output:**
+- PTC generates files → stored in container
+- Download via Files API (`GET /files/{file_id}`)
+- Upload to Slack via `uploadFilesToThread()`
+
+**Code References:**
+- See `src/skills/init.ts` (lines 1-50) for initialization
+- See `src/skills/sync-service.ts` (lines 1-100) for upload logic
+- See `src/skills/container-lifecycle.ts` for container reuse
+
+#### Skill Sync at Startup
+
+```typescript
+// src/skills/init.ts
+export async function initializeSkills(): Promise<void> {
+  // 1. Load local .skills/ directory
+  // 2. Compare with remote Skills API
+  // 3. Upload new/changed skills
+  // 4. Cache skill IDs in memory
+}
+
+// Called from src/index.ts during startup
+await initializeSkills();
+```
+
+#### File Output Handling
+
+```typescript
+// PTC generates files → Files API retrieves them
+// src/files/api-client.ts
+class FilesApiClient {
+  async downloadFile(fileId: string): Promise<{ content: Buffer; filename: string; mimeType: string }>;
+  async listFiles(containerId: string): Promise<FileInfo[]>;
+}
+
+// In Slack handler (src/slack/handlers/user-message.ts)
+if (result.generatedFileIds.length > 0) {
+  for (const fileId of result.generatedFileIds) {
+    const file = await filesApi.downloadFile(fileId);
+    await slackClient.files.upload({
+      channels: channelId,
+      thread_ts: threadTs,
+      file: file.content,
+      filename: file.filename,
+    });
+  }
+}
+```
+
+#### Files API Client
+
+**Location:** `src/files/api-client.ts`
+
+**Operations:**
+- `getFile(fileId)` → Download generated file (blob)
+- `getFileMetadata(fileId)` → Fetch file info (name, size, type)
+
+**Integration Flow:**
+1. PTC generates files → stored in container
+2. Extract from `response.container.files: [{ id, name, type }]`
+3. Download via `FilesApiClient.getFile(fileId)` → Blob
+4. Upload to Slack via `slackFileUploader.uploadFilesToThread()`
+
+**Supported Formats:**
+- **Built-in (Anthropic):** xlsx, pdf, docx, pptx
+- **Custom Skills:** png, jpg, svg (image generation)
+- **Data Exports:** csv, json, txt
+
+**Limitations:**
+- Max file size: 100MB per file
+- Retention: 7 days from generation
+- Download requires `file_id` from `container.files` response
+
+**Code Reference:** See `src/files/api-client.ts` (lines 1-80)
+
+#### Observability
+
+```typescript
+// Langfuse events for container lifecycle
+langfuse.event({
+  name: 'container.lifecycle.create',  // New container spun up
+  metadata: { threadTs, containerId, skillCount }
+});
+
+langfuse.event({
+  name: 'container.lifecycle.reuse',   // Reused from previous turn
+  metadata: { threadTs, containerId, hasSkills: true }
+});
+
+// Log structure for PTC calls
+logger.debug({
+  event: 'agent.loop.ptc_tool_call',
+  traceId,
+  ptcCallNumber: ptcToolCallCount,
+  containerId: activeContainerId,
+  skillsLoaded: skillIds.length,
+});
+```
+
+#### Model Compatibility
+
+| Model | PTC Support | Skills Support | Notes |
+|-------|-------------|----------------|-------|
+| claude-sonnet-4-20250514 | ✅ Full | ✅ Full | Primary model |
+| claude-3-5-sonnet-20241022 | ⚠️ Limited | ⚠️ Limited | May not support all features |
+| claude-3-opus-20240229 | ❌ No | ❌ No | Use GKE sandbox |
+
+#### File Structure (Final)
+
+```
+src/
+├── skills/
+│   ├── index.ts                    # Re-exports
+│   ├── types.ts                    # SkillFile, ApiSkill, ContainerParameter
+│   ├── api-client.ts               # Skills API CRUD
+│   ├── api-client.test.ts
+│   ├── container-builder.ts        # buildContainerParameter()
+│   ├── container-builder.test.ts
+│   ├── container-lifecycle.ts      # Singleton lifecycle manager
+│   ├── container-lifecycle.test.ts
+│   ├── sync-service.ts             # .skills/ → API sync
+│   ├── sync-service.test.ts
+│   ├── init.ts                     # Startup initialization
+│   └── runtime.ts                  # Legacy skill loading (deprecated)
+├── files/
+│   ├── api-client.ts               # Files API download
+│   └── api-client.test.ts
+scripts/
+└── upload-skills.ts                # CI/CD upload script
+```
+
+---
+
+## Code Execution Architecture
+
+Orion's code execution follows a **primary-fallback pattern** established in ADR-2026-01-07.
+
+### Primary: Anthropic Skills API + PTC
+
+**What it is:**
+- **Skills:** Custom capabilities uploaded via Skills API (`.skills/` directory)
+- **PTC (Programmatic Tool Calling):** On-the-fly code generation using `code_execution_20250825` tool
+- **Container:** Anthropic-managed execution environment with pre-loaded skills
+- **MCP Access:** Skills can call MCP tools via `allowed_callers` (Anthropic routes them)
+- **File Output:** Generated files downloaded via Files API
+
+**When to use:**
+- 90% of code execution use cases
+- Skills with MCP tool dependencies (e.g., summarize, mcp-builder, skill-creator)
+- Data processing, file generation (xlsx, pdf, docx), API orchestration
+- Any task that doesn't require browser automation or local filesystem
+
+**Architecture:**
+```
+┌─────────────────────────────────────────┐
+│  Slack Thread                           │
+│  ├─ User: "Analyze this data"          │
+│  └─ Orion: Calls Anthropic Messages API │
+└─────────────────────────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────┐
+│  Anthropic Messages API                 │
+│  ┌─────────────────────────────────┐   │
+│  │  Code Execution Container       │   │
+│  │  ├─ Skills (pre-loaded)         │   │
+│  │  ├─ PTC (dynamic code)          │   │
+│  │  └─ MCP Tools (via allowed_     │   │
+│  │     callers, routed by Anthropic)│   │
+│  └─────────────────────────────────┘   │
+│  ┌─────────────────────────────────┐   │
+│  │  Files API                       │   │
+│  │  └─ Download generated files     │   │
+│  └─────────────────────────────────┘   │
+└─────────────────────────────────────────┘
+```
+
+**Benefits:**
+- No infrastructure management (Anthropic manages container)
+- Container reuse across conversation turns (30min TTL)
+- Lower latency vs cold starts
+- Skills versioning via API
+- Clean file downloads via Files API
+
+**See:** ADR-2026-01-07 (lines 428-791) for full implementation details.
+
+### Fallback: GKE Agent Sandbox
+
+**What it is:**
+- Kubernetes-based Python execution environment
+- Full filesystem access and network capabilities
+- Playwright browser automation support
+
+**When to use (edge cases only):**
+- Browser automation requiring Playwright (`webapp-testing`)
+- Local HTTP server execution for build artifacts (`web-artifacts-builder`)
+- Tasks requiring direct filesystem access beyond Anthropic container capabilities
+
+**Retained Skills:**
+- `webapp-testing` — Playwright browser automation
+- `web-artifacts-builder` — Local filesystem builds
+
+**Cost:** ~$35-75/month (1 replica warm pool, reduced from 2 replicas after Skills migration)
+
+**Infrastructure:** GKE cluster `orion-sandbox-cluster` in `us-central1`
+
+**See:** `infra/gke-sandbox/README.md` for setup details.
+
+### Execution Decision Tree
+
+```
+User requests code execution
+  │
+  ├─ Requires browser automation (Playwright)?
+  │  └─ YES → GKE Sandbox (webapp-testing)
+  │
+  ├─ Requires local filesystem builds?
+  │  └─ YES → GKE Sandbox (web-artifacts-builder)
+  │
+  └─ Everything else → Anthropic Skills + PTC
+```
 
 ---
 

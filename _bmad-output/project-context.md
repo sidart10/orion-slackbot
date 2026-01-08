@@ -2,7 +2,8 @@
 project_name: 'orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-sections_completed: ['technology_stack', 'implementation_rules', 'edge_cases', 'operational']
+last_updated: '2026-01-07'
+sections_completed: ['technology_stack', 'implementation_rules', 'edge_cases', 'operational', 'ptc_skills']
 elicitation_methods: ['pre-mortem', 'failure-mode', 'red-team-blue-team', 'code-review-gauntlet', 'critical-perspective']
 ---
 
@@ -19,6 +20,8 @@ _Critical rules and patterns that AI agents must follow when implementing code. 
 3. **Slack format:** `*bold*` not `**bold**`, `<url|text>` not `[text](url)`
 4. **Logging:** Include `traceId` in every log entry
 5. **Config:** Import order matters — `instrumentation.ts` first in `index.ts`
+6. **PTC/Skills:** Use `config.anthropic.allBetas` array, not individual beta strings
+7. **Container reuse:** Track `container.id` by `threadTs` via `containerLifecycle`
 
 ---
 
@@ -33,13 +36,29 @@ _Critical rules and patterns that AI agents must follow when implementing code. 
 | ESLint | 8.57.1 | Flat config |
 | Prettier | 3.4.2 | Single quotes |
 
-| Key Dependencies | Version |
-|------------------|---------|
-| @anthropic-ai/sdk | ^0.71.x |
-| (MCP session management) | Native implementation via fetch headers |
-| @slack/bolt | 4.6.0 |
-| langfuse | 3.38.6 |
-| @google-cloud/storage | ^7.x |
+| Key Dependencies | Version | Notes |
+|------------------|---------|-------|
+| @anthropic-ai/sdk | ^0.72.x | PTC + Skills API support |
+| @slack/bolt | 4.6.0 | HTTP mode, Assistant API |
+| langfuse | 3.38.6 | Tracing + prompt management |
+| @google-cloud/storage | ^7.x | Memory persistence |
+| fflate | ^0.8.x | ZIP skills for upload |
+
+### Required Beta Headers (2026-01-07)
+
+All betas consolidated in `config.anthropic.allBetas`:
+
+```typescript
+allBetas: [
+  'context-management-2025-06-27', // Memory tool auto-context
+  'advanced-tool-use-2025-11-20',  // PTC - Programmatic Tool Calling
+  'code-execution-2025-08-25',     // Skills execution + container
+  'skills-2025-10-02',             // Skills API CRUD operations
+  'files-api-2025-04-14',          // File downloads from container
+]
+```
+
+**IMPORTANT:** Always pass `config.anthropic.allBetas` to `messages.create()`. Never construct beta arrays manually.
 
 ---
 
@@ -94,24 +113,37 @@ No exceptions. Never throw from tool handlers.
 ### Agent Loop Pattern (MANDATORY)
 
 ```typescript
+// Build container parameter with skills (Story 6.2/6.3)
+const container = buildContainerParameter(skillIds);
+if (existingContainerId) {
+  container.id = existingContainerId; // Reuse across turns
+}
+
 while (true) {
   const response = await anthropic.messages.create({
     model: config.anthropic.model,
     messages,
     tools,
-    betas: ['context-management-2025-06-27']  // Required for memory
+    container,  // PTC + Skills
+    betas: config.anthropic.allBetas,  // ALL betas consolidated
   });
-  
+
   for (const block of response.content) {
     if (block.type === 'tool_use') {
       const result = await toolHandlers[block.name](block.input);
-      messages.push({ 
-        role: 'user', 
-        content: [{ type: 'tool_result', tool_use_id: block.id, content: result }] 
+      messages.push({
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: block.id, content: result }]
       });
     }
   }
-  
+
+  // Extract container ID for reuse (from message_start event when streaming)
+  if (response.container?.id && !activeContainerId) {
+    activeContainerId = response.container.id;
+    containerLifecycle.setContainerId(threadTs, activeContainerId);
+  }
+
   if (response.stop_reason !== 'tool_use') break;
 }
 ```
@@ -343,11 +375,13 @@ App crashes on startup if any are missing.
 
 ---
 
-## GKE Agent Sandbox (Code Execution)
+## GKE Agent Sandbox (FALLBACK ONLY — 2026-01-07)
 
 ### Overview
 
-Orion uses **GKE Agent Sandbox** for secure Python code execution with network access. This enables custom Skills and programmatic tool calling that Anthropic's container cannot support (no network access in Anthropic's container).
+> **⚠️ DEMOTED TO FALLBACK:** As of 2026-01-07, Anthropic's PTC + Skills API is the primary code execution path. GKE sandbox is retained ONLY for edge cases requiring Playwright or local filesystem access.
+
+Orion uses **GKE Agent Sandbox** as a **fallback** for secure Python code execution with network access. Most code execution now uses Anthropic's managed container via PTC.
 
 ### Connection Details
 
@@ -413,6 +447,185 @@ kubectl get sandboxwarmpools
 
 ---
 
+## Programmatic Tool Calling (PTC) & Skills API (2026-01-07)
+
+### Overview
+
+Orion uses Anthropic's **Programmatic Tool Calling (PTC)** with **custom Skills** for code execution. This replaces most GKE sandbox use cases.
+
+**Key Insight:** Anthropic's container has "no network access" for arbitrary HTTP, BUT MCP tool calls via `allowed_callers` ARE supported because Anthropic routes them server-side.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Orion Slack Agent (Cloud Run)                                   │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │                    ANTHROPIC API                            │ │
+│  │  ┌──────────────────────────────────────────────────────┐  │ │
+│  │  │           CODE EXECUTION CONTAINER                    │  │ │
+│  │  │                                                      │  │ │
+│  │  │  • Custom Skills (uploaded via Skills API)           │  │ │
+│  │  │  • code_execution tool (PTC)                         │  │ │
+│  │  │  • allowed_callers → MCP tools (Anthropic routes)    │  │ │
+│  │  │  • Container reuse via container.id                  │  │ │
+│  │  └──────────────────────────────────────────────────────┘  │ │
+│  │                                                             │ │
+│  │  ┌──────────────────────────────────────────────────────┐  │ │
+│  │  │  FILES API                                            │  │ │
+│  │  │  - Download generated files (xlsx, pdf, pptx)        │  │ │
+│  │  └──────────────────────────────────────────────────────┘  │ │
+│  └────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### PTC Tool Definition (EXACT)
+
+```typescript
+// The code_execution tool MUST use this exact format
+const codeExecutionTool = {
+  type: 'code_execution_20250825' as const,
+  name: 'code_execution',
+};
+
+// Add to tools array alongside MCP and memory tools
+const tools = [
+  ...mcpTools,
+  codeExecutionTool as unknown as Anthropic.Tool,
+  ...(memoryTool ? [memoryTool as unknown as Anthropic.Tool] : []),
+];
+```
+
+### Container Parameter (Skills Integration)
+
+```typescript
+import { buildContainerParameter, containerLifecycle } from '../skills/index.js';
+
+// Build with skills on first call
+const container = buildContainerParameter(skillIds);
+// container = { skills: ['skl_abc123', 'skl_def456'], allowed_callers: [...] }
+
+// Reuse on subsequent calls in same thread
+const existingId = containerLifecycle.getContainerId(threadTs);
+if (existingId) {
+  container.id = existingId;
+}
+```
+
+### Container Lifecycle Management
+
+```typescript
+// SINGLETON - imported from src/skills/container-lifecycle.ts
+import { containerLifecycle } from '../skills/index.js';
+
+// Get existing container ID for a thread
+const containerId = containerLifecycle.getContainerId(threadTs);
+
+// Store new container ID (after first PTC call)
+containerLifecycle.setContainerId(threadTs, newContainerId);
+
+// TTL: 30 minutes idle, auto-cleanup of expired entries
+// Max entries: 1000 (LRU eviction)
+```
+
+### Skills API Client Usage
+
+```typescript
+import { skillsApi } from '../skills/api-client.js';
+
+// Create skill (uploads .zip with SKILL.md + scripts/)
+const { skillId, versionId } = await skillsApi.createSkill(
+  'my-skill',
+  'Description',
+  skillFiles  // SkillFile[]
+);
+
+// List all skills
+const skills = await skillsApi.listSkills();
+
+// Get skill details
+const skill = await skillsApi.getSkill(skillId);
+```
+
+### File Output Handling (Story 6.6)
+
+```typescript
+// PTC generates files → stored in container → download via Files API
+// Returned as generatedFileIds in AgentLoopResult
+
+interface AgentLoopResult {
+  // ... other fields
+  generatedFileIds: string[];  // File IDs to download and upload to Slack
+}
+
+// In Slack handler:
+if (result.generatedFileIds.length > 0) {
+  await slackFileUploader.uploadFilesToThread(
+    result.generatedFileIds,
+    threadTs
+  );
+}
+```
+
+### Observability for PTC
+
+```typescript
+// Langfuse events for container lifecycle
+langfuse.event({
+  name: 'container.lifecycle.create',  // New container
+  // or
+  name: 'container.lifecycle.reuse',   // Reused from lifecycle
+  metadata: { threadTs, containerId, skillCount }
+});
+
+// Track PTC tool calls
+let ptcToolCallCount = 0;
+let ptcContainerStartTime: number | undefined;
+
+// Log on each code_execution block
+logger.debug({
+  event: 'agent.loop.ptc_tool_call',
+  traceId,
+  ptcCallNumber: ++ptcToolCallCount,
+  containerId: activeContainerId,
+});
+```
+
+### Model-Specific Behavior
+
+| Model | PTC Support | Notes |
+|-------|-------------|-------|
+| claude-sonnet-4-20250514 | ✅ Full | Primary model for PTC |
+| claude-3-5-sonnet-* | ⚠️ Limited | May not support all PTC features |
+| claude-3-opus-* | ❌ No | Use GKE sandbox for code execution |
+
+### Common Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Missing beta headers | Always use `config.anthropic.allBetas` |
+| Hardcoded beta strings | Import from config, never inline |
+| Container not reused | Track via `containerLifecycle` by `threadTs` |
+| Files not extracted | Check `response.container?.files` and use Files API |
+| Skills not loaded | Call `initializeSkills()` at startup |
+| Wrong tool type format | Use `code_execution_20250825` (dated version) |
+
+### File Locations
+
+| File | Purpose |
+|------|---------|
+| `src/skills/api-client.ts` | Skills API CRUD operations |
+| `src/skills/container-builder.ts` | Build `container` parameter |
+| `src/skills/container-lifecycle.ts` | Track container IDs by thread |
+| `src/skills/sync-service.ts` | Sync .skills/ to API at startup |
+| `src/skills/init.ts` | Initialize skills on app start |
+| `src/skills/types.ts` | All skill-related types |
+| `src/files/api-client.ts` | Files API download client |
+| `scripts/upload-skills.ts` | CI/CD skill upload script |
+
+---
+
 ## JSDoc Convention
 
 ```typescript
@@ -440,4 +653,8 @@ kubectl get sandboxwarmpools
 | Missing traceId in logs | Always include `traceId` |
 | Global mutable state | Fresh context per request |
 | Hardcode token limits | Read from API response |
+| `betas: ['single-beta']` | `betas: config.anthropic.allBetas` |
+| New container every turn | Reuse via `containerLifecycle` |
+| `type: 'code_execution'` | `type: 'code_execution_20250825'` |
+| GKE for simple code | Use PTC (Anthropic container) |
 

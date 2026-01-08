@@ -8,10 +8,12 @@ An AI assistant that lives in Slack, powered by Claude. Orion maintains persiste
 - [How It Works](#how-it-works)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
+- [Tech Stack](#tech-stack)
 - [Quick Start](#quick-start)
 - [Environment Variables](#environment-variables)
 - [Scripts](#scripts)
 - [Project Structure](#project-structure)
+- [Documentation](#documentation)
 - [Development](#development)
 - [Docker](#docker)
 - [Deployment](#deployment)
@@ -25,7 +27,7 @@ An AI assistant that lives in Slack, powered by Claude. Orion maintains persiste
 - **Persistent Memory** — Per-user and per-thread context stored in GCS
 - **Custom Skills** — Extensible skill system with Python execution support
 - **MCP Integration** — Connect to external tools (Rube, Serena, custom servers)
-- **Code Execution** — Secure Python/shell execution via GKE Agent Sandbox
+- **Code Execution** — Python execution via Anthropic Skills API + Files API (GKE fallback for edge cases)
 - **Full Observability** — Distributed tracing via Langfuse
 - **Native Slack AI** — Uses Slack's Assistant API for thread management
 
@@ -40,6 +42,42 @@ Orion operates in a **three-phase loop**:
 Each phase is observable via Langfuse traces.
 
 ## Architecture
+
+Orion is built on:
+- **Slack Bolt (HTTP mode)** with Assistant API integration
+- **Anthropic Messages API** with Skills + PTC (Programmatic Tool Calling)
+- **MCP (Model Context Protocol)** for extensible tool connectivity
+- **Langfuse** for observability and prompt management
+- **Google Cloud Storage** for persistent memory
+- **Cloud Run** for serverless deployment
+
+### Code Execution
+
+- **Primary:** Anthropic Skills API + Files API (zero infrastructure)
+- **Fallback:** GKE Agent Sandbox (edge cases only: Playwright, local filesystem)
+
+See [`_bmad-output/architecture.md`](_bmad-output/architecture.md) for detailed architecture decisions.
+
+### Skills System
+
+Orion uses Anthropic's Skills API for custom code execution capabilities:
+
+**Skill Definition:**
+- Create `.skills/<skill-name>/SKILL.md` with metadata + instructions
+- Optional: Add `scripts/` directory with Python executables
+
+**Skill Upload (Startup):**
+- `initializeSkills()` scans `.skills/` and uploads to Anthropic Skills API
+- Skills are cached by `skill_id` for runtime reference
+
+**Skill Execution:**
+- Skills pre-loaded in managed container via `container: { skills: [...] }`
+- Container reused across conversation turns (30min TTL)
+- Generated files downloadable via Files API
+
+**Fallback:** GKE sandbox for edge cases (Playwright, local filesystem)
+
+See [`.skills/` directory](/.skills/) for examples.
 
 ```mermaid
 flowchart TB
@@ -103,7 +141,35 @@ flowchart TB
 - Slack workspace with bot configured
 - Anthropic API key
 - Langfuse account (for observability)
-- GCP project with GKE cluster (for code execution)
+
+**Optional (for GKE fallback only):**
+- GCP project with GKE cluster (only required for edge-case skills: Playwright, local filesystem)
+
+## Tech Stack
+
+| Core | Version | Notes |
+|------|---------|-------|
+| TypeScript | 5.7.2 | Strict mode, ES2022 target |
+| Node.js | ≥20.0.0 | ESM with `.js` imports |
+| pnpm | 9.15.0 | Package manager |
+| @anthropic-ai/sdk | ^0.72.x | Skills + Files API + PTC support |
+| @slack/bolt | 4.6.0 | HTTP mode, Assistant API |
+| langfuse | 3.38.6 | Tracing + prompt management |
+| @google-cloud/storage | ^7.x | Memory persistence |
+
+### Required Beta Headers
+
+```typescript
+betas: [
+  'context-management-2025-06-27',  // Memory auto-context
+  'advanced-tool-use-2025-11-20',   // PTC
+  'code-execution-2025-08-25',      // Skills execution
+  'skills-2025-10-02',              // Skills API CRUD
+  'files-api-2025-04-14',           // File downloads
+]
+```
+
+All betas consolidated in `config.anthropic.allBetas`.
 
 ## Quick Start
 
@@ -149,6 +215,10 @@ pnpm dev
 | `GKE_CLUSTER_NAME` | Cluster name (e.g., `orion-sandbox-cluster`) |
 | `GKE_CLUSTER_REGION` | Cluster region (e.g., `us-central1`) |
 | `GKE_SANDBOX_ROUTER_URL` | Sandbox router URL (local: `http://localhost:8080`) |
+
+**Note:** GKE Sandbox variables are OPTIONAL. Most code execution uses Anthropic's managed container via Skills API + PTC. GKE is retained as fallback for edge cases (Playwright, local filesystem) only.
+
+See: [infra/gke-sandbox/README.md](infra/gke-sandbox/README.md) for GKE setup details.
 
 See `.env.example` for a complete template.
 
@@ -225,6 +295,19 @@ orion-slack-agent/
 ├── docs/                     # Documentation
 └── tests/                    # Test suites
 ```
+
+## Documentation
+
+### For Developers
+
+- **[`_bmad-output/project-context.md`](_bmad-output/project-context.md)** — Critical implementation rules and patterns that AI agents must follow
+- **[`_bmad-output/architecture.md`](_bmad-output/architecture.md)** — Detailed architecture decisions and ADRs
+- **[`docs/testing-standards.md`](docs/testing-standards.md)** — Testing best practices
+
+### For Reference
+
+- [Anthropic Skills API](docs/anthropic-sdk/using-skills-with-api.md)
+- [MCP Integration](docs/mcp-config-implementation-2025-12-31.md)
 
 ## Development
 

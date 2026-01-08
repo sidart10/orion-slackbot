@@ -208,7 +208,7 @@ export interface SyncResult {
  */
 export async function syncSkills(traceId: string): Promise<SyncResult> {
   const langfuse = getLangfuse();
-  const span = langfuse?.span?.({ name: 'skills.sync' });
+  const span = langfuse?.span?.({ traceId, name: 'skills.sync' });
 
   const result: SyncResult = {
     uploaded: 0,
@@ -258,7 +258,7 @@ export async function syncSkills(traceId: string): Promise<SyncResult> {
         if (cached) {
           // Try to create new version
           try {
-            const version = await apiClient.createSkillVersion(cached.skillId, files);
+            const version = await apiClient.createSkillVersion(cached.skillId, files, skill.name);
 
             result.updated++;
             result.skillIds[skill.name] = cached.skillId;

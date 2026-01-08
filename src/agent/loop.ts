@@ -669,7 +669,7 @@ export async function* executeAgentLoop(
     if (skillIdArray.length > 0) {
       activeContainer = buildContainerParameter(skillIdArray);
       // Story 6.3: If we have an existing container ID from lifecycle, reuse it
-      if (existingContainerId) {
+      if (existingContainerId && activeContainer) {
         activeContainer.id = existingContainerId;
         activeContainerId = existingContainerId;
         containerWasReused = true;
@@ -978,6 +978,92 @@ export async function* executeAgentLoop(
                   containerTimeMs,
                   toolCallCount: ptcToolCallCount,
                   estimatedTokenSavings,
+                },
+              });
+            }
+
+            // Clear status after PTC completes
+            void options.setStatus?.({ phase: 'act' });
+          }
+
+          // Story 6.10 Fix: Handle bash_code_execution_tool_result (new API format)
+          // Anthropic's code_execution_20250825 beta returns this block type instead of
+          // code_execution_tool_result, with a nested content.content[] structure for files.
+          if (blockType === 'bash_code_execution_tool_result') {
+            const resultBlock = event.content_block as unknown as {
+              content?: {
+                type?: string;
+                stdout?: string;
+                stderr?: string;
+                return_code?: number;
+                content?: Array<{ file_id?: string }>;
+              };
+            };
+
+            const innerContent = resultBlock.content;
+            const { return_code, stdout, stderr } = innerContent ?? {};
+
+            // Extract file IDs from nested content.content array
+            if (innerContent?.content && Array.isArray(innerContent.content)) {
+              for (const item of innerContent.content) {
+                if (item?.file_id) {
+                  generatedFileIds.push(item.file_id);
+                }
+              }
+              const extractedCount = innerContent.content.filter((i) => i?.file_id).length;
+              if (extractedCount > 0) {
+                logger.info({
+                  event: 'agent.loop.files_extracted',
+                  fileCount: extractedCount,
+                  fileIds: generatedFileIds.slice(-extractedCount),
+                  blockType: 'bash_code_execution_tool_result',
+                  traceId: context.traceId,
+                });
+              }
+            }
+
+            // Log PTC completion
+            logger.info({
+              event: 'agent.loop.ptc_code_execution_completed',
+              returnCode: return_code,
+              stdoutLength: stdout?.length ?? 0,
+              stderrLength: stderr?.length ?? 0,
+              fileCount: generatedFileIds.length,
+              blockType: 'bash_code_execution_tool_result',
+              traceId: context.traceId,
+            });
+
+            // Handle error conditions
+            if (return_code !== 0) {
+              if (stderr?.includes('TimeoutError')) {
+                logger.warn({
+                  event: 'agent.loop.ptc_tool_timeout',
+                  stderr: stderr?.slice(0, 500),
+                  traceId: context.traceId,
+                });
+              }
+              if (stderr?.includes('container_expired')) {
+                logger.error({
+                  event: 'agent.loop.ptc_container_expired',
+                  traceId: context.traceId,
+                });
+              }
+            }
+
+            // Emit Langfuse event for PTC observability
+            const langfuseClient = getLangfuse();
+            if (langfuseClient?.event && ptcToolCallCount > 0) {
+              const containerTimeMs = ptcContainerStartTime ? Date.now() - ptcContainerStartTime : 0;
+              const estimatedTokenSavings = Math.floor((stdout?.length ?? 0) / 4);
+
+              langfuseClient.event({
+                name: 'ptc_execution_completed',
+                metadata: {
+                  traceId: context.traceId,
+                  containerTimeMs,
+                  toolCallCount: ptcToolCallCount,
+                  estimatedTokenSavings,
+                  blockType: 'bash_code_execution_tool_result',
                 },
               });
             }

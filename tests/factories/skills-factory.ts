@@ -421,6 +421,11 @@ export function createMockStreamWithPauseTurn(params: {
 /**
  * Creates mock bash_code_execution_tool_result with file_id (AC#9).
  *
+ * Story 6.10 Fix: Updated to use correct block type and nested structure.
+ * Anthropic's code_execution_20250825 beta returns:
+ * - type: 'bash_code_execution_tool_result' (not 'code_execution_tool_result')
+ * - files in content.content[] (not content.files[])
+ *
  * @param params - Result configuration
  * @returns Stream event with file IDs
  */
@@ -437,12 +442,14 @@ export function createMockCodeExecutionResultWithFiles(params: {
     type: 'content_block_start',
     index: 1,
     content_block: {
-      type: 'code_execution_tool_result',
+      type: 'bash_code_execution_tool_result',
       content: {
+        type: 'bash_code_execution_result',
         return_code: returnCode,
         stdout: `Files created: ${fileIds.join(', ')}`,
         stderr: '',
-        files: fileIds.map((id) => ({ file_id: id })),
+        // Story 6.10: Files are in content.content[], not content.files[]
+        content: fileIds.map((id) => ({ file_id: id })),
       },
     },
   };

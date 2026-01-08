@@ -238,10 +238,11 @@ describe('skills/api-client', () => {
         mockSkillsVersionsCreate.mockResolvedValueOnce(mockVersion);
 
         const files = [{ name: 'SKILL.md', content: Buffer.from('# Updated') }];
+        const skillName = 'test-skill';
 
         // WHEN: Creating new version
         const client = new SkillsApiClient('test-trace');
-        const version = await client.createSkillVersion(skillId, files);
+        const version = await client.createSkillVersion(skillId, files, skillName);
 
         // THEN: Version is created with epoch timestamp
         expect(version).toBeDefined();
@@ -257,10 +258,11 @@ describe('skills/api-client', () => {
         mockSkillsVersionsCreate.mockRejectedValueOnce(notFoundError);
 
         const files = [{ name: 'SKILL.md', content: Buffer.from('# Skill') }];
+        const skillName = 'nonexistent-skill';
 
         // WHEN/THEN: Creating version throws error
         const client = new SkillsApiClient('test-trace');
-        await expect(client.createSkillVersion(skillId, files)).rejects.toThrow();
+        await expect(client.createSkillVersion(skillId, files, skillName)).rejects.toThrow();
       });
     });
 

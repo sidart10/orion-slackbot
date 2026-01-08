@@ -570,11 +570,11 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           } catch (stopError) {
             logger.error({
               event: 'stream_delivery_failed',
-              channel: body.event.channel,
+              channel: channelId,
               threadTs,
-              userId: body.event.user,
+              userId,
               error: stopError instanceof Error ? stopError.message : String(stopError),
-              traceId,
+              traceId: trace.id,
             });
 
             // Notify user of delivery failure
@@ -929,10 +929,10 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             // Log but don't throw - we're already in error path
             logger.warn({
               event: 'stream_stop_failed_during_error_cleanup',
-              channel: body.event.channel,
+              channel: channelId,
               threadTs,
               error: stopError instanceof Error ? stopError.message : String(stopError),
-              traceId,
+              traceId: trace.id,
             });
           }
 

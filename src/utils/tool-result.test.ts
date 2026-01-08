@@ -8,9 +8,13 @@ const _allToolErrorCodes: ToolErrorCode[] = [
   'TOOL_INVALID_INPUT',
   'TOOL_UNAVAILABLE',
   'TOOL_EXECUTION_FAILED',
+  'TOOL_TIMEOUT',
   'RATE_LIMITED',
   'MCP_CONNECTION_FAILED',
   'TOOL_NOT_FOUND',
+  'MEMORY_NOT_FOUND',
+  'MEMORY_WRITE_FAILED',
+  'SKILL_NOT_GKE', // Story 6.12: Skill should use PTC, not GKE
 ];
 
 describe('tool-result', () => {

@@ -273,7 +273,8 @@ describe('skills/sync-service', () => {
       // THEN: New version created (not new skill)
       expect(mockCreateSkillVersion).toHaveBeenCalledWith(
         'skill_existing123',
-        expect.any(Array)
+        expect.any(Array),
+        'updated_skill'
       );
     });
 

@@ -1,0 +1,8 @@
+#!/bin/bash
+# Mock claude-code for dry-run testing
+echo "[MOCK] Claude Code invoked with:"
+while IFS= read -r line; do
+  echo "[MOCK]   $line"
+done
+echo "[MOCK] Execution complete (simulated)"
+exit 0

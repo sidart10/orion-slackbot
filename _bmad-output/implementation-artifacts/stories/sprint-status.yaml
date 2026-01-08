@@ -33,9 +33,13 @@
 # ==============
 # Epic 6: SKILLS & EXTENSIONS - Major restructure (2026-01-07)
 # - Stories 6.2-6.3 archived, replaced by 6.2-6.13 (Skills migration to Anthropic container)
-# - 6-1 done, 6-2 ready-for-review (implementation complete)
+# - 6.9 bug fixed (2026-01-07): Multipart upload now uses ZIP format to preserve directory structure
+# - 6.10 CODE COMPLETE (2026-01-08): PTC file extraction fix + Phase 2 reliability improvements
+#   - Phase 1: bash_code_execution_tool_result handler for file ID extraction
+#   - Phase 2: Rate limiting (pLimit 3) + cleanup retry with exponential backoff
+# - 7 custom skills uploaded: summarize, mcp-builder, skill-creator, d3-viz, frontend-design, algorithmic-art, example-skill
 #
-# NEXT ACTION: Code review for stories 6-2 and 6-3, then implement 6-4 (Skill Registry Service)
+# NEXT ACTION: Story 6.10 - Manual Slack testing in #orion-testing channel
 
 generated: 2026-01-07
 project: 2025-12 orion-slack-agent
@@ -114,16 +118,16 @@ development_status:
   6-3-skills-container-config: dev-complete
   6-4-skill-registry-service: done
   6-5-files-api-client: dev-complete
-  6-6-files-api-slack-integration: ready-for-dev
+  6-6-files-api-slack-integration: done
   # Phase 2: PTC & Skill Migration
   6-7-programmatic-tool-calling-core: done  # Already implemented in 6.2/6.3
-  6-8-ptc-observability: backlog
-  6-9-upload-custom-skills-script: backlog
-  6-10-skill-migration-testing: backlog
-  6-11-prompt-builder-cleanup: backlog
+  6-8-ptc-observability: done  # Already implemented in 6.2/6.3/6.7
+  6-9-upload-custom-skills-script: done
+  6-10-skill-migration-testing: ready-for-testing  # CODE COMPLETE 2026-01-08: PTC fix + reliability, awaiting manual Slack verification
+  6-11-prompt-builder-cleanup: in-review
   # Phase 3: Cleanup
-  6-12-gke-sandbox-scope-reduction: backlog
-  6-13-documentation-update: backlog
+  6-12-gke-sandbox-scope-reduction: done  # 2026-01-08: GKE scope reduced to edge-case skills only
+  6-13-documentation-update: done
   epic-6-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════

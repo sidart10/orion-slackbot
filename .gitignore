@@ -49,3 +49,9 @@ yarn.lock
 venv/
 .venv/
 
+# Skills cache
+.skills/.cache/
+
+# Zip archives
+*.zip
+

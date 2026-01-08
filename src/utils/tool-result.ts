@@ -16,7 +16,8 @@ export type ToolErrorCode =
   | 'MCP_CONNECTION_FAILED'
   | 'TOOL_NOT_FOUND'
   | 'MEMORY_NOT_FOUND'
-  | 'MEMORY_WRITE_FAILED';
+  | 'MEMORY_WRITE_FAILED'
+  | 'SKILL_NOT_GKE'; // Story 6.12: Skill should use Anthropic container (PTC), not GKE sandbox
 
 export type ToolError = {
   code: ToolErrorCode;

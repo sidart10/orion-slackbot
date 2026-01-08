@@ -1,23 +1,6 @@
 ---
 name: summarize
 description: Summarize Slack conversations, threads, channels, group DMs, and direct messages
-version: 1.1.0
-author: Orion Team
-tools:
-  - name: summarize_conversation
-    description: |
-      Summarize ALL messages in a Slack channel, thread, or DM over a time period.
-      Smart routing automatically detects if summarizing a thread (via URL or context)
-      or a channel/conversation (with time range).
-      DO NOT USE for searching/finding threads - only for summarizing known conversations.
-    parameters:
-      user_request:
-        type: string
-        description: |
-          The user's summarization request in natural language.
-          Examples: "summarize this channel", "tldr", "what happened in the past week?",
-          or a pasted Slack thread URL.
-        required: true
 ---
 
 # Conversation Summarization Skill

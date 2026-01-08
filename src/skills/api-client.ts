@@ -10,7 +10,8 @@
  * @see AC#5 - Correct beta headers included
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import Anthropic, { toFile } from '@anthropic-ai/sdk';
+import { zipSync } from 'fflate';
 import { config } from '../config/environment.js';
 import { logger } from '../utils/logger.js';
 import { getLangfuse } from '../observability/langfuse.js';
@@ -75,6 +76,65 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Get MIME type for a file based on extension.
+ */
+function getMimeType(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'md':
+      return 'text/markdown';
+    case 'py':
+      return 'text/x-python';
+    case 'txt':
+      return 'text/plain';
+    case 'json':
+      return 'application/json';
+    case 'yaml':
+    case 'yml':
+      return 'application/yaml';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+/**
+ * Create a ZIP file containing all skill files.
+ *
+ * The Anthropic Skills API requires files to be in a directory structure:
+ * - `{skill_name}/SKILL.md` must exist at the root
+ * - All files share the same root directory
+ *
+ * Since the SDK's multipart handling strips directory paths from filenames,
+ * we create a ZIP file instead which preserves the directory structure.
+ *
+ * @param skillFiles - Array of skill files with name and content
+ * @param skillName - Name of the skill (used as directory prefix in ZIP)
+ * @returns Single File object containing the ZIP
+ */
+async function createSkillZip(skillFiles: SkillFile[], skillName: string): Promise<File> {
+  // Build ZIP file structure: { "skillName/filename": Uint8Array }
+  const zipData: Record<string, Uint8Array> = {};
+
+  for (const skillFile of skillFiles) {
+    // Convert content to Uint8Array
+    const content =
+      typeof skillFile.content === 'string'
+        ? new TextEncoder().encode(skillFile.content)
+        : new Uint8Array(skillFile.content);
+
+    // Path in ZIP: skillName/filename (e.g., "summarize/SKILL.md")
+    const zipPath = `${skillName}/${skillFile.name}`;
+    zipData[zipPath] = content;
+  }
+
+  // Create ZIP synchronously (skill files are small)
+  const zipped = zipSync(zipData);
+
+  // Convert to File for SDK upload
+  return toFile(zipped, `${skillName}.zip`, { type: 'application/zip' });
+}
+
+/**
  * Skills API Client for Anthropic's managed container system.
  *
  * Provides CRUD operations for custom skills with automatic retry
@@ -124,8 +184,8 @@ export class SkillsApiClient {
         lastError = error;
 
         // Emit Langfuse events for specific error types
-        if (isRateLimitError(error)) {
-          langfuse?.event({
+        if (isRateLimitError(error) && langfuse?.event) {
+          langfuse.event({
             name: 'skills.api.rate_limited',
             metadata: {
               traceId: this.traceId,
@@ -143,8 +203,8 @@ export class SkillsApiClient {
         // Don't retry if we've exhausted attempts
         if (attempt >= MAX_RETRIES) {
           // Emit unavailable event for persistent 5xx errors
-          if (isServerError(error)) {
-            langfuse?.event({
+          if (isServerError(error) && langfuse?.event) {
+            langfuse.event({
               name: 'skills.api.unavailable',
               metadata: {
                 traceId: this.traceId,
@@ -229,17 +289,22 @@ export class SkillsApiClient {
       fileCount: files.length,
     });
 
+    // Create ZIP file containing all skill files
+    // ZIP is required because the SDK strips directory paths from filenames,
+    // but the API requires files in a {skillName}/ directory structure
+    const zipFile = files.length > 0 ? await createSkillZip(files, displayTitle) : undefined;
+
     // Type assertion for beta API
     const beta = this.client.beta as unknown as {
       skills: {
-        create: (params: { display_title: string; files?: unknown[] }) => Promise<ApiSkill>;
+        create: (params: { display_title: string; files?: File[] }) => Promise<ApiSkill>;
       };
     };
 
     return this.withRetry('createSkill', async () => {
       return beta.skills.create({
         display_title: displayTitle,
-        files: files.length > 0 ? files : undefined,
+        files: zipFile ? [zipFile] : undefined,
       });
     });
   }
@@ -284,30 +349,39 @@ export class SkillsApiClient {
    *
    * @param skillId - The skill ID
    * @param files - Array of files for the new version
+   * @param skillName - Name of the skill (used for file path prefix)
    * @returns Created version metadata
    *
    * @see AC#4 - Modified SKILL.md creates new version, not new skill
    */
-  async createSkillVersion(skillId: string, files: SkillFile[]): Promise<ApiSkillVersion> {
+  async createSkillVersion(
+    skillId: string,
+    files: SkillFile[],
+    skillName: string
+  ): Promise<ApiSkillVersion> {
     logger.debug({
       event: 'skills.api.version.create',
       traceId: this.traceId,
       skillId,
+      skillName,
       fileCount: files.length,
     });
+
+    // Create ZIP file containing all skill files (same as createSkill)
+    const zipFile = files.length > 0 ? await createSkillZip(files, skillName) : undefined;
 
     // Type assertion for beta API
     const beta = this.client.beta as unknown as {
       skills: {
         versions: {
-          create: (skillId: string, params: { files?: unknown[] }) => Promise<ApiSkillVersion>;
+          create: (skillId: string, params: { files?: File[] }) => Promise<ApiSkillVersion>;
         };
       };
     };
 
     return this.withRetry('createSkillVersion', async () => {
       return beta.skills.versions.create(skillId, {
-        files: files.length > 0 ? files : undefined,
+        files: zipFile ? [zipFile] : undefined,
       });
     });
   }

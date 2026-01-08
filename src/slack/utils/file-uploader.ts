@@ -15,8 +15,12 @@
  */
 
 import type { WebClient } from '@slack/web-api';
+import pLimit from 'p-limit';
 import { logger } from '../../utils/logger.js';
 import type { FilesApiClient } from '../../files/api-client.js';
+
+// Story 6.10 Phase 2: Limit concurrent uploads to avoid Slack rate limits (~20/min)
+const CONCURRENT_UPLOAD_LIMIT = 3;
 
 // Slack file upload limit (1GB for most plans)
 const MAX_SLACK_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB
@@ -203,11 +207,11 @@ export class SlackFileUploader {
         durationMs: duration,
       });
 
-      // Step 5: Cleanup (async, don't block) - AC#4
+      // Step 5: Cleanup with retry (async, don't block) - AC#4, Story 6.10 Phase 2
       if (deleteAfterUpload) {
-        this.cleanupFile(fileId, traceId).catch((error) => {
+        this.cleanupFileWithRetry(fileId, traceId, 3).catch((error) => {
           logger.warn({
-            event: 'slack.file.cleanup.failed',
+            event: 'slack.file.cleanup.failed_final',
             traceId,
             fileId,
             error: error instanceof Error ? error.message : String(error),
@@ -271,9 +275,10 @@ export class SlackFileUploader {
       threadTs,
     });
 
-    // Upload files in parallel (Slack rate limits ~20/min, should be fine for typical batches)
+    // Story 6.10 Phase 2: Rate-limit concurrent uploads to avoid Slack rate limits (~20/min)
+    const limit = pLimit(CONCURRENT_UPLOAD_LIMIT);
     const results = await Promise.all(
-      fileIds.map((fileId) => this.uploadFile(fileId, channel, threadTs, options))
+      fileIds.map((fileId) => limit(() => this.uploadFile(fileId, channel, threadTs, options)))
     );
 
     const successCount = results.filter((r) => r.success).length;
@@ -299,18 +304,57 @@ export class SlackFileUploader {
   /**
    * Delete file from Anthropic storage (cleanup after upload).
    * @see AC#4 - Cleanup as async fire-and-forget
+   * @deprecated Use cleanupFileWithRetry instead for better reliability
    */
   private async cleanupFile(fileId: string, traceId?: string): Promise<void> {
-    try {
-      await this.filesClient.deleteFile(fileId, traceId);
-      logger.debug({
-        event: 'slack.file.cleanup.complete',
-        traceId,
-        fileId,
-      });
-    } catch (error) {
-      // Re-throw for caller to handle
-      throw error;
+    await this.filesClient.deleteFile(fileId, traceId);
+    logger.debug({
+      event: 'slack.file.cleanup.complete',
+      traceId,
+      fileId,
+    });
+  }
+
+  /**
+   * Delete file from Anthropic storage with retry and exponential backoff.
+   * Story 6.10 Phase 2: Retry transient failures to avoid orphaned files.
+   *
+   * @param fileId - Anthropic file ID to delete
+   * @param traceId - Optional trace ID for observability
+   * @param maxRetries - Maximum number of retry attempts (default 3)
+   * @see AC#4 - Cleanup as async fire-and-forget
+   */
+  private async cleanupFileWithRetry(
+    fileId: string,
+    traceId: string | undefined,
+    maxRetries: number
+  ): Promise<void> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.filesClient.deleteFile(fileId, traceId);
+        logger.debug({
+          event: 'slack.file.cleanup.complete',
+          traceId,
+          fileId,
+          attempt,
+        });
+        return;
+      } catch (error) {
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        // Exponential backoff: 1s, 2s, 4s... capped at 10s
+        const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+        logger.debug({
+          event: 'slack.file.cleanup.retry',
+          traceId,
+          fileId,
+          attempt,
+          backoffMs,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
     }
   }
 
