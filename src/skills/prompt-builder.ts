@@ -54,7 +54,7 @@ ${skillSections.join('\n\n---\n\n')}
  *
  * This is the preferred function for system prompt injection.
  * Only includes name, description, and available tool names.
- * Full instructions are loaded on-demand when the skill is invoked.
+ * Skills are loaded via container parameter in messages.create().
  *
  * Returns empty string if no skills loaded.
  * Used by Slack handlers when building the system prompt.
@@ -63,7 +63,7 @@ ${skillSections.join('\n\n---\n\n')}
  * @returns Formatted skills hint for system prompt (~100 tokens per skill)
  *
  * @see Story 6.1 AC#4 - Skills hint injected (not full content)
- * @see Story 6.1 AC#9 - On-demand instruction loading
+ * @see Story 6.3 - Skills loaded via container parameter
  */
 export function buildSkillsHint(skills: SkillMetadata[]): string {
   if (skills.length === 0) {
@@ -82,9 +82,6 @@ export function buildSkillsHint(skills: SkillMetadata[]): string {
 # Available Skills
 
 ${hints.join('\n')}
-
-When a task matches a skill, load its full instructions on-demand:
-  orion_sandbox({ skill_doc: "skill:{skill-name}" })
 `;
 }
 
