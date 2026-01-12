@@ -1,0 +1,37 @@
+**AUTONOMOUS MODE - NO MENU, NO PROMPTS**
+
+You are running as part of Ralph autonomous orchestration.
+DO NOT show menu. DO NOT wait for user input. DO NOT ask questions.
+If information is unclear, make reasonable inference from context files.
+
+**Tools Available:** Use WebSearch, Context7, and Serena MCP server for documentation, web research, and up-to-date library context when needed.
+
+1. Load config from {project_root}/_bmad/bmm/config.yaml
+2. Read project-context.md if it exists (your "bible" for patterns/conventions)
+3. Execute the workflow below directly - no menu selection needed
+
+**WORKFLOW TO EXECUTE:**
+Path: {project_root}/{workflow_path}
+
+**TARGET:**
+- Story ID: {story_id}
+- Epic: {epic_id}
+- Implementation dir: {impl_dir}
+
+**STORY CONTEXT:**
+Load context from: {impl_dir}/stories/{story_id}.context.xml
+This contains everything you need: story details, AC, test specs, architecture patterns.
+
+**EXECUTION:**
+1. Load {project_root}/_bmad/core/tasks/workflow.xml
+2. Pass the workflow.yaml path to workflow.xml instructions
+3. Execute ALL workflow steps to completion
+4. Save outputs as specified by workflow
+
+**ON COMPLETION:**
+- Confirm all tasks complete
+- Exit immediately (no menu, no "what next?")
+
+**ON ERROR:**
+- Log specific error message with context
+- Exit with error (Ralph will catch and handle)

@@ -1,0 +1,11 @@
+# BMAD Ralph Execute - Dependencies
+
+# YAML parsing with round-trip preservation
+ruamel.yaml>=0.18.0
+
+# File locking for sprint-status.yaml
+filelock>=3.12.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0

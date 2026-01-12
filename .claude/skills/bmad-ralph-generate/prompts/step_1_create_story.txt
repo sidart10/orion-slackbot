@@ -1,0 +1,40 @@
+**STEP 1: CREATE STORY**
+
+Create a comprehensive story file for story {story_id}.
+
+**INPUT SOURCES:**
+- Epic details: {planning_dir}/epic-{epic_id}-details.md
+- Epics overview: {planning_dir}/epics.md
+- PRD: {planning_dir}/prd.md
+- Architecture: {planning_dir}/architecture.md
+
+**REQUIREMENTS:**
+1. Find story {story_id} definition in epic details
+2. Extract all acceptance criteria
+3. Identify dependencies from architecture
+4. Create complete story file with all BMAD sections
+
+**OUTPUT:**
+- File: {impl_dir}/stories/story-{story_id}.md
+- Status update: {story_id} → drafted
+
+**STORY FILE STRUCTURE:**
+```markdown
+# Story: {story_id}
+
+## Overview
+[Brief description from epic]
+
+## Acceptance Criteria
+- [ ] AC1: ...
+- [ ] AC2: ...
+
+## Technical Notes
+[From architecture]
+
+## Dependencies
+[Other stories/components]
+
+## Test Considerations
+[Initial test thoughts]
+```

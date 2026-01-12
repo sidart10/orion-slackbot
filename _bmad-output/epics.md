@@ -435,6 +435,9 @@ Add discovery, summarization, and UX polish features to complete the Slack exper
 | 7.4 | Response Completion Indicators | done | P2 |
 | 7.5 | Fix Duplicate Response Bug | done | P0 |
 | 7.6 | Conversation Summarization (All types incl. threads) | done | P1 |
+| 7.7 | Skill-Aware & Response-Content Suggested Prompts | backlog | P2 |
+| 7.8 | Enhanced Slack UI Polish | backlog | P3 |
+| 7.9 | Unified Status Updater Refactoring | backlog | P3 |
 
 **Note:** Foundational UX (FR47-50) moved to Epic 1/2 for day-1 integration:
 - FR47 (dynamic status) → Story 2.2 ✓ (enhanced in 7.3)
@@ -450,8 +453,11 @@ Add discovery, summarization, and UX polish features to complete the Slack exper
 - 7.4: Response Completion Indicators — ✅ on answered messages ✅
 - 7.5: Fix Duplicate Response Bug — P0 bug, response appearing twice ✅
 - 7.6: Conversation Summarization — Channels, Group DMs, DMs, Threads (context-aware) ✅
+- 7.7: Skill-Aware Suggested Prompts — Enhance prompts based on available skills and response content
+- 7.8: Enhanced Slack UI Polish — Improve visual consistency and professional appearance
+- 7.9: Unified Status Updater — Extract status logic to `StatusUpdater` abstraction (refactoring)
 
-**Note (2026-01-11):** Stories 7.7, 7.8, 7.9 removed from scope. WIP preserved in branch backup/epic-7-wip-2026-01-11.
+**Note (2026-01-11):** Stories 7.7, 7.8, 7.9 re-added for proper implementation.
 
 ---
 

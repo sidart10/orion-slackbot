@@ -95,29 +95,29 @@
     </acceptance-criteria>
 
     <tasks>
-      <task id="1" title="Fix MCP Server Configurations" acs="1,2,3">
+      <task id="1" title="Fix MCP Server Configurations" acs="1,2,3" status="done">
         <important>Only modify servers that are broken. Do NOT touch working servers (rube, genmedia-imagen, genmedia-veo).</important>
         <subtask id="1.1" status="done">AUDIT: Review all servers with `headers: {}` - identify which require GCP IAM</subtask>
-        <subtask id="1.2">Add `authType: gcp_identity` to `audience-manager` config</subtask>
-        <subtask id="1.3">Add `authType: gcp_identity` to `msci-reports` config</subtask>
-        <subtask id="1.4">Verify `exa` works without auth (stateless, no IAM)</subtask>
-        <subtask id="1.5">Verify `rube` bearer token auth still works</subtask>
+        <subtask id="1.2" status="done">Add `authType: gcp_identity` to `audience-manager` config</subtask>
+        <subtask id="1.3" status="done">Add `authType: gcp_identity` to `msci-reports` config</subtask>
+        <subtask id="1.4" status="pending">Verify `exa` works without auth (stateless, no IAM) - manual testing</subtask>
+        <subtask id="1.5" status="pending">Verify `rube` bearer token auth still works - manual testing</subtask>
       </task>
 
-      <task id="2" title="Config Validation Warning" acs="6">
-        <subtask id="2.1">In `src/tools/mcp/config.ts`, after `transformToSdkConfig()`, add detection logic</subtask>
-        <subtask id="2.2">Pattern: if `headers` is empty/undefined AND `authType` is undefined AND URL contains `.run.app`, log warning</subtask>
-        <subtask id="2.3">Warning message: `mcp.config.possible_missing_auth`</subtask>
+      <task id="2" title="Config Validation Warning" acs="6" status="done">
+        <subtask id="2.1" status="done">In `src/tools/mcp/config.ts`, after `transformToSdkConfig()`, add detection logic</subtask>
+        <subtask id="2.2" status="done">Pattern: if `headers` is empty/undefined AND `authType` is undefined AND URL contains `.run.app`, log warning</subtask>
+        <subtask id="2.3" status="done">Warning message: `mcp.config.possible_missing_auth`</subtask>
       </task>
 
-      <task id="3" title="Test Auth Scenarios" acs="4,5,7">
-        <subtask id="3.1">Add test cases to `src/tools/mcp/client.test.ts` (co-located with auth logic)</subtask>
-        <subtask id="3.2">Manual verification via local dev environment</subtask>
+      <task id="3" title="Test Auth Scenarios" acs="4,5,7" status="done">
+        <subtask id="3.1" status="done">Add test cases to `src/tools/mcp/client.test.ts` (co-located with auth logic)</subtask>
+        <subtask id="3.2" status="pending">Manual verification via local dev environment</subtask>
       </task>
 
-      <task id="4" title="Integration Test" acs="7">
-        <subtask id="4.1">Update `scripts/test-mcp-health.ts` (or create if missing)</subtask>
-        <subtask id="4.2">Add npm script: `pnpm mcp:health-check`</subtask>
+      <task id="4" title="Integration Test" acs="7" status="pending">
+        <subtask id="4.1" status="pending">Update `scripts/test-mcp-health.ts` (or create if missing)</subtask>
+        <subtask id="4.2" status="pending">Add npm script: `pnpm mcp:health-check`</subtask>
       </task>
     </tasks>
   </story>

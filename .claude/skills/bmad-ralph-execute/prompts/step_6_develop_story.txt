@@ -1,0 +1,51 @@
+**STEP 6: DEVELOP STORY**
+
+Implement story {story_id} according to the context.xml specifications.
+
+**LOAD CONTEXT:**
+Read: {impl_dir}/stories/{story_id}.context.xml
+This contains:
+- Story overview and acceptance criteria
+- Test specifications (ATDD checklist or AC-derived)
+- Architecture patterns to follow
+- Dependencies and technical notes
+
+**IMPLEMENTATION REQUIREMENTS:**
+
+1. **Follow Test-First Development:**
+   - Read test specifications from context
+   - Write failing tests first
+   - Implement code to pass tests
+   - Refactor as needed
+
+2. **Code Implementation:**
+   - Follow architecture patterns from context.xml
+   - Match existing code style in project
+   - Implement ALL acceptance criteria
+   - Add appropriate error handling
+
+3. **Test Implementation:**
+   - Write tests for each acceptance criterion
+   - Include happy path tests
+   - Include edge case tests
+   - Include error handling tests
+   - All tests must pass
+
+4. **Code Quality:**
+   - Follow project conventions (from project-context.md)
+   - Clean, readable code
+   - Appropriate comments where logic isn't obvious
+   - No dead code or debugging statements
+
+**OUTPUT:**
+- All code files created/modified
+- All test files created/modified
+- All tests passing
+- Story status → in-progress
+
+**VERIFICATION:**
+Before completing, verify:
+- [ ] All acceptance criteria addressed
+- [ ] All tests pass
+- [ ] Code follows project patterns
+- [ ] No build errors

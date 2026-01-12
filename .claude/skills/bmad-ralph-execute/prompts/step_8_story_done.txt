@@ -1,0 +1,51 @@
+**STEP 8: STORY DONE**
+
+Final validation and completion for story {story_id}.
+
+**FINAL VALIDATION CHECKLIST:**
+
+1. **Acceptance Criteria:**
+   - [ ] AC1: [verify each AC is met]
+   - [ ] AC2: [verify]
+   - [ ] All ACs verified complete
+
+2. **Tests:**
+   - [ ] All tests passing
+   - [ ] No skipped tests
+   - [ ] No flaky tests
+   - [ ] Coverage is adequate
+
+3. **Code Quality:**
+   - [ ] Code review complete (Step 7)
+   - [ ] No TODO comments left unaddressed
+   - [ ] No debugging code left in
+   - [ ] Clean commit history
+
+4. **Documentation:**
+   - [ ] Code comments where needed
+   - [ ] README updated (if applicable)
+   - [ ] API docs updated (if applicable)
+
+5. **Integration:**
+   - [ ] Works with existing code
+   - [ ] No breaking changes (or properly handled)
+   - [ ] Build succeeds
+
+**IF ALL CHECKS PASS:**
+- Mark story status as 'done'
+- Story is complete!
+
+**IF ANY CHECK FAILS:**
+- Document what's missing or failing
+- Exit with error
+- Ralph will report and allow manual fix
+
+**OUTPUT:**
+- Story status → done
+- Story implementation complete
+
+**COMPLETION MESSAGE:**
+Confirm:
+- Which AC were implemented
+- How many tests pass
+- Any notes for future reference

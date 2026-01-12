@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="8-3-slack-file-ingestion" epic="8">
+  <metadata>
+    <created>2026-01-11T00:00:00Z</created>
+    <status>ready-for-dev</status>
+    <story-file>story-8-3-slack-file-ingestion.md</story-file>
+    <atdd-checklist>atdd-checklist-8-3-slack-file-ingestion.md</atdd-checklist>
+  </metadata>
+
+  <story>
+    <overview>
+      As a Slack user, I want to upload files (PDFs, images, CSVs, etc.) in my messages to Orion, so that Claude can read and analyze the file contents as part of my request.
+
+      This story enables file ingestion by:
+      1. Detecting files in Slack message events
+      2. Downloading files via Slack API
+      3. Uploading to Anthropic Files API (reusing Story 6.5 client)
+      4. Including as document blocks with Citations support (pairs with Story 8.1)
+    </overview>
+
+    <acceptance-criteria>
+      <!-- File Detection -->
+      <criterion id="AC1">Detect `files` array in Slack `message` events (both DM and channel)</criterion>
+      <criterion id="AC2">Support multiple files in a single message (process all)</criterion>
+      <criterion id="AC3">Log file metadata (name, type, size) to Langfuse for observability</criterion>
+
+      <!-- File Download from Slack -->
+      <criterion id="AC4">Download file content via Slack API using `url_private_download`</criterion>
+      <criterion id="AC5">Use bot token for authentication (`Authorization: Bearer ${SLACK_BOT_TOKEN}`)</criterion>
+      <criterion id="AC6">Handle download failures gracefully (log error, inform user, continue without file)</criterion>
+      <criterion id="AC7">Respect file size limits (max 100MB per file)</criterion>
+
+      <!-- File Upload to Anthropic -->
+      <criterion id="AC8">Upload downloaded file to Anthropic Files API</criterion>
+      <criterion id="AC9">Reuse existing `FilesApiClient` from `src/files/api-client.ts` (Story 6.5)</criterion>
+      <criterion id="AC10">Track upload success/failure in Langfuse</criterion>
+
+      <!-- Document Block Integration -->
+      <criterion id="AC11">Create document block with `file_id` reference for each uploaded file</criterion>
+      <criterion id="AC12">Enable `citations: { enabled: true }` on document blocks (pairs with Story 8.1)</criterion>
+      <criterion id="AC13">Include document blocks in messages array before calling agent loop</criterion>
+      <criterion id="AC14">Handle unsupported file types gracefully (inform user, skip file)</criterion>
+
+      <!-- Supported Formats -->
+      <criterion id="AC15">PDF files (`.pdf`) - max 100MB</criterion>
+      <criterion id="AC16">Images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`) - max 20MB</criterion>
+      <criterion id="AC17">CSV files (`.csv`) - max 100MB</criterion>
+      <criterion id="AC18">Text files (`.txt`, `.md`, `.json`, `.xml`, `.yaml`, `.yml`) - max 100MB</criterion>
+      <criterion id="AC19">Reject unsupported formats with helpful message listing supported types</criterion>
+
+      <!-- Error Handling -->
+      <criterion id="AC20">File too large: Inform user of size limit</criterion>
+      <criterion id="AC21">Download failed: Log error, inform user, continue processing text message</criterion>
+      <criterion id="AC22">Upload failed: Log error, inform user, continue processing text message</criterion>
+      <criterion id="AC23">Unsupported type: Inform user of supported types</criterion>
+
+      <!-- Observability -->
+      <criterion id="AC24">Track file ingestion metrics in Langfuse (count, types, sizes, success rate)</criterion>
+      <criterion id="AC25">Include file metadata in trace for debugging</criterion>
+    </acceptance-criteria>
+
+    <dependencies>
+      <dependency id="6.5" status="DONE">Files API Client - provides download infrastructure and uploadBuffer()</dependency>
+      <dependency id="6.6" status="DONE">Files API Slack Integration - provides upload to Slack</dependency>
+      <dependency id="8.1" status="IN_PROGRESS">Citations API - enables document citations (forward compatible)</dependency>
+    </dependencies>
+
+    <tasks>
+      <task id="1" name="File Detection in Slack Handlers" acs="1,2,3">
+        <subtask id="1.1">Extend `SlackMessageEvent` type to include `files` array</subtask>
+        <subtask id="1.2">Add file detection logic in `user-message.ts` handler</subtask>
+        <subtask id="1.3">Add file detection logic in `app-mention.ts` handler</subtask>
+        <subtask id="1.4">Log file metadata to Langfuse on detection</subtask>
+      </task>
+      <task id="2" name="Slack File Download Service" acs="4,5,6,7,20,21">
+        <subtask id="2.1">Create `src/slack/files/download.ts` with `downloadSlackFile()`</subtask>
+        <subtask id="2.2">Implement authenticated download using `url_private_download`</subtask>
+        <subtask id="2.3">Add file size validation before download</subtask>
+        <subtask id="2.4">Return `Buffer` with metadata (filename, mimetype)</subtask>
+        <subtask id="2.5">Write unit tests for download service</subtask>
+      </task>
+      <task id="3" name="Anthropic Files API Upload" acs="8,9,10,22">
+        <subtask id="3.1">Verify `FilesApiClient.uploadBuffer()` from Story 6.5 meets requirements (already exists at `src/files/api-client.ts` lines 145-188 - NO modification needed)</subtask>
+        <subtask id="3.2">Create `src/files/ingestion.ts` to orchestrate download to upload using existing `uploadBuffer()`</subtask>
+        <subtask id="3.3">Add Langfuse tracking for upload operations</subtask>
+        <subtask id="3.4">Write unit tests for upload orchestration</subtask>
+      </task>
+      <task id="4" name="Document Block Builder" acs="11,12,13,14,15,16,17,18,19,23">
+        <subtask id="4.1">Create `src/agent/document-blocks.ts` with `buildDocumentBlocks()`</subtask>
+        <subtask id="4.2">Map Slack file to Anthropic document block format</subtask>
+        <subtask id="4.3">Enable citations on document blocks</subtask>
+        <subtask id="4.4">Add format validation (supported vs unsupported types)</subtask>
+        <subtask id="4.5">Return user-friendly error for unsupported types</subtask>
+        <subtask id="4.6">Write unit tests for document block builder</subtask>
+      </task>
+      <task id="5" name="Integration with Agent Loop" acs="13">
+        <subtask id="5.1">Modify `runOrionAgent()` signature in `src/agent/orion.ts` to accept optional `documentBlocks` parameter</subtask>
+        <subtask id="5.2">In agent loop, prepend document blocks to first user message content array (Anthropic requires document blocks in `user` role messages)</subtask>
+        <subtask id="5.3">Update `handleAssistantUserMessage` in `src/slack/handlers/user-message.ts` to call file ingestion and pass document blocks</subtask>
+      </task>
+      <task id="6" name="Observability and Testing" acs="24,25">
+        <subtask id="6.1">Add Langfuse events for file ingestion flow</subtask>
+        <subtask id="6.2">Include file metadata in trace</subtask>
+        <subtask id="6.3">Write integration tests for complete flow</subtask>
+        <subtask id="6.4">Manual E2E test with Slack file upload</subtask>
+      </task>
+    </tasks>
+
+    <technical-notes>
+      <note category="critical-rules">
+        <item>ESM imports: Always use `.js` extension - `import { x } from './module.js'`</item>
+        <item>Tool errors: Never throw, return `ToolResult&lt;T&gt;` with success/error</item>
+        <item>Slack format: `*bold*` not `**bold**`, `&lt;url|text&gt;` not `[text](url)`</item>
+        <item>Logging: Include `traceId` in every log entry</item>
+        <item>Config: Import order matters - `instrumentation.ts` first in `index.ts`</item>
+      </note>
+
+      <note category="existing-code-reuse">
+        <item>`src/files/api-client.ts` - Files API client from Story 6.5 with uploadBuffer() method</item>
+        <item>`src/config/environment.ts` - `config.slackBotToken` for auth</item>
+        <item>`src/observability/langfuse.ts` - Langfuse client for tracking</item>
+        <item>`src/utils/logger.ts` - Structured logging</item>
+      </note>
+
+      <note category="edge-cases">
+        <item>Expired Slack URL: Slack file URLs can expire. If download fails with 404/403, inform user "File no longer available"</item>
+        <item>Zero-byte file: Skip files with `size === 0`, log warning, inform user</item>
+        <item>MIME/Extension mismatch: Trust Slack's `mimetype` field over file extension for validation</item>
+        <item>Story 8.1 not ready: If Citations (Story 8.1) is not yet implemented, set `citations: { enabled: true }` anyway - it's forward compatible</item>
+      </note>
+    </technical-notes>
+
+    <file-structure>
+      <new-files>
+        <file path="src/slack/files/download.ts">Slack file download service</file>
+        <file path="src/slack/files/download.test.ts">Unit tests for download service</file>
+        <file path="src/slack/files/types.ts">SlackFile type extensions</file>
+        <file path="src/files/ingestion.ts">Download to Upload orchestration</file>
+        <file path="src/files/ingestion.test.ts">Unit tests for ingestion</file>
+        <file path="src/agent/document-blocks.ts">Document block builder</file>
+        <file path="src/agent/document-blocks.test.ts">Unit tests for document blocks</file>
+      </new-files>
+      <modified-files>
+        <file path="src/slack/handlers/user-message.ts">Add file ingestion flow</file>
+        <file path="src/slack/handlers/app-mention.ts">Add file detection</file>
+        <file path="src/agent/orion.ts">Accept documentBlocks parameter</file>
+      </modified-files>
+      <reused-files>
+        <file path="src/files/api-client.ts">Existing FilesApiClient.uploadBuffer()</file>
+      </reused-files>
+    </file-structure>
+  </story>
+
+  <tests>
+    <atdd-checklist-ref>atdd-checklist-8-3-slack-file-ingestion.md</atdd-checklist-ref>
+    <test-summary>
+      <total-tests>79</total-tests>
+      <by-type>
+        <happy-path>35</happy-path>
+        <edge-cases>22</edge-cases>
+        <error-handling>18</error-handling>
+        <integration>4</integration>
+      </by-type>
+      <by-category>
+        <category name="File Detection (AC1-3)">11</category>
+        <category name="File Download (AC4-7)">15</category>
+        <category name="File Upload (AC8-10)">7</category>
+        <category name="Document Blocks (AC11-14)">10</category>
+        <category name="Supported Formats (AC15-19)">17</category>
+        <category name="Error Handling (AC20-23)">8</category>
+        <category name="Observability (AC24-25)">7</category>
+        <category name="Integration">4</category>
+      </by-category>
+    </test-summary>
+    <mock-patterns>
+      <pattern name="Slack file download">
+        <code><![CDATA[
+vi.spyOn(global, 'fetch').mockResolvedValue(
+  new Response(Buffer.from('test content'), { status: 200 })
+);
+        ]]></code>
+      </pattern>
+      <pattern name="Files API client">
+        <code><![CDATA[
+vi.mock('../files/api-client.js', () => ({
+  FilesApiClient: vi.fn().mockImplementation(() => ({
+    uploadBuffer: vi.fn().mockResolvedValue({ id: 'file_test123' }),
+  })),
+}));
+        ]]></code>
+      </pattern>
+      <pattern name="Langfuse">
+        <code><![CDATA[
+vi.mock('../observability/langfuse.js', () => ({
+  langfuse: {
+    event: vi.fn(),
+    trace: vi.fn(),
+  },
+}));
+        ]]></code>
+      </pattern>
+    </mock-patterns>
+  </tests>
+
+  <architecture>
+    <relevant-sections>
+      <section name="Epic 8 Repurposed: Anthropic API Enhancements (ADR-2026-01-09)">
+        Story 8.3 implements FR51 (Slack File Ingestion) as part of Epic 8's focus on Anthropic API Enhancements. The flow is: Slack file upload -> Orion detects files array -> Download via Slack API -> Upload to Anthropic Files API -> Include as document block with Citations support.
+      </section>
+      <section name="Files API Client">
+        Location: `src/files/api-client.ts`. Operations: getFile(), getFileMetadata(), uploadBuffer(). Supported formats: xlsx, pdf, docx, pptx, png, jpg, svg, csv, json, txt. Max file size: 100MB per file. Retention: 7 days from generation.
+      </section>
+      <section name="Anthropic Skills + Files API Adoption (ADR-2026-01-07)">
+        Files API integration established in Epic 6 Stories 6.5-6.6. FilesApiClient provides uploadBuffer(buffer, filename, mimeType, traceId) for uploading files to Anthropic. This story reuses this existing infrastructure for ingestion.
+      </section>
+    </relevant-sections>
+
+    <patterns-to-follow>
+      <pattern name="Tool Handler Pattern (MANDATORY)">
+        Every tool handler MUST wrap its entire body in try/catch. Return `{ success: true, data }` or `{ success: false, error }`. Never throw from tool handlers.
+      </pattern>
+      <pattern name="ESM Import Extension (MANDATORY)">
+        Always use `.js` extension on relative imports: `import { handler } from './handler.js'`
+      </pattern>
+      <pattern name="Logging Context">
+        Every log entry should include: traceId, spanName, slackThreadTs (if in Slack context). Levels: ERROR (user-impacting), WARN (degraded), INFO (key events), DEBUG (dev only).
+      </pattern>
+      <pattern name="Slack mrkdwn Format">
+        Bold: `*bold*` (not `**bold**`). Italic: `_italic_`. Links: `&lt;url|text&gt;` (not `[text](url)`).
+      </pattern>
+      <pattern name="File Naming Conventions">
+        Files: `kebab-case.ts` (enforced by ESLint). Tests: `kebab-case.test.ts` (co-located with source). Classes/Interfaces: PascalCase. Functions/Variables: camelCase.
+      </pattern>
+      <pattern name="Config Access">
+        Entry points: import config directly. Utilities: receive values as parameters. NEVER: import config at module level in shared utilities.
+      </pattern>
+    </patterns-to-follow>
+
+    <type-definitions>
+      <type name="SlackFile">
+        <code><![CDATA[
+interface SlackFile {
+  id: string;
+  name: string;
+  mimetype: string;
+  filetype: string;
+  size: number;
+  url_private_download: string;
+}
+        ]]></code>
+      </type>
+      <type name="DownloadedFile">
+        <code><![CDATA[
+interface DownloadedFile {
+  content: Buffer;
+  filename: string;
+  mimetype: string;
+  size: number;
+  slackFileId: string;  // For observability tracing back to source
+}
+        ]]></code>
+      </type>
+      <type name="FILE_LIMITS">
+        <code><![CDATA[
+const FILE_LIMITS = {
+  PDF: { extensions: ['.pdf'], maxSize: 100 * 1024 * 1024 },
+  IMAGE: { extensions: ['.png', '.jpg', '.jpeg', '.gif', '.webp'], maxSize: 20 * 1024 * 1024 },
+  CSV: { extensions: ['.csv'], maxSize: 100 * 1024 * 1024 },
+  TEXT: { extensions: ['.txt', '.md', '.json', '.xml', '.yaml', '.yml'], maxSize: 100 * 1024 * 1024 },
+} as const;
+        ]]></code>
+      </type>
+      <type name="DocumentBlock">
+        <code><![CDATA[
+interface DocumentBlock {
+  type: 'document';
+  source: {
+    type: 'file';
+    file_id: string;
+  };
+  title?: string;
+  citations?: { enabled: boolean };
+}
+        ]]></code>
+      </type>
+    </type-definitions>
+  </architecture>
+
+  <implementation-guidance>
+    <phase order="1" name="File Detection">
+      Start with Task 1: Extend Slack types and add file detection in both handlers. This is the foundation for all subsequent work. Log file metadata to Langfuse early to verify detection works.
+    </phase>
+    <phase order="2" name="Download Service">
+      Task 2: Create the Slack file download service. Test with various file types and sizes. Handle edge cases (expired URLs, zero-byte files, size limits) early.
+    </phase>
+    <phase order="3" name="Ingestion Orchestration">
+      Task 3: Wire up download to existing FilesApiClient.uploadBuffer(). The upload infrastructure already exists - this is orchestration code only.
+    </phase>
+    <phase order="4" name="Document Blocks">
+      Task 4: Build document blocks with citations enabled. Format validation and user-friendly error messages for unsupported types.
+    </phase>
+    <phase order="5" name="Agent Integration">
+      Task 5: Modify agent loop to accept and include document blocks. Prepend to first user message content array per Anthropic requirements.
+    </phase>
+    <phase order="6" name="Testing">
+      Task 6: Comprehensive testing. Unit tests should cover 79 test cases. Manual E2E test with actual Slack file uploads.
+    </phase>
+  </implementation-guidance>
+</story-context>

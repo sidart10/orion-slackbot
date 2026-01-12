@@ -1,0 +1,46 @@
+**STEP 3: ATDD TEST DESIGN**
+
+Create ATDD checklist with comprehensive test scenarios for story {story_id}.
+
+**INPUT:**
+- Story file: {impl_dir}/stories/story-{story_id}.md
+- Test design: {planning_dir}/test-design.md (project test patterns)
+
+**REQUIREMENTS:**
+1. Read all acceptance criteria from story
+2. For each AC, design test scenarios:
+   - Happy path test
+   - Edge cases
+   - Error handling
+   - Boundary conditions
+3. Follow project test patterns from test-design.md
+
+**OUTPUT:**
+- File: {impl_dir}/stories/atdd-checklist-{story_id}.md
+
+**ATDD CHECKLIST STRUCTURE:**
+```markdown
+# ATDD Checklist: {story_id}
+
+## AC1: [Acceptance Criterion]
+
+### Happy Path
+- [ ] Test: [description]
+  - Given: [precondition]
+  - When: [action]
+  - Then: [expected result]
+
+### Edge Cases
+- [ ] Test: [edge case description]
+
+### Error Handling
+- [ ] Test: [error scenario]
+
+## AC2: [Next Criterion]
+...
+```
+
+**COVERAGE REQUIREMENTS:**
+- Every AC must have at least one happy path test
+- Consider: null inputs, empty states, max limits
+- Include integration points if story has dependencies

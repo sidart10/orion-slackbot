@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="8-2-tool-search-tool" epic="8">
+  <metadata>
+    <created>2026-01-11T00:00:00Z</created>
+    <status>ready-for-dev</status>
+    <story-file>story-8-2-tool-search-tool.md</story-file>
+    <atdd-file>atdd-checklist-8-2-tool-search-tool.md</atdd-file>
+  </metadata>
+
+  <story>
+    <overview>
+      As a platform developer, I want Orion to use Anthropic's Tool Search capability for on-demand tool discovery, so that token usage is reduced when 100+ MCP tools are available and Claude discovers the right tools dynamically.
+
+      Key Benefits:
+      - Token savings: 100+ tools at ~200 tokens each = 20k+ tokens saved per request
+      - Latency improvement: Smaller context = faster API calls
+      - Scalability: Can add unlimited MCP tools without context window pressure
+
+      Prerequisites:
+      - Beta header `advanced-tool-use-2025-11-20` already in `config.anthropic.allBetas` (Story 6.3)
+      - Model must be Sonnet 4.5+ or Opus 4.5+ (current `claude-sonnet-4-20250514` qualifies)
+    </overview>
+
+    <acceptance-criteria>
+      <criterion id="1" title="Tool Definition Enhancement">
+        - MCP tools from `toolRegistry.getToolsForClaude()` include `defer_loading: true` property
+        - Core tools (memory, code_execution) remain always-loaded (no `defer_loading`)
+        - Static tools registered via `registerStaticTool` remain always-loaded
+      </criterion>
+
+      <criterion id="2" title="Tool Search Configuration">
+        - New config option `TOOL_SEARCH_ENABLED` (default: `true`) controls feature
+        - When disabled, behavior reverts to current all-tools-in-context mode
+        - Config allows specifying which tools are "core" (always loaded)
+      </criterion>
+
+      <criterion id="3" title="Tool Registry Enhancement">
+        - `ToolRegistry.getToolsForClaude()` returns two categories:
+          - Core tools (always in context): memory, code_execution, summarize
+          - Deferred tools (discovered on-demand): all MCP and skill tools
+        - New method `getCoreTool(name)` for quick lookup of always-loaded tools
+      </criterion>
+
+      <criterion id="4" title="Agent Loop Integration">
+        - When `TOOL_SEARCH_ENABLED=true`, pass only core tools + deferred tool definitions
+        - Claude's `tool_search` tool is automatically available (Anthropic manages this)
+        - Tool execution continues to work for discovered tools via existing `executeTool` handler
+        - No code changes needed for tool execution path - Claude discovers, then calls tools normally
+      </criterion>
+
+      <criterion id="5" title="Observability and Token Tracking">
+        - Langfuse event `tool_search.discovery` logged when Claude uses tool search (per project naming: `{component}.{operation}`)
+        - Langfuse metric `tool_search.tokens_saved` estimates token savings
+        - Log which tools were discovered vs. always loaded per request
+      </criterion>
+
+      <criterion id="6" title="Graceful Degradation">
+        - If model doesn't support tool search, fall back to all-tools-in-context
+        - Log warning when fallback occurs
+        - No user-facing errors from tool search configuration
+      </criterion>
+
+      <criterion id="7" title="Documentation and Testing">
+        - Unit tests for tool registry changes (core vs deferred categorization)
+        - Integration test verifying tool search discovery flow
+        - Update `project-context.md` with tool search configuration
+      </criterion>
+    </acceptance-criteria>
+
+    <tasks>
+      <task id="1" title="Tool Registry Enhancement" ac-refs="1, 3">
+        <subtask id="1.1">Add `defer_loading` property to MCP tool schema conversion in `src/tools/mcp/schema-converter.ts`</subtask>
+        <subtask id="1.2">Add `getCoreTool()` method to `ToolRegistry` class</subtask>
+        <subtask id="1.3">Create `CORE_TOOL_NAMES` const array in `src/tools/registry.ts`</subtask>
+        <subtask id="1.4">Modify `getToolsForClaude()` to annotate non-core tools with `defer_loading: true`</subtask>
+      </task>
+
+      <task id="2" title="Configuration" ac-refs="2">
+        <subtask id="2.1">Add `TOOL_SEARCH_ENABLED` env var to `src/config/environment.ts` (default: `true`)</subtask>
+        <subtask id="2.2">Add `CORE_TOOLS` env var (comma-separated list) with default: `memory,code_execution,summarize`</subtask>
+        <subtask id="2.3">Document new config options in `.env.example`</subtask>
+      </task>
+
+      <task id="3" title="Agent Loop Integration" ac-refs="4">
+        <subtask id="3.1">Conditionally apply `defer_loading` based on config in `executeAgentLoop()`</subtask>
+        <subtask id="3.2">Ensure tool execution path handles tools discovered via tool_search</subtask>
+        <subtask id="3.3">Log when tool search is active vs. disabled</subtask>
+      </task>
+
+      <task id="4" title="Observability" ac-refs="5">
+        <subtask id="4.1">Add `tool_search.discovery` Langfuse event in agent loop (per project naming convention)</subtask>
+        <subtask id="4.2">Calculate and log token savings estimate: `deferredToolCount * 200` tokens</subtask>
+        <subtask id="4.3">Track discovered vs. always-loaded tools per request for debugging</subtask>
+      </task>
+
+      <task id="5" title="Graceful Degradation" ac-refs="6">
+        <subtask id="5.1">Detect model capability for tool search using explicit pattern matching:
+          ```typescript
+          const TOOL_SEARCH_MODELS = [/^claude-sonnet-4-/, /^claude-opus-4-/];
+          function supportsToolSearch(model: string): boolean {
+            return TOOL_SEARCH_MODELS.some(p => p.test(model));
+          }
+          ```
+        </subtask>
+        <subtask id="5.2">Fall back to all-tools mode for unsupported models (claude-3-* patterns)</subtask>
+        <subtask id="5.3">Add warning log for fallback scenarios</subtask>
+      </task>
+
+      <task id="6" title="Testing and Documentation" ac-refs="7">
+        <subtask id="6.1">Unit tests for `ToolRegistry.getToolsForClaude()` with defer_loading</subtask>
+        <subtask id="6.2">Unit tests for config parsing and defaults</subtask>
+        <subtask id="6.3">Integration test for tool search flow (mock API response with tool_search)</subtask>
+        <subtask id="6.4">Update `project-context.md` with tool search section</subtask>
+      </task>
+    </tasks>
+
+    <dependencies>
+      <dependency type="required">Story 6.3 - Beta header `advanced-tool-use-2025-11-20` already in `config.anthropic.allBetas`</dependency>
+      <dependency type="sibling">Story 8.1 - Citations API (both modify src/agent/loop.ts - watch for merge conflicts)</dependency>
+    </dependencies>
+
+    <technical-notes>
+      <note id="api-pattern">
+        Tool Search is part of `advanced-tool-use-2025-11-20` beta (already enabled).
+        ```typescript
+        // Tool definition with deferred loading
+        const mcpTool = {
+          name: 'confluence__search_pages',
+          description: 'Search Confluence documentation',
+          defer_loading: true,  // Claude will discover this via tool_search
+          input_schema: { ... },
+        };
+
+        // Core tools remain always-loaded (no defer_loading)
+        const memoryTool = {
+          type: 'memory_20250818',
+          name: 'memory',
+          // NO defer_loading - always in context
+        };
+        ```
+      </note>
+
+      <note id="core-tools">
+        These tools should NEVER be deferred:
+        1. `memory` - Auto-context feature requires immediate availability
+        2. `code_execution` - PTC container lifecycle requires immediate availability
+        3. `summarize` - Conversation summarization (Story 7.6)
+        Optionally configurable via `CORE_TOOLS` env var.
+      </note>
+
+      <note id="model-requirements">
+        Tool Search requires:
+        - `claude-sonnet-4-*` (4.5+)
+        - `claude-opus-4-*` (4.5+)
+        Older models (claude-3-*) do NOT support tool search.
+      </note>
+
+      <note id="discovery-flow">
+        Tool Search Discovery Flow:
+        1. Request includes core tools (always loaded) + deferred tools (with `defer_loading: true`)
+        2. Anthropic provides a built-in `tool_search` tool automatically when deferred tools exist
+        3. Claude calls `tool_search` to discover relevant tools from the deferred pool
+        4. Anthropic returns matching tool definitions to Claude
+        5. Claude calls those tools via normal `tool_use` blocks
+        6. Our `executeTool` handler processes them unchanged - NO code path changes needed
+      </note>
+
+      <note id="token-savings">
+        Token Savings Estimation:
+        ```typescript
+        const deferredToolCount = tools.filter(t => t.defer_loading).length;
+        const estimatedTokenSavings = deferredToolCount * 200;  // ~200 tokens per tool average
+        ```
+      </note>
+
+      <note id="story-coordination">
+        Story 8.1 Coordination Notes:
+        - Both stories modify `src/agent/loop.ts` - watch for merge conflicts
+        - Story 8.1 adds `documentCitations` to `AgentLoopResult` - this story should not break that type
+        - Beta header `advanced-tool-use-2025-11-20` is shared (already in `allBetas`)
+      </note>
+
+      <note id="modified-files">
+        Modified Files:
+        - `src/config/environment.ts` - Add TOOL_SEARCH_ENABLED, CORE_TOOLS
+        - `src/tools/registry.ts` - Add defer_loading, CORE_TOOL_NAMES, getCoreTool()
+        - `src/tools/mcp/schema-converter.ts` - Add defer_loading to converted tools
+        - `src/agent/loop.ts` - Conditional tool loading based on config
+        - `src/agent/tools.ts` - Update getToolDefinitions() if needed
+        No new files required - enhancement to existing files
+      </note>
+
+      <note id="anti-patterns">
+        Anti-Patterns to Avoid:
+        | Don't | Do Instead |
+        |-------|------------|
+        | Hardcode which tools are core | Use `CORE_TOOLS` config or `CORE_TOOL_NAMES` const |
+        | Apply defer_loading to all tools | Check `defer_loading: true` only for non-core tools |
+        | Fail if tool search not supported | Gracefully fall back to all-tools mode |
+        | Log all tool definitions | Log only counts and categories |
+      </note>
+    </technical-notes>
+  </story>
+
+  <tests>
+    <atdd-checklist-ref>atdd-checklist-8-2-tool-search-tool.md</atdd-checklist-ref>
+    <test-summary>
+      <total-tests>50</total-tests>
+      <by-type>
+        <happy-path>28</happy-path>
+        <edge-cases>15</edge-cases>
+        <error-handling>7</error-handling>
+      </by-type>
+    </test-summary>
+    <key-test-scenarios>
+      <scenario ac="1">MCP tools receive defer_loading property, core tools do NOT</scenario>
+      <scenario ac="2">TOOL_SEARCH_ENABLED defaults to true, CORE_TOOLS configurable</scenario>
+      <scenario ac="3">getToolsForClaude returns categorized tools, getCoreTool returns specific core tool</scenario>
+      <scenario ac="4">Agent loop includes deferred tools when enabled, tool execution works for discovered tools</scenario>
+      <scenario ac="5">Langfuse events logged for tool_search.discovery, token savings calculated</scenario>
+      <scenario ac="6">Unsupported models fall back gracefully with warning log</scenario>
+      <scenario ac="7">Unit tests and integration test cover full discovery flow</scenario>
+    </key-test-scenarios>
+    <test-file-locations>
+      <location component="Tool Registry">src/tools/registry.test.ts</location>
+      <location component="Schema Converter">src/tools/mcp/schema-converter.test.ts</location>
+      <location component="Config">src/config/environment.test.ts</location>
+      <location component="Agent Loop">src/agent/loop.test.ts</location>
+      <location component="Model Detection">src/agent/model-capabilities.test.ts</location>
+      <location component="Integration">tests/integration/tool-search.test.ts</location>
+    </test-file-locations>
+  </tests>
+
+  <architecture>
+    <relevant-sections>
+      <section name="Epic 8 Repurposed (ADR-2026-01-09)">
+        Story 8.2 adds Tool Search Tool integration to reduce token usage when 100s of MCP tools are available.
+        Beta header `advanced-tool-use-2025-11-20` enables this feature.
+        Model requirements: Sonnet 4.5+ or Opus 4.5+.
+      </section>
+
+      <section name="Beta Headers (Consolidated)">
+        All betas in config.anthropic.allBetas:
+        - `context-management-2025-06-27` - Memory tool auto-context
+        - `advanced-tool-use-2025-11-20` - PTC + Tool Search
+        - `code-execution-2025-08-25` - Skills execution + container
+        - `skills-2025-10-02` - Skills API CRUD operations
+        - `files-api-2025-04-14` - File downloads from container
+        Always use `config.anthropic.allBetas` - never construct inline.
+      </section>
+
+      <section name="Tool Registry Pattern">
+        Tool naming: snake_case
+        TOOL_NAMES const array - single source of truth
+        toolHandlers: Record&lt;ToolName, ToolHandler&gt; - type-safe registration
+      </section>
+
+      <section name="Agent Loop Pattern">
+        While (stop_reason === 'tool_use') loop with:
+        - Container parameter with skills
+        - Container reuse via containerLifecycle
+        - All betas from config.anthropic.allBetas
+      </section>
+
+      <section name="Observability">
+        Langfuse span naming: {component}.{operation}
+        Examples: tool_search.discovery, tool_search.tokens_saved
+        All logs include traceId
+      </section>
+    </relevant-sections>
+
+    <patterns-to-follow>
+      <pattern name="ESM Imports">Always use `.js` extension: `import { x } from './module.js'`</pattern>
+      <pattern name="Config Access">Use `config.anthropic.*` from environment.ts, never construct inline</pattern>
+      <pattern name="Tool Errors">Return ToolResult with success/error, never throw from tools</pattern>
+      <pattern name="Langfuse Events">Use `{component}.{operation}` naming pattern</pattern>
+      <pattern name="Logging">Include `traceId` in every log entry</pattern>
+      <pattern name="File Naming">kebab-case.ts for files, kebab-case.test.ts for tests (co-located)</pattern>
+      <pattern name="Type Safety">Use const arrays with `as const`, branded types where appropriate</pattern>
+    </patterns-to-follow>
+  </architecture>
+
+  <project-context-rules>
+    <rule priority="critical">ESM imports: Always use `.js` extension</rule>
+    <rule priority="critical">Tool errors: Never throw, return `ToolResult&lt;T&gt;` with success/error</rule>
+    <rule priority="critical">Config: Import order matters - `instrumentation.ts` first in `index.ts`</rule>
+    <rule priority="critical">PTC/Skills: Use `config.anthropic.allBetas` array, not individual beta strings</rule>
+    <rule priority="high">Logging: Include `traceId` in every log entry</rule>
+    <rule priority="high">Files: kebab-case.ts - enforced by ESLint</rule>
+    <rule priority="high">Tests: kebab-case.test.ts - co-located with source</rule>
+  </project-context-rules>
+</story-context>

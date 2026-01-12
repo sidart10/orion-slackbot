@@ -1,0 +1,29 @@
+**STEP 4: TEST REVIEW**
+
+Review and validate the ATDD checklist for story {story_id}.
+
+**INPUT:**
+- Story file: {impl_dir}/stories/story-{story_id}.md
+- ATDD checklist: {impl_dir}/stories/atdd-checklist-{story_id}.md
+
+**REVIEW CHECKLIST:**
+1. ☐ Every acceptance criterion has tests
+2. ☐ Happy paths are covered for all ACs
+3. ☐ Edge cases are realistic and important
+4. ☐ Error scenarios are comprehensive
+5. ☐ Tests are implementable (not too abstract)
+6. ☐ No redundant or overlapping tests
+7. ☐ Test descriptions are clear and specific
+
+**IF REVIEW PASSES:**
+- Confirm tests are ready for implementation
+- Continue to next step
+
+**IF REVIEW FAILS:**
+- Document missing coverage
+- Suggest additional tests
+- Exit with error (manual intervention needed)
+
+**OUTPUT:**
+- Review notes added to ATDD checklist (if needed)
+- No new files created

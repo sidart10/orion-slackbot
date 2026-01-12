@@ -14,6 +14,8 @@ vi.mock('../../utils/logger.js', () => ({
   },
 }));
 
+import { logger } from '../../utils/logger.js';
+
 describe('MCP Config Loader', () => {
   beforeEach(() => {
     clearMcpConfigCache();
@@ -197,5 +199,119 @@ mcp_servers:
     loadMcpServersConfig('/test/path');
 
     expect(readFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Config Validation Warning Tests (Story 8.4 AC6)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('config validation warning (Story 8.4 AC6)', () => {
+    it('logs warning for .run.app URL with empty headers and no authType (T2.1)', () => {
+      clearMcpConfigCache();
+      const mockYaml = `
+mcp_servers:
+  audience-manager:
+    enabled: true
+    type: http
+    url: "https://audience-manager-mcp-vjlizxe2vq-uc.a.run.app/mcp"
+    headers: {}
+`;
+      vi.mocked(readFileSync).mockReturnValue(mockYaml);
+
+      loadMcpServersConfig('/test/path');
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'mcp.config.possible_missing_auth',
+          server: 'audience-manager',
+        })
+      );
+    });
+
+    it('does not warn when authType: gcp_identity is configured (T2.2)', () => {
+      clearMcpConfigCache();
+      const mockYaml = `
+mcp_servers:
+  genmedia-imagen:
+    enabled: true
+    type: http
+    url: "https://mcp-imagen-201626763325.us-central1.run.app/mcp"
+    headers: {}
+    authType: gcp_identity
+`;
+      vi.mocked(readFileSync).mockReturnValue(mockYaml);
+
+      loadMcpServersConfig('/test/path');
+
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'mcp.config.possible_missing_auth',
+        })
+      );
+    });
+
+    it('does not warn when Authorization header is configured (T2.3)', () => {
+      clearMcpConfigCache();
+      const mockYaml = `
+mcp_servers:
+  rube:
+    enabled: true
+    type: http
+    url: "https://some-cloud-run.a.run.app/mcp"
+    headers:
+      Authorization: "Bearer token123"
+`;
+      vi.mocked(readFileSync).mockReturnValue(mockYaml);
+
+      loadMcpServersConfig('/test/path');
+
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'mcp.config.possible_missing_auth',
+        })
+      );
+    });
+
+    it('passes authType through to SDK config for http type (T2.4)', () => {
+      clearMcpConfigCache();
+      const mockYaml = `
+mcp_servers:
+  genmedia-imagen:
+    enabled: true
+    type: http
+    url: "https://mcp-imagen.run.app/mcp"
+    headers: {}
+    authType: gcp_identity
+`;
+      vi.mocked(readFileSync).mockReturnValue(mockYaml);
+
+      const config = loadMcpServersConfig('/test/path');
+
+      expect(config['genmedia-imagen']).toMatchObject({
+        type: 'http',
+        authType: 'gcp_identity',
+      });
+    });
+
+    it('does not warn for non-.run.app URLs without auth (T2.5)', () => {
+      clearMcpConfigCache();
+      const mockYaml = `
+mcp_servers:
+  exa:
+    enabled: true
+    type: http
+    url: "https://mcp.exa.ai/mcp"
+    headers: {}
+`;
+      vi.mocked(readFileSync).mockReturnValue(mockYaml);
+
+      loadMcpServersConfig('/test/path');
+
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'mcp.config.possible_missing_auth',
+        })
+      );
+    });
   });
 });

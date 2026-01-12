@@ -1,0 +1,48 @@
+**STEP 2: STORY QUALITY VALIDATION**
+
+Run comprehensive quality validation checklist for story {story_id} in FRESH CONTEXT.
+
+**CRITICAL: This is a validation pass, NOT story creation. You are auditing existing work.**
+
+**VALIDATION CHECKLIST LOCATION:**
+{project_root}/_bmad/bmm/workflows/4-implementation/create-story/checklist.md
+
+**EXECUTION INSTRUCTIONS:**
+
+1. **Load the validation checklist:**
+   - Read: {project_root}/_bmad/bmm/workflows/4-implementation/create-story/checklist.md
+   - This is a 241-line comprehensive validation guide
+
+2. **Execute ALL validation steps:**
+   - Previous story continuity check
+   - Source document coverage validation
+   - Acceptance criteria quality check
+   - Task-AC mapping verification
+   - Dev notes quality assessment
+   - Story structure validation
+   - Unresolved review items alert
+
+3. **Generate validation report:**
+   - Count Critical/Major/Minor issues
+   - Determine outcome: PASS / PASS with issues / FAIL
+   - List all findings with evidence
+
+4. **Handle outcome:**
+   - **FAIL (Critical > 0 OR Major > 3):** Exit with error, report issues
+   - **PASS with issues:** Report issues, offer to improve story
+   - **PASS:** Confirm quality standards met, proceed
+
+**INPUT:**
+- Story file: {impl_dir}/stories/story-{story_id}.md
+- Planning artifacts: {planning_dir}/
+- Sprint status: {planning_dir}/sprint-status.yaml
+
+**OUTPUT:**
+- Validation report with findings
+- Story may be improved if issues found
+- Exit with error if validation FAILS (critical issues)
+- No status change (remains "drafted" until step 5)
+
+**ON ERROR:**
+- If story fails validation, STOP and report critical issues
+- Ralph will handle the error and notify user

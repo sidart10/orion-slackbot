@@ -20,6 +20,8 @@ mcp_servers:
     description: "Samba Audience Manager - audience segmentation and targeting"
     url: "https://audience-manager-mcp-vjlizxe2vq-uc.a.run.app/mcp"
     headers: {}
+    # Cloud Run requires IAM auth - fetch identity token at runtime (Story 8.4)
+    authType: gcp_identity
 
   msci-reports:
     type: http
@@ -27,6 +29,8 @@ mcp_servers:
     description: "Samba MSCI Reports - report generation and analytics"
     url: "https://report-generator-mcp-vjlizxe2vq-uc.a.run.app/mcp"
     headers: {}
+    # Cloud Run requires IAM auth - fetch identity token at runtime (Story 8.4)
+    authType: gcp_identity
 
   # ─────────────────────────────────────────────────────────────────────────────
   # External MCP Servers

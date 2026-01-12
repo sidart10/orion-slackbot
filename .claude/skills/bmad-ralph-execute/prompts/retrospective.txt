@@ -1,0 +1,72 @@
+**EPIC RETROSPECTIVE**
+
+Generate a retrospective document for Epic {epic_id}.
+
+**CONTEXT:**
+All stories in this epic have been completed:
+{story_list}
+
+**REVIEW INPUTS:**
+1. Story files in {impl_dir}/stories/
+2. Original epic definition in {planning_dir}/
+3. Any notes or issues encountered during development
+
+**RETROSPECTIVE STRUCTURE:**
+
+Create file: {impl_dir}/retrospectives/epic-{epic_id}-retrospective.md
+
+```markdown
+# Epic {epic_id} Retrospective
+
+**Date:** {date}
+**Stories Completed:** {story_count}
+
+## Summary
+[2-3 sentence overview of what was accomplished]
+
+## Stories Delivered
+{story_list_formatted}
+
+## What Went Well
+- [Effective patterns or practices used]
+- [Things that worked smoothly]
+- [Positive outcomes]
+
+## Lessons Learned
+- [What would we do differently]
+- [Unexpected challenges encountered]
+- [Knowledge gained]
+
+## Technical Patterns Established
+- [Reusable code patterns created]
+- [Architectural decisions made]
+- [Conventions established]
+
+## Technical Debt Identified
+- [Shortcuts taken that need addressing]
+- [Areas needing refactoring]
+- [Performance improvements needed]
+
+## Recommendations for Future Epics
+- [Process improvements]
+- [Tool recommendations]
+- [Team practices to adopt/avoid]
+
+## Metrics
+- Stories: {story_count}
+- Lines of code: [estimate]
+- Test coverage: [estimate]
+- Time from first story to completion: [if known]
+```
+
+**GUIDELINES:**
+- Be specific and actionable
+- Include concrete examples
+- Focus on learnings, not blame
+- Make recommendations practical
+- Keep it concise but complete
+
+**OUTPUT:**
+- Create retrospective markdown file
+- Confirm file created
+- Exit

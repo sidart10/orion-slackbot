@@ -122,10 +122,9 @@ development_status:
   epic-6-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 7: Slack Polish ✅ COMPLETE (5/6 done, 1 cancelled)
+  # Epic 7: Slack Polish ✅ COMPLETE (8/8 done, 1 cancelled)
   # ═══════════════════════════════════════════════════════════════════════════
-  # Note: Stories 7-7, 7-8, 7-9 were removed (2026-01-11) - scope reduced
-  # WIP code preserved in branch: backup/epic-7-wip-2026-01-11
+  # Stories 7-7, 7-8, 7-9 completed (2026-01-11)
   epic-7: done
   7-1-dynamic-suggested-prompts: done
   7-2-thread-summarization: cancelled
@@ -133,7 +132,10 @@ development_status:
   7-4-response-completion-indicators: done
   7-5-duplicate-response-bug: done
   7-6-conversation-summarization: done
-  epic-7-retrospective: optional
+  7-7-skill-aware-suggested-prompts: done
+  7-8-enhanced-slack-ui-polish: done
+  7-9-unified-status-updater: done
+  epic-7-retrospective: done
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Epic 8: Anthropic API Enhancements 📋 BACKLOG
@@ -141,10 +143,10 @@ development_status:
   # Repurposed (2026-01-09): From "Code Generation (Phase 2)" to "Anthropic API Enhancements"
   # See: sprint-change-proposal-2025-01-09.md
   # Reset (2026-01-09): Artifacts deleted, stories reset to backlog for re-generation
-  epic-8: backlog
+  epic-8: in-progress
   8-1-anthropic-citations-api: drafted
-  8-2-tool-search-tool: backlog
-  8-3-slack-file-ingestion: backlog
-  8-4-mcp-auth-fix-ptc: ready-for-dev
-  8-5-tool-call-summary-cleanup: backlog
+  8-2-tool-search-tool: ready-for-dev
+  8-3-slack-file-ingestion: ready-for-dev
+  8-4-mcp-auth-fix-ptc: done
+  8-5-tool-call-summary-cleanup: ready-for-dev
   epic-8-retrospective: optional

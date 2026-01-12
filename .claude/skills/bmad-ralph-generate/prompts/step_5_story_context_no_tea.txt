@@ -1,0 +1,53 @@
+**STEP 5: STORY CONTEXT COMPILATION (NO TEA)**
+
+Compile story context into XML format for DEV agent.
+Note: TEA agent was disabled, so DEV will write tests from acceptance criteria directly.
+
+**INPUT:**
+- Story file: {impl_dir}/stories/story-{story_id}.md
+- Architecture: {planning_dir}/architecture.md
+
+**OUTPUT:**
+- File: {impl_dir}/stories/{story_id}.context.xml
+- Status update: {story_id} → ready-for-dev
+
+**CONTEXT XML STRUCTURE:**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="{story_id}" epic="{epic_id}">
+  <metadata>
+    <created>{timestamp}</created>
+    <status>ready-for-dev</status>
+    <tea-enabled>false</tea-enabled>
+  </metadata>
+
+  <story>
+    <overview>[From story file]</overview>
+    <acceptance-criteria>
+      <criterion id="1">[AC text]</criterion>
+      <criterion id="2">[AC text]</criterion>
+    </acceptance-criteria>
+    <dependencies>[List]</dependencies>
+    <technical-notes>[From story]</technical-notes>
+  </story>
+
+  <tests>
+    <note>No ATDD checklist - DEV should write tests from acceptance criteria</note>
+    <test-guidance>
+      <for-each-ac>Write at least one test per acceptance criterion</for-each-ac>
+      <coverage>Include happy path, edge cases, and error handling</coverage>
+    </test-guidance>
+  </tests>
+
+  <architecture>
+    <relevant-sections>[From architecture.md]</relevant-sections>
+    <patterns-to-follow>[Key patterns]</patterns-to-follow>
+  </architecture>
+</story-context>
+```
+
+**REQUIREMENTS:**
+1. Include ALL story details
+2. Provide test guidance (no ATDD checklist reference)
+3. DEV will derive tests from acceptance criteria
+4. Include relevant architecture patterns

@@ -19,6 +19,25 @@ import { SessionState } from './types.js';
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
+// Mock GCP auth for Story 8.4 auth scenario tests
+vi.mock('./gcp-auth.js', () => ({
+  getGcpIdentityToken: vi.fn(),
+}));
+
+import { getGcpIdentityToken } from './gcp-auth.js';
+
+// Mock logger for error logging verification
+vi.mock('../../utils/logger.js', () => ({
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
+
+import { logger } from '../../utils/logger.js';
+
 /**
  * Helper to create a mock Response with proper text() and headers
  */
@@ -1345,6 +1364,158 @@ describe('McpClient', () => {
       if (!result.success) {
         expect(result.error.retryable).toBe(false);
       }
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GCP Identity Auth Scenario Tests (Story 8.4)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('getAuthHeader auth scenarios (Story 8.4)', () => {
+    beforeEach(() => {
+      vi.mocked(getGcpIdentityToken).mockReset();
+    });
+
+    it('returns GCP identity token when authType is gcp_identity (T1.1)', async () => {
+      // Arrange
+      vi.mocked(getGcpIdentityToken).mockResolvedValue('mock-gcp-identity-token');
+
+      setupMockWithInit({ jsonrpc: '2.0', id: 2, result: { tools: [] } });
+
+      const client = new McpClient('test-server', {
+        url: 'https://test.run.app/mcp',
+        authType: 'gcp_identity',
+      });
+
+      // Act
+      await client.listTools();
+
+      // Assert - Verify GCP identity token was fetched
+      expect(getGcpIdentityToken).toHaveBeenCalledWith(
+        'https://test.run.app',
+        undefined
+      );
+
+      // Verify auth header was set on initialize call
+      const initCall = mockFetch.mock.calls.find(
+        (call) => JSON.parse(call[1].body).method === 'initialize'
+      );
+      expect(initCall![1].headers['Authorization']).toBe('Bearer mock-gcp-identity-token');
+    });
+
+    it('returns undefined (no auth) when neither bearerToken nor authType configured (T1.2)', async () => {
+      // Arrange
+      setupMockWithInit({ jsonrpc: '2.0', id: 2, result: { tools: [] } });
+
+      const client = new McpClient('test-server', {
+        url: 'https://mcp.example.com',
+        // No bearerToken, no authType
+      });
+
+      // Act
+      await client.listTools();
+
+      // Assert - No auth header
+      const initCall = mockFetch.mock.calls.find(
+        (call) => JSON.parse(call[1].body).method === 'initialize'
+      );
+      expect(initCall![1].headers['Authorization']).toBeUndefined();
+      // Should NOT have called GCP identity token
+      expect(getGcpIdentityToken).not.toHaveBeenCalled();
+    });
+
+    it('uses URL origin as audience for GCP identity token (T1.4)', async () => {
+      // Arrange
+      vi.mocked(getGcpIdentityToken).mockResolvedValue('token');
+
+      setupMockWithInit({ jsonrpc: '2.0', id: 2, result: { tools: [] } });
+
+      const client = new McpClient('test-server', {
+        url: 'https://audience-manager-mcp-vjlizxe2vq-uc.a.run.app/mcp',
+        authType: 'gcp_identity',
+      });
+
+      // Act
+      await client.listTools();
+
+      // Assert - Audience should be URL origin (without path)
+      expect(getGcpIdentityToken).toHaveBeenCalledWith(
+        'https://audience-manager-mcp-vjlizxe2vq-uc.a.run.app',
+        undefined
+      );
+    });
+
+    it('logs error and returns undefined when GCP identity fetch fails (T1.5)', async () => {
+      // Arrange
+      vi.mocked(getGcpIdentityToken).mockRejectedValue(new Error('GCP auth failed'));
+
+      mockFetch.mockImplementation((_url: string, opts: { body: string }) => {
+        const body = JSON.parse(opts.body);
+        // Initialize will succeed (no auth required for this mock)
+        if (body.method === 'initialize') {
+          return Promise.resolve(mockResponse({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: { protocolVersion: '2025-06-18', capabilities: {} },
+          }));
+        }
+        if (body.method === 'notifications/initialized') {
+          return Promise.resolve({
+            ok: true,
+            status: 202,
+            headers: { get: () => null },
+            text: () => Promise.resolve(''),
+          });
+        }
+        return Promise.resolve(mockResponse({ jsonrpc: '2.0', id: body.id, result: { tools: [] } }));
+      });
+
+      const client = new McpClient('test-server', {
+        url: 'https://test.run.app/mcp',
+        authType: 'gcp_identity',
+      });
+
+      // Act
+      await client.listTools();
+
+      // Assert - Error was logged
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'mcp.auth.gcp_identity_failed',
+          serverName: 'test-server',
+        })
+      );
+
+      // Assert - Auth header should be undefined (no token)
+      const initCall = mockFetch.mock.calls.find(
+        (call) => JSON.parse(call[1].body).method === 'initialize'
+      );
+      expect(initCall![1].headers['Authorization']).toBeUndefined();
+    });
+
+    it('static bearer token takes precedence over authType gcp_identity (T1.6)', async () => {
+      // Arrange
+      vi.mocked(getGcpIdentityToken).mockResolvedValue('should-not-use');
+
+      setupMockWithInit({ jsonrpc: '2.0', id: 2, result: { tools: [] } });
+
+      const client = new McpClient('test-server', {
+        url: 'https://test.run.app/mcp',
+        bearerToken: 'static-token',
+        authType: 'gcp_identity', // Should be ignored when bearerToken is present
+      });
+
+      // Act
+      await client.listTools();
+
+      // Assert - Should NOT call GCP identity token
+      expect(getGcpIdentityToken).not.toHaveBeenCalled();
+
+      // Assert - Should use static bearer token
+      const initCall = mockFetch.mock.calls.find(
+        (call) => JSON.parse(call[1].body).method === 'initialize'
+      );
+      expect(initCall![1].headers['Authorization']).toBe('Bearer static-token');
     });
   });
 });

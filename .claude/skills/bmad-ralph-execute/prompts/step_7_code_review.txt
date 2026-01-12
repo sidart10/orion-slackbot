@@ -1,0 +1,58 @@
+**STEP 7: CODE REVIEW**
+
+Review and improve the implementation for story {story_id}.
+
+**REVIEW SCOPE:**
+All code changes made in Step 6 for this story.
+
+**REVIEW CHECKLIST:**
+
+1. **Correctness:**
+   - [ ] All acceptance criteria are met
+   - [ ] Logic is correct for all scenarios
+   - [ ] Edge cases are handled
+   - [ ] No off-by-one errors
+
+2. **Test Coverage:**
+   - [ ] All AC have corresponding tests
+   - [ ] Happy paths tested
+   - [ ] Edge cases tested
+   - [ ] Error scenarios tested
+   - [ ] Tests are meaningful (not just coverage padding)
+
+3. **Code Quality:**
+   - [ ] Code is readable and self-documenting
+   - [ ] Functions/methods have single responsibility
+   - [ ] No code duplication (DRY)
+   - [ ] Consistent naming conventions
+   - [ ] Appropriate abstraction level
+
+4. **Error Handling:**
+   - [ ] All error paths handled
+   - [ ] Errors logged with context
+   - [ ] User-facing errors are clear
+   - [ ] No silent failures
+
+5. **Security:**
+   - [ ] No hardcoded credentials
+   - [ ] Input validation in place
+   - [ ] No injection vulnerabilities
+   - [ ] Appropriate authorization checks
+
+6. **Performance:**
+   - [ ] No obvious N+1 queries
+   - [ ] No unnecessary loops
+   - [ ] Appropriate data structures
+   - [ ] No memory leaks
+
+**FIX ALL ISSUES FOUND:**
+- Critical issues: Fix immediately
+- Minor issues: Fix if quick, otherwise note for future
+
+**OUTPUT:**
+- All issues resolved
+- Tests still passing
+- Story status → review
+
+**AFTER REVIEW:**
+Run all tests again to ensure fixes didn't break anything.

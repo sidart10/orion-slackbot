@@ -62,6 +62,27 @@ export function loadMcpServersConfig(basePath: string = process.cwd()): Record<s
     cachedConfig[name] = transformToSdkConfig(name, serverConfig);
   }
 
+  // Story 8.4 AC6: Warn about potential missing auth for Cloud Run servers
+  for (const [name, serverConfig] of Object.entries(cachedConfig)) {
+    const httpConfig = serverConfig as {
+      url?: string;
+      headers?: Record<string, string>;
+      authType?: string;
+    };
+    if (
+      httpConfig.url?.includes('.run.app') &&
+      !httpConfig.headers?.Authorization &&
+      !httpConfig.authType
+    ) {
+      logger.warn({
+        event: 'mcp.config.possible_missing_auth',
+        server: name,
+        url: httpConfig.url,
+        hint: 'Cloud Run servers typically require authType: gcp_identity',
+      });
+    }
+  }
+
   logger.info({
     event: 'mcp_config_loaded',
     serverCount: Object.keys(cachedConfig).length,

@@ -1,0 +1,56 @@
+**STEP 5: STORY CONTEXT COMPILATION**
+
+Compile all story context into XML format for DEV agent.
+
+**INPUT:**
+- Story file: {impl_dir}/stories/story-{story_id}.md
+- ATDD checklist: {impl_dir}/stories/atdd-checklist-{story_id}.md
+- Architecture: {planning_dir}/architecture.md
+
+**OUTPUT:**
+- File: {impl_dir}/stories/{story_id}.context.xml
+- Status update: {story_id} → ready-for-dev
+
+**CONTEXT XML STRUCTURE:**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="{story_id}" epic="{epic_id}">
+  <metadata>
+    <created>{timestamp}</created>
+    <status>ready-for-dev</status>
+  </metadata>
+
+  <story>
+    <overview>[From story file]</overview>
+    <acceptance-criteria>
+      <criterion id="1">[AC text]</criterion>
+      <criterion id="2">[AC text]</criterion>
+    </acceptance-criteria>
+    <dependencies>[List]</dependencies>
+    <technical-notes>[From story]</technical-notes>
+  </story>
+
+  <tests>
+    <atdd-checklist-ref>atdd-checklist-{story_id}.md</atdd-checklist-ref>
+    <test-summary>
+      <total-tests>[count]</total-tests>
+      <by-type>
+        <happy-path>[count]</happy-path>
+        <edge-cases>[count]</edge-cases>
+        <error-handling>[count]</error-handling>
+      </by-type>
+    </test-summary>
+  </tests>
+
+  <architecture>
+    <relevant-sections>[From architecture.md]</relevant-sections>
+    <patterns-to-follow>[Key patterns]</patterns-to-follow>
+  </architecture>
+</story-context>
+```
+
+**REQUIREMENTS:**
+1. Include ALL story details
+2. Reference ATDD checklist (don't duplicate)
+3. Extract relevant architecture patterns
+4. Provide enough context for DEV to implement without additional lookups
