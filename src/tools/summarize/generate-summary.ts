@@ -19,9 +19,10 @@ const anthropic = new Anthropic();
  * Summarization prompt — outputs Slack mrkdwn format (not markdown).
  *
  * IMPORTANT: Use *bold* not **bold**, use _italic_ not *italic*.
+ * @see Story 7.8 - Enhanced Slack UI Polish (AC6)
  * @see project-context.md Slack mrkdwn Reference
  */
-const SUMMARIZATION_PROMPT = `You are summarizing a Slack conversation. Output in Slack mrkdwn format.
+export const SUMMARIZATION_PROMPT = `You are summarizing a Slack conversation. Output in Slack mrkdwn format.
 
 IMPORTANT FORMATTING RULES:
 - Bold: *text* (NOT **text**)

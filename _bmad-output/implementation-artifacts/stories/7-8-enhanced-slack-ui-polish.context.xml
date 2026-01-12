@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="7-8-enhanced-slack-ui-polish" epic="7">
+  <metadata>
+    <created>2026-01-11T00:00:00Z</created>
+    <status>ready-for-dev</status>
+    <priority>P3</priority>
+    <estimate>3 points</estimate>
+  </metadata>
+
+  <story>
+    <overview>
+      As a Slack user interacting with Orion, I want responses to have consistent, professional visual formatting, so that information is easy to scan, looks polished, and maintains a cohesive brand experience.
+
+      Orion's response formatting has evolved organically across multiple stories, leading to inconsistencies: emoji inconsistency (some responses use emoji prefixes, others don't), header style variance (mix of *bold* headers and ## markdown which renders poorly in Slack), source/reference formatting variations, and stakeholder feedback that emoji-heavy formatting feels informal.
+
+      Key Design Decision (from Story 8.1): "Remove emojis from sources-block.ts - use *References:* header instead"
+    </overview>
+
+    <acceptance-criteria>
+      <criterion id="AC1">
+        <title>Standardize Section Headers</title>
+        <requirements>
+          <req>All response sections use *Section Name* format (Slack mrkdwn bold)</req>
+          <req>Remove markdown ## headers that render incorrectly in Slack</req>
+          <req>Header format: *Summary*, *Key Findings*, *References*, etc.</req>
+          <req>Consistent casing: Title Case for headers</req>
+        </requirements>
+      </criterion>
+
+      <criterion id="AC2">
+        <title>Remove Emoji Prefix Clutter</title>
+        <requirements>
+          <req>Remove emoji prefixes from section headers in body text</req>
+          <req>Keep emoji ONLY for status indicators (searching, success, warning, error)</req>
+          <req>Response body text should be professional, not decorated with emojis</req>
+          <req>Exception: Status messages can use functional emojis per UX spec</req>
+        </requirements>
+        <emoji-policy>
+          <allowed category="status-indicators">searching indicator, checkmark (success), warning, X (error) - Status messages only</allowed>
+          <removed category="section-headers">magnifying glass, lightbulb, clipboard, wrench, lock, speech bubble, thread, group - No longer used</removed>
+        </emoji-policy>
+      </criterion>
+
+      <criterion id="AC3">
+        <title>Formatting Constants (NEW FILE)</title>
+        <requirements>
+          <req>Create NEW file: src/slack/formatting-constants.ts (does not exist yet)</req>
+          <req>Define SECTION_HEADERS constant with all standard headers</req>
+          <req>Define RESPONSE_STRUCTURE constant for response ordering</req>
+          <req>Export constants for use across all formatters</req>
+          <req>NOTE: This is a NEW file to create, not an existing file to modify</req>
+        </requirements>
+      </criterion>
+
+      <criterion id="AC4">
+        <title>Response Template Consistency</title>
+        <requirements>
+          <req>All handlers use consistent response structure: 1) Lead with value (answer/result first), 2) Supporting details (bulleted), 3) References section (if sources exist), 4) Feedback prompt (if applicable)</req>
+          <req>Summarization responses follow same pattern</req>
+          <req>Error responses follow same pattern with alternatives</req>
+        </requirements>
+      </criterion>
+
+      <criterion id="AC5">
+        <title>Audit and Fix Existing Formatters</title>
+        <requirements>
+          <req>Audit src/tools/summarize/format-summary.ts - update to use formatting constants</req>
+          <req>Audit src/tools/summarize/generate-summary.ts - update prompt for consistent headers</req>
+          <req>Audit src/slack/handlers/user-message.ts response formatting</req>
+          <req>Audit src/slack/handlers/app-mention.ts response formatting</req>
+          <req>Audit any prompt templates that include formatting instructions</req>
+          <req>DO NOT modify src/slack/sources-block.ts - owned by Story 8.1</req>
+        </requirements>
+      </criterion>
+
+      <criterion id="AC6">
+        <title>Update Summarization Formatting</title>
+        <requirements>
+          <req>Remove emoji prefixes from summary sections (*Summary* not emoji+Summary)</req>
+          <req>Standardize section names: *Key Decisions*, *Action Items*, etc.</req>
+          <req>Update generate-summary.ts prompt to output consistent format</req>
+        </requirements>
+      </criterion>
+
+      <criterion id="AC7">
+        <title>Langfuse Observability</title>
+        <requirements>
+          <req>No new spans needed - formatting changes only</req>
+          <req>Verify existing traces still work after formatting changes</req>
+        </requirements>
+      </criterion>
+    </acceptance-criteria>
+
+    <dependencies>
+      <dependency>Story 7.3 - Contextual Tool Feedback</dependency>
+      <dependency>Story 7.6 - Conversation Summarization</dependency>
+    </dependencies>
+
+    <out-of-scope>
+      <item>Story 8.1 (Citations API) - separate story with API integration</item>
+      <item>sources-block.ts changes - Story 8.1 owns the References/Sources block format</item>
+      <item>New response types - only polish existing ones</item>
+      <item>Block Kit redesign - uses existing Block Kit patterns</item>
+      <item>Custom UI components - Slack native only</item>
+    </out-of-scope>
+
+    <technical-notes>
+      <files-to-modify>
+        <file action="create">src/slack/formatting-constants.ts - NEW FILE - Centralized formatting constants</file>
+        <file action="modify">src/tools/summarize/generate-summary.ts - Update prompt for consistent formatting</file>
+        <file action="modify">src/tools/summarize/format-summary.ts - Use formatting constants, remove emoji prefixes</file>
+        <file action="audit">src/slack/handlers/user-message.ts - Audit/fix response formatting</file>
+        <file action="audit">src/slack/handlers/app-mention.ts - Audit/fix response formatting</file>
+      </files-to-modify>
+
+      <files-out-of-scope>
+        <file reason="Story 8.1 owns References/Sources formatting">src/slack/sources-block.ts</file>
+      </files-out-of-scope>
+
+      <implementation-guidance>
+        <formatting-constants-template><![CDATA[
+/**
+ * Formatting constants for Slack responses.
+ * Centralized to ensure consistency across all formatters.
+ *
+ * @see Story 7.8 - Enhanced Slack UI Polish
+ * @see project-context.md - Slack mrkdwn Reference
+ */
+
+export const STATUS_EMOJI = {
+  searching: '...',
+  success: '',
+  warning: '',
+  error: '',
+  tip: '',
+} as const;
+
+export const SECTION_HEADERS = {
+  summary: '*Summary*',
+  keyFindings: '*Key Findings*',
+  keyDecisions: '*Key Decisions*',
+  actionItems: '*Action Items*',
+  topicsDiscussed: '*Topics Discussed*',
+  unresolvedQuestions: '*Unresolved Questions*',
+  participants: '*Active Participants*',
+  references: '*References:*',
+  nextSteps: '*Next Steps*',
+  error: '*Error*',
+  alternatives: '*Alternatives*',
+} as const;
+
+export const RESPONSE_STRUCTURE = [
+  'value',
+  'details',
+  'references',
+  'actions',
+] as const;
+        ]]></formatting-constants-template>
+
+        <summarization-prompt-rules>
+          <rule>Use *bold* for headers (Slack mrkdwn), NOT **bold** (markdown)</rule>
+          <rule>Omit sections with no content</rule>
+          <rule>Maximum 5 items per section for readability</rule>
+          <rule>Professional tone, no emojis in body text</rule>
+        </summarization-prompt-rules>
+      </implementation-guidance>
+    </technical-notes>
+  </story>
+
+  <tests>
+    <atdd-checklist-ref>atdd-checklist-7-8-enhanced-slack-ui-polish.md</atdd-checklist-ref>
+    <test-summary>
+      <total-tests>51</total-tests>
+      <by-type>
+        <happy-path>32</happy-path>
+        <edge-cases>10</edge-cases>
+        <error-handling>5</error-handling>
+        <boundary>4</boundary>
+      </by-type>
+    </test-summary>
+    <key-test-areas>
+      <area ac="AC1">Section headers use Slack mrkdwn bold format, no markdown ## headers, Title Case</area>
+      <area ac="AC2">No emoji prefixes in section headers, status indicators only for allowed categories</area>
+      <area ac="AC3">formatting-constants.ts created with SECTION_HEADERS, RESPONSE_STRUCTURE, STATUS_EMOJI constants</area>
+      <area ac="AC4">Response structure: value first, details, references, actions</area>
+      <area ac="AC5">Formatters import and use constants, sources-block.ts unchanged</area>
+      <area ac="AC6">Summarization output uses standardized headers without emojis</area>
+      <area ac="AC7">Existing Langfuse traces work, no new spans</area>
+    </key-test-areas>
+  </tests>
+
+  <architecture>
+    <relevant-sections>
+      <section name="Slack-mrkdwn">
+        <description>Slack uses mrkdwn format, NOT Markdown</description>
+        <key-differences>
+          <diff element="bold">Slack: *bold* | NOT: **bold**</diff>
+          <diff element="italic">Slack: _italic_ | NOT: *italic*</diff>
+          <diff element="strike">Slack: ~strike~ | NOT: ~~strike~~</diff>
+          <diff element="link">Slack: &lt;https://url|text&gt; | NOT: [text](url)</diff>
+        </key-differences>
+      </section>
+
+      <section name="Implementation-Patterns">
+        <description>Project conventions from project-context.md</description>
+        <rules>
+          <rule>ESM imports: Always use .js extension</rule>
+          <rule>Tool errors: Never throw, return ToolResult with success/error</rule>
+          <rule>File naming: kebab-case.ts, tests: kebab-case.test.ts</rule>
+          <rule>Constants: SCREAMING_SNAKE_CASE</rule>
+        </rules>
+      </section>
+
+      <section name="Observability">
+        <description>Langfuse tracing requirements</description>
+        <rules>
+          <rule>Include traceId in every log entry</rule>
+          <rule>Span naming: {component}.{operation}</rule>
+          <rule>No new spans needed for formatting changes</rule>
+        </rules>
+      </section>
+
+      <section name="Slack-Response-Format">
+        <description>Response structure from UX Spec</description>
+        <structure>
+          <step order="1">Lead with value (answer/result first)</step>
+          <step order="2">Supporting details (bulleted)</step>
+          <step order="3">References section (if sources exist)</step>
+          <step order="4">Feedback/Actions</step>
+        </structure>
+      </section>
+    </relevant-sections>
+
+    <patterns-to-follow>
+      <pattern name="ESM-Imports">Always use .js extension in relative imports</pattern>
+      <pattern name="Const-Exports">Use as const for type-safe constants</pattern>
+      <pattern name="Slack-mrkdwn">Use *bold* not **bold**, use &lt;url|text&gt; not [text](url)</pattern>
+      <pattern name="Test-Colocation">Unit tests in kebab-case.test.ts next to source</pattern>
+      <pattern name="No-Console">Use logger.* methods, never console.log</pattern>
+      <pattern name="Formatting-Centralization">Import section headers from formatting-constants.ts</pattern>
+    </patterns-to-follow>
+  </architecture>
+
+  <definition-of-done>
+    <item>formatting-constants.ts created (NEW file) with all section headers</item>
+    <item>generate-summary.ts prompt updated for consistent headers</item>
+    <item>format-summary.ts uses formatting constants</item>
+    <item>Handler response formatting audited and consistent</item>
+    <item>Unit tests for formatting-constants (2+ tests)</item>
+    <item>All existing tests pass after changes</item>
+    <item>Manual Slack verification of response formatting</item>
+    <item>No markdown ## headers in any response</item>
+    <item>No emojis in section headers (only status indicators)</item>
+    <item>sources-block.ts NOT modified (Story 8.1 scope)</item>
+  </definition-of-done>
+
+  <risks-mitigations>
+    <risk name="Breaking existing responses">
+      <mitigation>Unit tests for all formatters before changes</mitigation>
+    </risk>
+    <risk name="Claude ignoring format instructions">
+      <mitigation>Explicit prompt instructions with examples</mitigation>
+    </risk>
+    <risk name="Inconsistent user experience during rollout">
+      <mitigation>All changes in single deployment</mitigation>
+    </risk>
+    <risk name="Regression in summarization">
+      <mitigation>Comprehensive tests for summarization formatting</mitigation>
+    </risk>
+  </risks-mitigations>
+</story-context>

@@ -31,6 +31,7 @@ import { feedbackBlock } from '../feedback-block.js';
 import { createSourcesContextBlock, type SourceCitation } from '../sources-block.js';
 import { filterClickableSources } from '../source-builder.js';
 import { buildLoadingMessages } from '../status-messages.js';
+import { createStatusUpdater } from '../status/index.js';
 import { runOrionAgent, type AgentResult } from '../../agent/orion.js';
 import { loadAgentPrompt } from '../../agent/loader.js';
 import { config } from '../../config/environment.js';
@@ -164,81 +165,18 @@ export async function handleAppMention({
         traceId: trace.id,
       });
 
-      // Story 3.4: Post initial status message for tool feedback
-      let statusMessageTs: string | undefined;
-      let lastStatusUpdate = 0;
-      const STATUS_DEBOUNCE_MS = 300;
+      // Story 7.9: Create unified StatusUpdater for status message handling
+      // Uses ChannelStatusUpdater since no setStatus callback in @mention context
+      const statusUpdater = createStatusUpdater({
+        // No setStatus for channel context - factory will use ChannelStatusUpdater
+        client,
+        channel: channelId,
+        thread_ts: threadTs,
+        traceId: trace.id,
+      });
 
-      try {
-        const statusMsg = await client.chat.postMessage({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: 'Thinking…',
-        });
-        statusMessageTs = statusMsg.ts;
-      } catch (statusError) {
-        logger.warn({
-          event: 'status_message_post_failed',
-          error: statusError instanceof Error ? statusError.message : String(statusError),
-          traceId: trace.id,
-        });
-      }
-
-      /**
-       * Update the status message with tool-specific text.
-       * Debounced to avoid Slack rate limits (300ms minimum between updates).
-       *
-       * @see Story 7.3 - Contextual Tool Feedback (AC1-AC5)
-       */
-      const updateStatusMessage = async (params: {
-        phase?: 'gather' | 'act' | 'tool' | 'verify' | 'final';
-        toolName?: string | null;
-        toolInput?: Record<string, unknown>;
-        allTools?: Array<{ name: string; input: Record<string, unknown> }>;
-      }): Promise<void> => {
-        if (!statusMessageTs) return;
-
-        const now = Date.now();
-        if (now - lastStatusUpdate < STATUS_DEBOUNCE_MS) return;
-        lastStatusUpdate = now;
-
-        const messages = buildLoadingMessages(params);
-        // Final phase returns empty array - skip update
-        if (messages.length === 0) return;
-
-        try {
-          await client.chat.update({
-            channel: channelId,
-            ts: statusMessageTs,
-            text: messages[0] ?? 'Working…',
-          });
-        } catch (updateError) {
-          logger.debug({
-            event: 'status_message_update_failed',
-            error: updateError instanceof Error ? updateError.message : String(updateError),
-            traceId: trace.id,
-          });
-        }
-      };
-
-      /**
-       * Delete the status message (cleanup after completion or error).
-       */
-      const deleteStatusMessage = async (): Promise<void> => {
-        if (!statusMessageTs) return;
-        try {
-          await client.chat.delete({
-            channel: channelId,
-            ts: statusMessageTs,
-          });
-        } catch (deleteError) {
-          logger.debug({
-            event: 'status_message_delete_failed',
-            error: deleteError instanceof Error ? deleteError.message : String(deleteError),
-            traceId: trace.id,
-          });
-        }
-      };
+      // Post initial status message
+      await statusUpdater.update('Thinking...');
 
       let agentSpan: ReturnType<typeof trace.startSpan> | null = null;
 
@@ -335,6 +273,7 @@ export async function handleAppMention({
           systemPrompt,
           trace: trace._span,
           // Story 7.3: Enhanced status with tool context (AC1-AC5)
+          // Story 7.9: Use StatusUpdater for consistent status handling
           setStatus: ({ phase, toolName, toolInput, allTools }) => {
             logger.debug({
               event: 'agent_status_update',
@@ -343,7 +282,11 @@ export async function handleAppMention({
               toolCount: allTools?.length,
               traceId: trace.id,
             });
-            void updateStatusMessage({ phase, toolName, toolInput, allTools });
+            const messages = buildLoadingMessages({ phase, toolName, toolInput, allTools });
+            // Final phase returns empty array - skip update
+            if (messages.length > 0) {
+              void statusUpdater.update(messages[0] ?? 'Working...');
+            }
           },
         });
 
@@ -425,7 +368,8 @@ export async function handleAppMention({
         }
 
         // Story 3.4: Delete status message now that streaming is complete
-        await deleteStatusMessage();
+        // Story 7.9: Use StatusUpdater for consistent status handling
+        await statusUpdater.cleanup();
 
         // Story 2.7 + Source Citations Fix: Only use sources from tool results
         // NOTE: Thread messages are NOT sources - they're the conversation context.
@@ -644,7 +588,8 @@ export async function handleAppMention({
         clearMemoryToolContext();
 
         // Story 3.4: Clean up status message on error
-        await deleteStatusMessage();
+        // Story 7.9: Use StatusUpdater for consistent status handling
+        await statusUpdater.cleanup();
 
         // Ensure stream is stopped even on error
         try {

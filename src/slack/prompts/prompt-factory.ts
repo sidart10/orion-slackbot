@@ -5,11 +5,18 @@
  * Per UX spec: prompts should never be static, always relevant to context.
  *
  * @see Story 7.1 - Dynamic Suggested Prompts
+ * @see Story 7.7 - Skill-Aware Suggested Prompts
  * @see AC#1 - Context-aware prompts (channel, user, time)
  * @see AC#2 - Follow-up prompts after responses
  * @see AC#4 - Error recovery prompts
  * @see AC#5 - Maximum 4 prompts (Slack API limit)
  */
+
+import {
+  getSkillAwarePrompts,
+  analyzeResponseForSkillPrompts,
+  getSkillFollowUpPrompts,
+} from './skill-prompts.js';
 
 /**
  * Prompt structure matching Slack's setSuggestedPrompts API
@@ -39,6 +46,32 @@ export interface PromptContext {
   errorCode?: string;
   /** Hour of day (0-23) for time-based prompts. Uses current hour if not provided. */
   hourOfDay?: number;
+
+  // Story 7.7: Skill-aware prompts
+  /** Available skills from skill registry (SkillRegistryEntry objects) */
+  availableSkills?: SkillInfo[];
+  /** Content of the last response for pattern-based skill suggestions */
+  responseContent?: string;
+  /** Skill that was used in the most recent response (triggers follow-up prompts) */
+  usedSkillInResponse?: string;
+  /** Skills that have been used throughout the thread (for progressive suggestions) */
+  usedSkillsInThread?: string[];
+}
+
+/**
+ * Minimal skill info for prompt generation.
+ * Subset of SkillRegistryEntry to avoid circular dependencies.
+ * @see Story 7.7 - AC#4 - Skills API metadata used in prompt generation
+ */
+export interface SkillInfo {
+  /** Local skill name (e.g., "summarize", "xlsx") */
+  name: string;
+  /** Anthropic skill ID */
+  skillId: string;
+  /** Skill type */
+  type: 'custom' | 'anthropic';
+  /** Version */
+  version: string;
 }
 
 /** Slack API limit for suggested prompts */
@@ -48,13 +81,30 @@ const MAX_PROMPTS = 4;
  * Generate context-aware suggested prompts.
  * Per UX spec: Never static, always relevant.
  *
+ * Priority order (Story 7.7):
+ * 1. usedSkillInResponse (highest - show skill follow-ups)
+ * 2. lastResponseType (existing behavior)
+ * 3. responseContent + skills (content analysis)
+ * 4. availableSkills only (general hints)
+ * 5. Time-based/base prompts (lowest)
+ *
  * @param context - Context for generating prompts
  * @returns Array of suggested prompts (max 4)
+ *
+ * @see Story 7.7 - Skill-aware prompts integration
  */
 export function generateSuggestedPrompts(context: PromptContext): SuggestedPrompt[] {
   let prompts: SuggestedPrompt[];
 
-  // If we have a response type, generate follow-up prompts
+  // Priority 1: Skill follow-ups if a skill was just used (AC#5)
+  if (context.usedSkillInResponse) {
+    const skillFollowUps = getSkillFollowUpPrompts(context.usedSkillInResponse);
+    if (skillFollowUps.length > 0) {
+      return skillFollowUps.slice(0, MAX_PROMPTS);
+    }
+  }
+
+  // Priority 2: Response type follow-ups (existing behavior)
   if (context.lastResponseType) {
     switch (context.lastResponseType) {
       case 'research':
@@ -72,20 +122,91 @@ export function generateSuggestedPrompts(context: PromptContext): SuggestedPromp
       default:
         prompts = getBasePrompts(context.channelType);
     }
-  } else {
-    // No response type: check for time-based prompts first, then base prompts
-    const hour = context.hourOfDay ?? new Date().getHours();
-    const timePrompts = getTimeBasedPrompts(hour, context.channelType);
+    // Blend skill prompts with response type prompts
+    return blendWithSkillPrompts(prompts, context);
+  }
 
-    if (timePrompts) {
-      prompts = timePrompts;
-    } else {
-      prompts = getBasePrompts(context.channelType);
+  // Priority 3 & 4: Response content analysis + available skills (AC#2, AC#3)
+  const availableSkillNames = (context.availableSkills ?? []).map((s) => s.name);
+  if (context.responseContent && availableSkillNames.length > 0) {
+    const contentPrompts = analyzeResponseForSkillPrompts(
+      context.responseContent,
+      availableSkillNames
+    );
+    if (contentPrompts.length > 0) {
+      // Fill remaining slots with base prompts
+      const basePrompts = getBasePrompts(context.channelType);
+      const combined = [...contentPrompts, ...basePrompts];
+      return combined.slice(0, MAX_PROMPTS);
     }
+  }
+
+  // Priority 4: Available skills hints (AC#1)
+  if (context.availableSkills && context.availableSkills.length > 0) {
+    const skillPrompts = getSkillAwarePrompts(context.availableSkills);
+    if (skillPrompts.length > 0) {
+      // Blend with time-based or base prompts
+      const hour = context.hourOfDay ?? new Date().getHours();
+      const timePrompts = getTimeBasedPrompts(hour, context.channelType);
+      const basePrompts = timePrompts ?? getBasePrompts(context.channelType);
+      // Put skill prompts first, then fill with base
+      const combined = [...skillPrompts, ...basePrompts];
+      return combined.slice(0, MAX_PROMPTS);
+    }
+  }
+
+  // Priority 5: Time-based or base prompts (lowest)
+  const hour = context.hourOfDay ?? new Date().getHours();
+  const timePrompts = getTimeBasedPrompts(hour, context.channelType);
+
+  if (timePrompts) {
+    prompts = timePrompts;
+  } else {
+    prompts = getBasePrompts(context.channelType);
   }
 
   // Enforce Slack API limit
   return prompts.slice(0, MAX_PROMPTS);
+}
+
+/**
+ * Blend base prompts with skill-aware prompts.
+ * Replaces 1-2 base prompts with skill prompts when available.
+ *
+ * @param basePrompts - Original prompts to blend with
+ * @param context - Context containing skill info
+ * @returns Blended prompts (max 4)
+ *
+ * @see Story 7.7 AC#1 - At least one skill hint when skills available
+ */
+function blendWithSkillPrompts(
+  basePrompts: SuggestedPrompt[],
+  context: PromptContext
+): SuggestedPrompt[] {
+  const availableSkillNames = (context.availableSkills ?? []).map((s) => s.name);
+
+  // Try content-based prompts first
+  let skillPrompts: SuggestedPrompt[] = [];
+  if (context.responseContent && availableSkillNames.length > 0) {
+    skillPrompts = analyzeResponseForSkillPrompts(
+      context.responseContent,
+      availableSkillNames
+    );
+  }
+
+  // Fall back to general skill hints
+  if (skillPrompts.length === 0 && context.availableSkills) {
+    skillPrompts = getSkillAwarePrompts(context.availableSkills);
+  }
+
+  if (skillPrompts.length === 0) {
+    return basePrompts.slice(0, MAX_PROMPTS);
+  }
+
+  // Blend: skill prompts first, then remaining base prompts
+  const remainingSlots = MAX_PROMPTS - skillPrompts.length;
+  const combined = [...skillPrompts, ...basePrompts.slice(0, remainingSlots)];
+  return combined.slice(0, MAX_PROMPTS);
 }
 
 /**
@@ -338,5 +459,119 @@ function getClarificationFollowUpPrompts(): SuggestedPrompt[] {
       message: 'What can you help me with?',
     },
   ];
+}
+
+// =============================================================================
+// Story 7.7: Skill Integration Helpers
+// =============================================================================
+
+import { skillRegistry } from '../../skills/index.js';
+import type { SkillRegistryEntry } from '../../skills/types.js';
+
+/**
+ * Get available skills from the registry as SkillInfo for prompt generation.
+ *
+ * Fetches all registered skills (both custom and built-in) and maps them
+ * to the minimal SkillInfo interface needed for prompt generation.
+ *
+ * @returns Array of available skills as SkillInfo
+ *
+ * @see Story 7.7 AC#4 - Skills API metadata used in prompt generation
+ */
+export function getAvailableSkillsForPrompts(): SkillInfo[] {
+  // Ensure registry is initialized (idempotent)
+  skillRegistry.initialize();
+
+  const skills: SkillInfo[] = [];
+  const allSkillIds = skillRegistry.getAllSkillIds();
+
+  for (const skillId of allSkillIds) {
+    const entry: SkillRegistryEntry | undefined = skillRegistry.getSkillMetadata(skillId);
+    if (entry) {
+      skills.push({
+        name: entry.name,
+        skillId: entry.skillId,
+        type: entry.type,
+        version: entry.version,
+      });
+    }
+  }
+
+  return skills;
+}
+
+/**
+ * Skills that generate files when executed.
+ * Used to detect skill usage from AgentResult.generatedFileIds.
+ */
+const FILE_GENERATING_SKILLS = new Set(['xlsx', 'pdf', 'docx', 'd3js-visualization', 'algorithmic-art', 'frontend-design']);
+
+/**
+ * Keywords in response content that suggest skill usage.
+ * Maps keyword patterns to likely skill names.
+ */
+const SKILL_USAGE_PATTERNS: Array<{ patterns: RegExp; skill: string }> = [
+  { patterns: /spreadsheet|excel|\.xlsx/i, skill: 'xlsx' },
+  { patterns: /pdf|document report|\.pdf/i, skill: 'pdf' },
+  { patterns: /word document|\.docx/i, skill: 'docx' },
+  { patterns: /visualization|chart|graph/i, skill: 'd3js-visualization' },
+  { patterns: /summariz(e|ed|ing)|thread summary/i, skill: 'summarize' },
+];
+
+/**
+ * Detect which skill was used based on response content and file generation.
+ *
+ * Uses multiple heuristics:
+ * 1. File generation (strongest signal - AgentResult.generatedFileIds present)
+ * 2. Response content patterns (keywords suggesting skill output)
+ *
+ * @param responseContent - Full text content of the response
+ * @param generatedFileIds - File IDs from AgentResult (indicates skill created files)
+ * @returns Name of the skill that was likely used, or undefined if none detected
+ *
+ * @see Story 7.7 AC#5 - Skill follow-up prompts after skill usage
+ */
+export function detectSkillUsage(
+  responseContent: string | undefined,
+  generatedFileIds?: string[]
+): string | undefined {
+  // Priority 1: If files were generated, it's very likely a file-generating skill
+  if (generatedFileIds && generatedFileIds.length > 0) {
+    // Check response content to determine which file-generating skill
+    if (responseContent) {
+      const lowerContent = responseContent.toLowerCase();
+
+      // Check explicit mentions
+      if (lowerContent.includes('spreadsheet') || lowerContent.includes('xlsx') || lowerContent.includes('excel')) {
+        return 'xlsx';
+      }
+      if (lowerContent.includes('pdf') && !lowerContent.includes('word')) {
+        return 'pdf';
+      }
+      if (lowerContent.includes('word document') || lowerContent.includes('docx')) {
+        return 'docx';
+      }
+      if (lowerContent.includes('visualization') || lowerContent.includes('chart')) {
+        return 'd3js-visualization';
+      }
+      if (lowerContent.includes('artwork') || lowerContent.includes('art')) {
+        return 'algorithmic-art';
+      }
+    }
+
+    // Default to xlsx for unknown file generation (most common)
+    return 'xlsx';
+  }
+
+  // Priority 2: Check response content patterns
+  if (responseContent && responseContent.length > 50) {
+    for (const { patterns, skill } of SKILL_USAGE_PATTERNS) {
+      if (patterns.test(responseContent)) {
+        return skill;
+      }
+    }
+  }
+
+  return undefined;
 }
 

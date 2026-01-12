@@ -44,6 +44,7 @@ import {
 import { config } from '../../config/environment.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { buildLoadingMessages } from '../status-messages.js';
+import { createStatusUpdater } from '../status/index.js';
 import {
   withTimeout,
   HARD_TIMEOUT_MS,
@@ -51,7 +52,12 @@ import {
   getUserMessage,
 } from '../../utils/errors.js';
 import { isDuplicateEvent } from '../event-dedup.js';
-import { generateSuggestedPrompts, type PromptContext } from '../prompts/prompt-factory.js';
+import {
+  generateSuggestedPrompts,
+  getAvailableSkillsForPrompts,
+  detectSkillUsage,
+  type PromptContext,
+} from '../prompts/prompt-factory.js';
 import {
   setSummarizeToolContext,
   clearSummarizeToolContext,
@@ -184,26 +190,21 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           }
         };
 
-        const safeSetStatus = (payload: unknown): Promise<void> => {
-          try {
-            const result = (setStatus as unknown as (p: unknown) => unknown)(payload);
-            if (result && typeof (result as Promise<unknown>).then === 'function') {
-              return (result as Promise<unknown>).then(() => {}).catch(() => {});
-            }
-            return Promise.resolve();
-          } catch {
-            return Promise.resolve();
-          }
-        };
+        // Story 7.9: Create unified StatusUpdater for status message handling
+        const statusUpdater = createStatusUpdater({
+          setStatus: setStatus as unknown as (payload: { status: string; loading_messages?: string[] }) => void | Promise<void>,
+          client,
+          channel: channelId,
+          thread_ts: threadTs ?? '',
+          traceId: trace.id,
+        });
 
         // Set thread title from first message (truncated) without blocking stream start (NFR4)
         safeSetTitle(messageText.slice(0, 50));
 
         // FR47: dynamic status messages without blocking stream start
-        const initialStatusPromise = safeSetStatus({
-          status: 'working...',
-          loading_messages: buildLoadingMessages(),
-        });
+        // Story 7.9: Use StatusUpdater for consistent status handling
+        const initialStatusPromise = statusUpdater.update(buildLoadingMessages()[0] ?? 'Thinking...');
 
         // CRITICAL: Initialize streamer within 500ms of message receipt (NFR4/AC#2)
         const streamer = createStreamer({
@@ -277,10 +278,8 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           });
 
           // Milestone: context gathered (FR47)
-          void safeSetStatus({
-            status: 'working...',
-            loading_messages: buildLoadingMessages(),
-          });
+          // Story 7.9: Use StatusUpdater for consistent status handling
+          void statusUpdater.update(buildLoadingMessages()[0] ?? 'Thinking...');
 
           // Convert thread history to Anthropic message format
           // Filter out messages with missing text (e.g., image-only messages)
@@ -466,10 +465,8 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           }
 
           // Milestone: before Anthropic call (FR47)
-          void safeSetStatus({
-            status: 'working...',
-            loading_messages: buildLoadingMessages(),
-          });
+          // Story 7.9: Use StatusUpdater for consistent status handling
+          void statusUpdater.update(buildLoadingMessages()[0] ?? 'Thinking...');
 
           // Set summarize tool context (Story 7.6)
           setSummarizeToolContext({
@@ -491,11 +488,11 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             // Pass the underlying span for the agent loop to create nested observations
             trace: trace._span,
             // Story 7.3: Enhanced status with tool context (AC1-AC5)
-          setStatus: ({ phase, toolName, toolInput, allTools }) =>
-              safeSetStatus({
-                status: 'working...',
-                loading_messages: buildLoadingMessages({ phase, toolName, toolInput, allTools }),
-              }),
+            // Story 7.9: Use StatusUpdater for consistent status handling
+            setStatus: ({ phase, toolName, toolInput, allTools }) => {
+              const messages = buildLoadingMessages({ phase, toolName, toolInput, allTools });
+              void statusUpdater.update(messages[0] ?? 'Working...');
+            },
           });
 
           // Stream formatted response (AC#3)
@@ -558,10 +555,8 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           generation.end();
 
           // Milestone: before final response flush (FR47)
-          void safeSetStatus({
-            status: 'working...',
-            loading_messages: buildLoadingMessages(),
-          });
+          // Story 7.9: Use StatusUpdater for consistent status handling
+          void statusUpdater.update(buildLoadingMessages()[0] ?? 'Finishing up...');
 
           // Stop streaming and get metrics
           let metrics;
@@ -857,6 +852,7 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           }
 
           // Story 7.1: Set context-aware follow-up prompts (AC#2)
+          // Story 7.7: Skill-aware suggested prompts (AC#1-AC#5)
           // Determine response type based on what happened
           const lastResponseType: PromptContext['lastResponseType'] =
             sourcesGatheredCount > 0 ? 'research' : undefined;
@@ -868,10 +864,23 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
               : 'channel';
 
           try {
+            // Story 7.7: Get available skills for prompt hints (AC#4)
+            const availableSkills = getAvailableSkillsForPrompts();
+
+            // Story 7.7: Detect if a skill was used in this response (AC#5)
+            const usedSkillInResponse = detectSkillUsage(
+              fullResponse,
+              agentResult?.generatedFileIds
+            );
+
             const followUpPrompts = generateSuggestedPrompts({
               channelType,
               userId: userId ?? 'unknown',
               lastResponseType,
+              // Story 7.7: Skill-aware prompt context
+              availableSkills,
+              responseContent: fullResponse,
+              usedSkillInResponse,
             });
 
             await setSuggestedPrompts({
@@ -883,6 +892,8 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
               event: 'follow_up_prompts_set',
               lastResponseType,
               promptCount: followUpPrompts.length,
+              availableSkillCount: availableSkills.length,
+              usedSkillInResponse: usedSkillInResponse ?? null,
               traceId: trace.id,
             });
           } catch (promptError) {
@@ -911,6 +922,9 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           // Clear memory tool context (Story 5.1)
           clearMemoryToolContext();
 
+          // Story 7.9: Clean up status on success
+          await statusUpdater.cleanup();
+
           // Return the full response as trace output (visible in Langfuse output tab)
           return fullResponse;
             })(),
@@ -921,6 +935,9 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           clearSummarizeToolContext();
           // Clear memory tool context on error (Story 5.1)
           clearMemoryToolContext();
+
+          // Story 7.9: Clean up status on error
+          await statusUpdater.cleanup();
 
           // Ensure stream is stopped even on error
           try {

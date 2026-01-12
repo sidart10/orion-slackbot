@@ -2,7 +2,11 @@
  * Tests for formatSummaryResponse.
  *
  * @see Story 7.6 - Conversation Summarization
+ * @see Story 7.8 - Enhanced Slack UI Polish (AC5 - uses formatting constants)
  * @see AC#6 - Format Response per UX Spec
+ *
+ * Note: Per Story 7.8, status emojis are intentionally empty for professional appearance.
+ * Tests validate content structure, not emoji presence.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -25,7 +29,8 @@ describe('formatSummaryResponse', () => {
 
       const formatted = formatSummaryResponse(result);
 
-      expect(formatted).toContain('🔍 Summarized *42* messages');
+      // Per Story 7.8: No emoji prefix - professional appearance
+      expect(formatted).toContain('Summarized *42* messages');
       expect(formatted).toContain('#conversation');
       expect(formatted).toContain('past 7 days');
       expect(formatted).toContain('*Summary*');
@@ -99,8 +104,9 @@ describe('formatSummaryResponse', () => {
 
       const formatted = formatSummaryResponse(result);
 
-      expect(formatted).toContain('⚠️');
+      // Per Story 7.8: No emoji for warning - text conveys message
       expect(formatted).toContain('500 messages');
+      expect(formatted).toContain('Showing summary of first 500 messages');
     });
 
     it('does not show truncation warning when not truncated', () => {
@@ -113,7 +119,8 @@ describe('formatSummaryResponse', () => {
 
       const formatted = formatSummaryResponse(result);
 
-      expect(formatted).not.toContain('⚠️');
+      // Per Story 7.8: No truncation message when not truncated
+      expect(formatted).not.toContain('Showing summary of first');
     });
 
     it('includes drill-down prompt', () => {
@@ -126,6 +133,82 @@ describe('formatSummaryResponse', () => {
       const formatted = formatSummaryResponse(result);
 
       expect(formatted).toContain('Need more detail on a specific topic?');
+    });
+
+    it('includes source link when sourceUrl is provided', () => {
+      const result: SummaryResult = {
+        summary: '*Summary*\nContent.',
+        messageCount: 10,
+        type: 'channel',
+        sourceUrl: 'https://example.slack.com/archives/C123/p1234',
+      };
+
+      const formatted = formatSummaryResponse(result);
+
+      expect(formatted).toContain('View conversation');
+      expect(formatted).toContain('https://example.slack.com');
+    });
+
+    it('uses thread link label for thread type', () => {
+      const result: SummaryResult = {
+        summary: '*Summary*\nContent.',
+        messageCount: 10,
+        type: 'thread',
+        sourceUrl: 'https://example.slack.com/archives/C123/p1234',
+      };
+
+      const formatted = formatSummaryResponse(result);
+
+      expect(formatted).toContain('View thread');
+    });
+  });
+
+  // Story 7.8: Enhanced Slack UI Polish
+  describe('Story 7.8: Enhanced formatting', () => {
+    it('header uses Slack mrkdwn bold format not markdown', () => {
+      const result: SummaryResult = {
+        summary: '*Summary*\nContent.',
+        messageCount: 10,
+        type: 'channel',
+      };
+
+      const formatted = formatSummaryResponse(result);
+
+      // Should use *bold* (Slack mrkdwn), NOT **bold** (markdown)
+      expect(formatted).toContain('*10*'); // Message count uses mrkdwn bold
+      expect(formatted).not.toMatch(/\*\*\d+\*\*/); // NOT markdown bold
+    });
+
+    it('does not use markdown ## headers', () => {
+      const result: SummaryResult = {
+        summary: '*Summary*\nContent.',
+        messageCount: 10,
+        type: 'channel',
+      };
+
+      const formatted = formatSummaryResponse(result);
+
+      expect(formatted).not.toContain('## ');
+      expect(formatted).not.toContain('### ');
+    });
+
+    it('status indicators use empty strings for professional appearance', () => {
+      // Per Story 7.8 AC2: STATUS_EMOJI values are empty for professional UI
+      // This test verifies the header is clean without emoji prefixes
+      const result: SummaryResult = {
+        summary: '*Summary*\nContent.',
+        messageCount: 10,
+        type: 'channel',
+      };
+
+      const formatted = formatSummaryResponse(result);
+
+      // Header should NOT start with emoji - clean professional format
+      // STATUS_EMOJI.searching is empty string by design
+      expect(formatted).toMatch(/^Summarized \*\d+\* messages/);
+      // Verify no emoji at start of response
+      const firstChar = formatted.charAt(0);
+      expect(firstChar).toBe('S'); // Starts with "Summarized", not an emoji
     });
   });
 });

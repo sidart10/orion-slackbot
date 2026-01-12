@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="7-9-unified-status-updater" epic="7">
+  <metadata>
+    <created>2026-01-11T00:00:00Z</created>
+    <status>done</status>
+    <priority>P3</priority>
+    <estimate>1-2 hours</estimate>
+  </metadata>
+
+  <story>
+    <overview>
+      Create a unified StatusUpdater abstraction for status message handling so that both Slack handlers
+      (user-message and app-mention) share consistent status logic. This reduces code duplication,
+      improves testability, and centralizes status message management.
+
+      Currently, user-message.ts uses setStatus() via Assistant API (no debounce, Slack handles rate limiting),
+      while app-mention.ts uses chat.postMessage/update/delete with manual 300ms debounce. This story
+      introduces a common interface with two implementations and a factory function.
+    </overview>
+
+    <acceptance-criteria>
+      <criterion id="AC1">
+        Create src/slack/status/types.ts with StatusUpdater interface containing three methods:
+        update(status: string): Promise&lt;void&gt;, cleanup(): Promise&lt;void&gt;, isActive(): boolean.
+        StatusContext type includes setStatus?, client: WebClient, channel: string, thread_ts: string, traceId?: string.
+      </criterion>
+      <criterion id="AC2">
+        Create AssistantStatusUpdater in src/slack/status/assistant-updater.ts that wraps setStatus() callback.
+        update() calls setStatus with loading_messages array, cleanup() calls setStatus(''), no debouncing.
+        Graceful error handling - never throws, logs warnings.
+      </criterion>
+      <criterion id="AC3">
+        Create ChannelStatusUpdater in src/slack/status/channel-updater.ts using chat.postMessage/update/delete.
+        Implements 300ms debounce on update(), tracks messageTs internally, cleanup() deletes status message.
+        Graceful error handling - never throws, logs debug messages.
+      </criterion>
+      <criterion id="AC4">
+        Create factory function createStatusUpdater(context) in src/slack/status/index.ts.
+        Returns AssistantStatusUpdater if context.setStatus exists, otherwise ChannelStatusUpdater.
+        Factory is synchronous, no async initialization.
+      </criterion>
+      <criterion id="AC5">
+        Refactor user-message.ts: Remove inline safeSetStatus function, import createStatusUpdater,
+        replace all status calls with statusUpdater.update()/cleanup().
+      </criterion>
+      <criterion id="AC6">
+        Refactor app-mention.ts: Remove updateStatusMessage/deleteStatusMessage functions and
+        statusMessageTs/lastStatusUpdate variables, use createStatusUpdater instead.
+      </criterion>
+      <criterion id="AC7">
+        Create unit tests in src/slack/status/index.test.ts covering both implementations,
+        factory selection, debounce behavior, and error handling. All tests pass: pnpm test src/slack/status/
+      </criterion>
+      <criterion id="AC8">
+        All existing handler tests pass: pnpm test src/slack/handlers/ with no regression in status behavior.
+      </criterion>
+    </acceptance-criteria>
+
+    <dependencies>
+      <dependency>Story 7.3 - Contextual Tool Feedback (buildLoadingMessages function)</dependency>
+      <dependency>Story 3.4 - Channel Tool Feedback (300ms debounce pattern)</dependency>
+    </dependencies>
+
+    <technical-notes>
+      <note>ESM imports: All imports must use .js extension per project conventions</note>
+      <note>Error handling: Never throw from utility functions, log warnings instead</note>
+      <note>Logging: Include traceId in all log entries using logger.warn/debug</note>
+      <note>File naming: kebab-case.ts enforced by ESLint</note>
+      <note>SetStatusFn may return void or Promise - handle both cases</note>
+      <note>Use as unknown as casts where Slack SDK types require</note>
+    </technical-notes>
+  </story>
+
+  <tests>
+    <atdd-checklist-ref>atdd-checklist-7-9-unified-status-updater.md</atdd-checklist-ref>
+    <test-summary>
+      <total-tests>63</total-tests>
+      <by-type>
+        <happy-path>36</happy-path>
+        <edge-cases>14</edge-cases>
+        <error-handling>13</error-handling>
+      </by-type>
+    </test-summary>
+    <key-test-scenarios>
+      <scenario>AssistantStatusUpdater.update() calls setStatus with loading_messages</scenario>
+      <scenario>AssistantStatusUpdater.cleanup() calls setStatus with empty string</scenario>
+      <scenario>ChannelStatusUpdater.update() posts message on first call, updates on subsequent</scenario>
+      <scenario>ChannelStatusUpdater debounces rapid updates (300ms window)</scenario>
+      <scenario>Factory returns correct implementation based on setStatus presence</scenario>
+      <scenario>All error handlers catch and log without throwing</scenario>
+    </key-test-scenarios>
+  </tests>
+
+  <architecture>
+    <relevant-sections>
+      <section name="StatusUpdater Abstraction" lines="978-1084">
+        Architecture defines StatusUpdater interface with update(), cleanup(), isActive() methods.
+        Two implementations: AssistantStatusUpdater (wraps setStatus) and ChannelStatusUpdater
+        (uses chat.postMessage/update/delete with 300ms debounce).
+        Factory function createStatusUpdater() selects implementation based on context.setStatus presence.
+      </section>
+      <section name="Tool Handler Pattern" lines="89-111">
+        Every handler must wrap entire body in try/catch, never throw, return structured results.
+        Applied to StatusUpdater: graceful error handling, log warnings, never throw.
+      </section>
+      <section name="ESM Import Extension" lines="68-75">
+        All relative imports MUST use .js extension: import { x } from './module.js'
+      </section>
+      <section name="Logging Rules" lines="214-226">
+        Include traceId in every log entry, use logger.* methods not console.log,
+        event names use {component}.{action} format.
+      </section>
+      <section name="File Structure" lines="1019-1028">
+        src/slack/status/ directory with types.ts, assistant-updater.ts, channel-updater.ts,
+        index.ts (factory + re-exports), index.test.ts
+      </section>
+    </relevant-sections>
+
+    <patterns-to-follow>
+      <pattern name="Error Handling">
+        Never throw from status updater methods. Catch all errors, log with traceId, continue gracefully.
+        Use logger.warn for AssistantStatusUpdater (user-visible impact), logger.debug for
+        ChannelStatusUpdater (less critical).
+      </pattern>
+      <pattern name="Interface Design">
+        StatusUpdater interface: update(status: string): Promise&lt;void&gt;, cleanup(): Promise&lt;void&gt;, isActive(): boolean
+        StatusContext: { setStatus?, client: WebClient, channel: string, thread_ts: string, traceId?: string }
+      </pattern>
+      <pattern name="Factory Pattern">
+        Synchronous factory - no async initialization. Select implementation based on context.setStatus presence.
+        Return interface type, not concrete class.
+      </pattern>
+      <pattern name="Debounce Pattern">
+        300ms debounce for ChannelStatusUpdater to avoid Slack rate limits.
+        Track lastUpdate timestamp, skip updates within debounce window.
+        First update (postMessage) is not debounced.
+      </pattern>
+      <pattern name="Async/Sync Handling">
+        SetStatusFn may return void or Promise. Check if result is thenable before awaiting.
+      </pattern>
+    </patterns-to-follow>
+  </architecture>
+
+  <implementation-guide>
+    <file-structure>
+      <file path="src/slack/status/types.ts" action="CREATE">
+        StatusUpdater interface, SetStatusFn type, StatusContext interface
+      </file>
+      <file path="src/slack/status/assistant-updater.ts" action="CREATE">
+        AssistantStatusUpdater class implementing StatusUpdater
+      </file>
+      <file path="src/slack/status/channel-updater.ts" action="CREATE">
+        ChannelStatusUpdater class with 300ms debounce
+      </file>
+      <file path="src/slack/status/index.ts" action="CREATE">
+        createStatusUpdater factory + re-exports
+      </file>
+      <file path="src/slack/status/index.test.ts" action="CREATE">
+        Unit tests for all components
+      </file>
+      <file path="src/slack/handlers/user-message.ts" action="MODIFY">
+        Replace safeSetStatus with createStatusUpdater
+      </file>
+      <file path="src/slack/handlers/app-mention.ts" action="MODIFY">
+        Replace inline status functions with createStatusUpdater
+      </file>
+    </file-structure>
+
+    <code-snippets>
+      <snippet name="Interface Definition">
+        export interface StatusUpdater {
+          update(status: string): Promise&lt;void&gt;;
+          cleanup(): Promise&lt;void&gt;;
+          isActive(): boolean;
+        }
+      </snippet>
+      <snippet name="Factory Usage">
+        const statusUpdater = createStatusUpdater({
+          setStatus,  // undefined for channel context
+          client,
+          channel: channelId,
+          thread_ts: threadTs,
+          traceId: trace.id,
+        });
+        await statusUpdater.update('Searching...');
+        // ... processing ...
+        await statusUpdater.cleanup();
+      </snippet>
+    </code-snippets>
+  </implementation-guide>
+</story-context>

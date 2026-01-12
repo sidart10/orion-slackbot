@@ -15,7 +15,10 @@
 import type { AssistantThreadStartedMiddleware } from '@slack/bolt';
 import { startActiveObservation } from '../../observability/tracing.js';
 import { logger } from '../../utils/logger.js';
-import { generateSuggestedPrompts } from '../prompts/prompt-factory.js';
+import {
+  generateSuggestedPrompts,
+  getAvailableSkillsForPrompts,
+} from '../prompts/prompt-factory.js';
 import {
   loadRelevantMemories,
   formatMemoriesForContext,
@@ -99,6 +102,7 @@ export const handleThreadStarted: AssistantThreadStartedMiddleware = async ({
       await say(greeting);
 
       // Story 7.1: Set context-aware suggested prompts (AC#1)
+      // Story 7.7: Skill-aware suggested prompts (AC#4)
       // Determine channel type from channel ID prefix
       const channelType = channelId?.startsWith('D')
         ? 'im'
@@ -106,14 +110,26 @@ export const handleThreadStarted: AssistantThreadStartedMiddleware = async ({
           ? 'group'
           : 'channel';
 
+      // Story 7.7: Get available skills for prompt hints (AC#4)
+      const availableSkills = getAvailableSkillsForPrompts();
+
       const prompts = generateSuggestedPrompts({
         channelType,
         userId: userId ?? 'unknown',
+        // Story 7.7: Include skills for discovery prompts
+        availableSkills,
       });
 
       await setSuggestedPrompts({
         title: 'Try asking me to:',
         prompts,
+      });
+
+      logger.debug({
+        event: 'thread_started_prompts_set',
+        promptCount: prompts.length,
+        availableSkillCount: availableSkills.length,
+        traceId: trace.id,
       });
 
       // Persist thread context (Slack API shape is managed by Slack; no custom payload allowed)

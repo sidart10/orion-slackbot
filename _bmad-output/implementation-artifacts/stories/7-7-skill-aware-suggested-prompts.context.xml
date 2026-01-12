@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="7-7-skill-aware-suggested-prompts" epic="7">
+  <metadata>
+    <created>2026-01-11T00:00:00Z</created>
+    <status>ready-for-dev</status>
+    <story-file>7-7-skill-aware-suggested-prompts.md</story-file>
+    <atdd-checklist>atdd-checklist-7-7-skill-aware-suggested-prompts.md</atdd-checklist>
+  </metadata>
+
+  <story>
+    <overview>
+      As a user, I want suggested prompts that surface available skills and adapt to response content,
+      so that I discover powerful capabilities like spreadsheet generation and file creation that I might not know exist.
+
+      This story extends the existing prompt factory (Story 7.1) with skill awareness, enabling prompts to:
+      1. Hint at available skills when loaded
+      2. Suggest skill-specific actions based on response content
+      3. Provide follow-up prompts after skill usage
+    </overview>
+
+    <acceptance-criteria>
+      <criterion id="1">Given Orion has skills loaded (xlsx, pdf, summarize, etc.), When prompts are generated, Then at least one prompt hints at an available skill capability</criterion>
+      <criterion id="2">Given a response mentions data or information that could be exported, When follow-up prompts are generated, Then prompts include skill-specific suggestions (e.g., "Create a spreadsheet", "Generate a PDF report")</criterion>
+      <criterion id="3">Given a response includes analysis or research, When follow-up prompts are generated, Then prompts suggest relevant skill-based outputs (e.g., "Visualize this data", "Create a presentation")</criterion>
+      <criterion id="4">Given the Skills API returns available skill IDs, When the prompt factory is called, Then skill metadata is used to generate relevant prompts</criterion>
+      <criterion id="5">Given a user has already used a skill in the conversation, When prompts are generated, Then related skill follow-ups are suggested (e.g., after xlsx creation: "Add charts", "Create another sheet")</criterion>
+      <criterion id="6">Given prompts are displayed, When the user views them, Then maximum 4 prompts are shown (Slack API limit preserved from 7.1)</criterion>
+    </acceptance-criteria>
+
+    <dependencies>
+      <dependency type="extends">Story 7.1 - Dynamic Suggested Prompts (prompt factory foundation)</dependency>
+      <dependency type="requires">Epic 6 - Skills Framework (skill registry access)</dependency>
+      <dependency type="requires">Story 6.4 - Skill Registry Service (provides skill metadata)</dependency>
+    </dependencies>
+
+    <technical-notes>
+      <note category="skill-registry-access">
+        Use skillRegistry.getAllSkillIds() + getSkillMetadata() pattern - NOT getLoadedSkills().
+        Import type SkillRegistryEntry from src/skills/types.ts, not a custom SkillMetadata interface.
+      </note>
+      <note category="excluded-skills">
+        Developer tools to exclude from prompts: mcp-builder, skill-creator, webapp-testing, web-artifacts-builder, example
+      </note>
+      <note category="prompt-limits">
+        getSkillAwarePrompts() returns max 2 skill prompts to blend with context prompts.
+        Final output always max 4 prompts (Slack API limit).
+      </note>
+      <note category="priority-order">
+        1. usedSkillInResponse (highest - show skill follow-ups)
+        2. lastResponseType (existing behavior)
+        3. responseContent + skills (content analysis)
+        4. availableSkills only (general hints)
+        5. Time-based/base prompts (lowest)
+      </note>
+    </technical-notes>
+  </story>
+
+  <tests>
+    <atdd-checklist-ref>atdd-checklist-7-7-skill-aware-suggested-prompts.md</atdd-checklist-ref>
+    <test-summary>
+      <total-tests>43</total-tests>
+      <by-type>
+        <happy-path>20</happy-path>
+        <edge-cases>16</edge-cases>
+        <error-handling>1</error-handling>
+        <boundary-conditions>6</boundary-conditions>
+      </by-type>
+    </test-summary>
+    <key-test-scenarios>
+      <scenario ac="1">Skill prompts included when skills available</scenario>
+      <scenario ac="1">Empty/undefined availableSkills produces standard prompts (backwards compatible)</scenario>
+      <scenario ac="2">Data/table content triggers xlsx prompt</scenario>
+      <scenario ac="2">Research/analysis content triggers pdf prompt</scenario>
+      <scenario ac="3">Trend data suggests visualization</scenario>
+      <scenario ac="4">SkillRegistryEntry used correctly with skill.name lookup</scenario>
+      <scenario ac="5">xlsx/pdf/summarize follow-ups after skill usage</scenario>
+      <scenario ac="5">Skill follow-ups take priority over base prompts</scenario>
+      <scenario ac="6">All scenarios maintain max 4 prompt limit</scenario>
+    </key-test-scenarios>
+  </tests>
+
+  <architecture>
+    <relevant-sections>
+      <section name="Skills API Implementation">
+        Skills are loaded at startup via initializeSkills(). Skill IDs stored in memory registry.
+        Access via skillRegistry.getAllSkillIds() and skillRegistry.getSkillMetadata(id).
+        Import from src/skills/index.ts
+      </section>
+      <section name="Available Skills">
+        User-facing skills (show in prompts): xlsx, pdf, docx, summarize, d3js-visualization, algorithmic-art, frontend-design
+        Developer tools (exclude): mcp-builder, skill-creator, webapp-testing, web-artifacts-builder, example
+      </section>
+      <section name="Existing Prompt Factory">
+        Location: src/slack/prompts/prompt-factory.ts
+        Provides: Context-aware base prompts, time-based prompts, response-type follow-ups
+        MAX_PROMPTS constant = 4 (Slack API limit)
+      </section>
+      <section name="PromptContext Interface">
+        Existing fields: channelType, userId, channelId, threadHistory, lastResponseType, errorCode, hourOfDay
+        New fields to add: availableSkills, responseContent, usedSkillInResponse, usedSkillsInThread
+      </section>
+    </relevant-sections>
+
+    <patterns-to-follow>
+      <pattern name="ESM Imports">Always use .js extension - import { x } from './module.js'</pattern>
+      <pattern name="File Naming">kebab-case.ts for files, PascalCase for types/interfaces</pattern>
+      <pattern name="Test Co-location">Tests as *.test.ts alongside source files</pattern>
+      <pattern name="Type Safety">Use SkillRegistryEntry from src/skills/types.ts, not custom types</pattern>
+      <pattern name="Slack mrkdwn">Use *bold* not **bold** in any user-facing text</pattern>
+      <pattern name="Vitest Framework">Use describe/it/expect from vitest</pattern>
+    </patterns-to-follow>
+
+    <file-structure>
+      <file path="src/slack/prompts/prompt-factory.ts" action="modify">Integrate skill awareness into generateSuggestedPrompts()</file>
+      <file path="src/slack/prompts/prompt-factory.test.ts" action="modify">Add skill-aware test cases</file>
+      <file path="src/slack/prompts/skill-prompts.ts" action="create">New file with getSkillAwarePrompts, analyzeResponseForSkillPrompts, getSkillFollowUpPrompts</file>
+      <file path="src/slack/prompts/skill-prompts.test.ts" action="create">Unit tests for skill prompt functions</file>
+      <file path="src/slack/handlers/user-message.ts" action="modify">Pass skills to prompt factory</file>
+      <file path="src/slack/handlers/thread-started.ts" action="modify">Pass skills to prompt factory</file>
+    </file-structure>
+  </architecture>
+
+  <implementation-guidance>
+    <task-order>
+      <task id="1" estimate="30min">Extend PromptContext interface with new fields (availableSkills, responseContent, usedSkillInResponse, usedSkillsInThread)</task>
+      <task id="2" estimate="1hr">Create skill-prompts.ts with SKILL_PROMPT_MAP, EXCLUDED_SKILLS, and getSkillAwarePrompts()</task>
+      <task id="3" estimate="1hr">Implement analyzeResponseForSkillPrompts() with pattern detection</task>
+      <task id="4" estimate="45min">Implement getSkillFollowUpPrompts() for xlsx, pdf, summarize</task>
+      <task id="5" estimate="1hr">Integrate skill awareness into prompt-factory.ts generateSuggestedPrompts()</task>
+      <task id="6" estimate="45min">Update handlers to pass skills from skillRegistry to prompt factory</task>
+      <task id="7" estimate="1.5hr">Write comprehensive unit tests (43 test scenarios)</task>
+      <task id="8" estimate="30min">Manual verification of all scenarios</task>
+    </task-order>
+
+    <code-snippets>
+      <snippet name="Skill Registry Access Pattern">
+        <![CDATA[
+import { skillRegistry } from '../../skills/index.js';
+import type { SkillRegistryEntry } from '../../skills/types.js';
+
+function getAvailableSkillEntries(): SkillRegistryEntry[] {
+  const skillIds = skillRegistry.getAllSkillIds();
+  const entries: SkillRegistryEntry[] = [];
+  for (const id of skillIds) {
+    const metadata = skillRegistry.getSkillMetadata(id);
+    if (metadata) entries.push(metadata);
+  }
+  return entries;
+}
+        ]]>
+      </snippet>
+      <snippet name="SKILL_PROMPT_MAP Structure">
+        <![CDATA[
+const SKILL_PROMPT_MAP: Record<string, SuggestedPrompt> = {
+  xlsx: { title: 'Create spreadsheet', message: 'Create a spreadsheet with this data' },
+  pdf: { title: 'Generate PDF', message: 'Generate a PDF report from this information' },
+  docx: { title: 'Create document', message: 'Create a Word document with this content' },
+  summarize: { title: 'Summarize thread', message: 'Summarize a conversation' },
+  'd3js-visualization': { title: 'Visualize data', message: 'Create a visualization of this data' },
+  'algorithmic-art': { title: 'Generate artwork', message: 'Generate visual artwork based on...' },
+  'frontend-design': { title: 'Design UI', message: 'Design a UI mockup for...' },
+};
+        ]]>
+      </snippet>
+      <snippet name="Response Content Pattern Detection">
+        <![CDATA[
+// Data/table patterns -> xlsx
+if (availableSkills.includes('xlsx') &&
+    (lowerText.includes('data') || lowerText.includes('table') ||
+     lowerText.includes('numbers') || /\d+.*\d+.*\d+/.test(responseText))) {
+  // suggest xlsx
+}
+
+// Research/analysis patterns -> pdf
+if (availableSkills.includes('pdf') &&
+    (lowerText.includes('research') || lowerText.includes('analysis') ||
+     lowerText.includes('findings') || lowerText.includes('report'))) {
+  // suggest pdf
+}
+
+// Visualization patterns -> d3js
+if (availableSkills.includes('d3js-visualization') &&
+    (lowerText.includes('trend') || lowerText.includes('comparison') ||
+     lowerText.includes('growth') || lowerText.includes('chart'))) {
+  // suggest visualization
+}
+        ]]>
+      </snippet>
+    </code-snippets>
+  </implementation-guidance>
+</story-context>
