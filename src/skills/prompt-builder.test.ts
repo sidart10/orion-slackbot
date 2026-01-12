@@ -148,12 +148,14 @@ describe('buildSkillsHint (token efficient)', () => {
     expect(result).toContain('# Available Skills');
     expect(result).toContain('*research_skill*');
     expect(result).toContain('Conducts deep research across multiple sources');
-    // Should NOT contain any instructions content
+    // Should NOT contain full skill instructions content
     expect(result).not.toContain('## Skill:');
-    // Story 6.11: Simplified output - just skills list, no instructions
-    // Claude auto-loads skills via container parameter
-    expect(result).not.toContain('orion_sandbox');
-    expect(result).not.toContain('code execution environment');
+    // Should include guidance on how to use skills
+    expect(result).toContain('How to Use Skills');
+    // Skills are at /skills/{name}/ per Anthropic docs
+    expect(result).toContain('/skills/');
+    expect(result).toContain('SKILL.md');
+    expect(result).toContain('Do NOT use orion_sandbox');
   });
 
   it('includes tool names in hint', () => {
@@ -219,7 +221,7 @@ describe('buildSkillsHint (token efficient)', () => {
     expect(result).not.toContain('tools:');
   });
 
-  it('is significantly smaller than buildSkillsPrompt', () => {
+  it('is smaller than buildSkillsPrompt (excludes full instructions)', () => {
     // Simulate a skill with large instructions
     const fullSkill: Skill = {
       name: 'big_skill',
@@ -240,10 +242,12 @@ describe('buildSkillsHint (token efficient)', () => {
     const fullPrompt = buildSkillsPrompt([fullSkill]);
     const hint = buildSkillsHint([metadata]);
 
-    // Hint should be at least 10x smaller than full prompt
-    expect(hint.length).toBeLessThan(fullPrompt.length / 10);
-    // Verify the ratio (should be around 100x smaller for this test)
-    expect(fullPrompt.length / hint.length).toBeGreaterThan(10);
+    // Hint should be smaller than full prompt (excludes 10K instructions)
+    // Hint now includes usage guidance (~1K chars) so it's not as small as before
+    expect(hint.length).toBeLessThan(fullPrompt.length);
+    // But still shouldn't include the 10K instruction blob
+    expect(hint.length).toBeLessThan(3000); // Hint + guidance should be under 3K
+    expect(hint).not.toContain('A'.repeat(100)); // Should not have instruction content
   });
 });
 

@@ -29,8 +29,10 @@ import type {
 /** Path to skill cache file (created by sync-service in Story 6.2) */
 const CACHE_FILE_PATH = '.skills/.cache/skills.json';
 
-/** Anthropic's built-in skills - use name as skill_id */
-const ANTHROPIC_BUILTIN_SKILLS = new Set(['xlsx', 'pdf', 'docx']);
+/** Anthropic's built-in skills - use name as skill_id
+ * @see https://platform.claude.com/docs/en/build-with-claude/skills-guide
+ */
+const ANTHROPIC_BUILTIN_SKILLS = new Set(['xlsx', 'pdf', 'docx', 'pptx']);
 
 /**
  * Skill Registry - centralized skill ID and metadata lookup.

@@ -298,6 +298,11 @@ describe('skills/registry', () => {
       expect(skillRegistry.isBuiltinSkill('docx')).toBe(true);
     });
 
+    it('returns true for pptx', async () => {
+      const { skillRegistry } = await import('./registry.js');
+      expect(skillRegistry.isBuiltinSkill('pptx')).toBe(true);
+    });
+
     it('returns false for custom skill', async () => {
       const { skillRegistry } = await import('./registry.js');
       expect(skillRegistry.isBuiltinSkill('my_custom_skill')).toBe(false);
@@ -326,11 +331,12 @@ describe('skills/registry', () => {
       // WHEN: Getting all skill IDs
       const skillIds = skillRegistry.getAllSkillIds();
 
-      // THEN: Returns built-in skills
+      // THEN: Returns built-in skills (xlsx, pdf, docx, pptx)
       expect(skillIds).toContain('xlsx');
       expect(skillIds).toContain('pdf');
       expect(skillIds).toContain('docx');
-      expect(skillIds.length).toBe(3);
+      expect(skillIds).toContain('pptx');
+      expect(skillIds.length).toBe(4);
     });
 
     it('returns custom skills combined with built-in skills', async () => {
@@ -352,13 +358,14 @@ describe('skills/registry', () => {
       // WHEN: Getting all skill IDs
       const skillIds = skillRegistry.getAllSkillIds();
 
-      // THEN: Contains both custom and built-in
+      // THEN: Contains both custom and built-in (2 custom + 4 built-in = 6)
       expect(skillIds).toContain('skill_sum123');
       expect(skillIds).toContain('skill_res456');
       expect(skillIds).toContain('xlsx');
       expect(skillIds).toContain('pdf');
       expect(skillIds).toContain('docx');
-      expect(skillIds.length).toBe(5);
+      expect(skillIds).toContain('pptx');
+      expect(skillIds.length).toBe(6);
     });
   });
 
@@ -491,15 +498,15 @@ describe('skills/registry', () => {
       skillRegistry._clear();
       skillRegistry.initialize();
 
-      // Initial state: 5 skills (2 custom + 3 built-in)
-      expect(skillRegistry.size).toBe(5);
+      // Initial state: 6 skills (2 custom + 4 built-in)
+      expect(skillRegistry.size).toBe(6);
 
       // WHEN: Refresh with empty cache
       vi.mocked(readFileSync).mockReturnValueOnce(JSON.stringify({ skills: {} }));
       skillRegistry.refresh();
 
-      // THEN: Only built-in skills remain
-      expect(skillRegistry.size).toBe(3);
+      // THEN: Only built-in skills remain (4)
+      expect(skillRegistry.size).toBe(4);
     });
 
     it('logs debug event on refresh', async () => {
@@ -644,8 +651,8 @@ describe('skills/registry', () => {
       skillRegistry._clear();
       skillRegistry.initialize();
 
-      // WHEN/THEN: Size includes custom + built-in (2 + 3 = 5)
-      expect(skillRegistry.size).toBe(5);
+      // WHEN/THEN: Size includes custom + built-in (2 + 4 = 6)
+      expect(skillRegistry.size).toBe(6);
     });
   });
 });

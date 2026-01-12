@@ -64,6 +64,7 @@ ${skillSections.join('\n\n---\n\n')}
  *
  * @see Story 6.1 AC#4 - Skills hint injected (not full content)
  * @see Story 6.3 - Skills loaded via container parameter
+ * @see https://platform.claude.com/docs/en/build-with-claude/skills-guide
  */
 export function buildSkillsHint(skills: SkillMetadata[]): string {
   if (skills.length === 0) {
@@ -82,6 +83,53 @@ export function buildSkillsHint(skills: SkillMetadata[]): string {
 # Available Skills
 
 ${hints.join('\n')}
+
+## How to Use Skills
+
+Skills are mounted in the container at \`/skills/{skill_name}/\`. Use code_execution to read and use them.
+
+### Reading a Skill
+\`\`\`python
+import os
+
+# Skills are at /skills/{skill_name}/
+skill_name = 'samba-slides'  # Use the exact skill name
+skill_path = f'/skills/{skill_name}'
+
+# List skill contents
+if os.path.exists(skill_path):
+    for item in os.listdir(skill_path):
+        print(item)
+
+# Read SKILL.md for instructions (REQUIRED before using)
+with open(f'{skill_path}/SKILL.md', 'r') as f:
+    print(f.read())
+\`\`\`
+
+### Skill Contents
+Skills may include:
+- \`SKILL.md\` - Instructions and usage guide (always read first)
+- \`scripts/*.py\` - Implementation code to import/use
+- \`assets/\` - Brand files, logos, fonts
+- \`references/\` - Templates and examples
+
+### Using Scripts
+\`\`\`python
+# Read script to understand the API
+with open(f'{skill_path}/scripts/example.py', 'r') as f:
+    print(f.read())
+
+# Import and use (skill scripts are on PYTHONPATH)
+import sys
+sys.path.insert(0, f'{skill_path}/scripts')
+from example import some_function
+\`\`\`
+
+**CRITICAL**: Always read SKILL.md first - it contains required instructions and guidelines.
+
+**NOTE**: Do NOT use orion_sandbox for skills. orion_sandbox is ONLY for:
+- webapp-testing (Playwright)
+- web-artifacts-builder (local builds)
 `;
 }
 
