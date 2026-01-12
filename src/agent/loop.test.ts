@@ -25,6 +25,11 @@ vi.mock('../config/environment.js', () => ({
   config: {
     anthropicApiKey: 'test-api-key',
     anthropicModel: 'claude-sonnet-4-20250514',
+    // Story 8.2: Tool Search config
+    toolSearch: {
+      enabled: true,
+      coreTools: ['memory', 'code_execution', 'summarize'],
+    },
   },
 }));
 
@@ -2522,6 +2527,183 @@ describe('Container Lifecycle Integration (Story 6.3)', () => {
         container: expect.objectContaining({ id: existingContainerId }),
       })
     );
+  });
+});
+
+/**
+ * Story 8.1: Citations API Integration Tests
+ *
+ * @see Story 8.1 - Anthropic Citations API Integration
+ * @see AC#1 - Extract citation blocks from streaming response
+ * @see AC#4 - Return documentCitations in AgentLoopResult
+ */
+describe('Story 8.1: Citations API Integration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    containerLifecycleMock.getContainerId.mockReturnValue(null);
+  });
+
+  it('AC#1, AC#4: extracts document citations from streaming response', async () => {
+    // GIVEN: Mock response with citation content blocks
+    const context = createAgentContext();
+    const options = createAgentLoopOptions({ context });
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockMessageStream({
+        events: [
+          { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+          // Text block
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'According to the document, ' } },
+          // Citation block for document 0
+          {
+            type: 'content_block_start',
+            index: 1,
+            content_block: {
+              type: 'cite',
+              cited_text: 'Revenue grew 12% YoY',
+              document_index: 0,
+              start_char_index: 100,
+              end_char_index: 120,
+            },
+          },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'revenue grew 12%.' } },
+          // Second citation block
+          {
+            type: 'content_block_start',
+            index: 2,
+            content_block: {
+              type: 'cite',
+              cited_text: 'User retention improved',
+              document_index: 1,
+              start_char_index: 50,
+              end_char_index: 73,
+            },
+          },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 100, output_tokens: 50 } },
+        ],
+      })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Summarize the documents', options);
+    let result;
+    while (true) {
+      const next = await gen.next();
+      if (next.done) {
+        result = next.value;
+        break;
+      }
+    }
+
+    // THEN: Result should contain extracted document citations
+    expect(result.documentCitations).toHaveLength(2);
+
+    // First citation
+    expect(result.documentCitations[0]).toEqual({
+      type: 'cite',
+      cited_text: 'Revenue grew 12% YoY',
+      document_index: 0,
+      start_char_index: 100,
+      end_char_index: 120,
+    });
+
+    // Second citation
+    expect(result.documentCitations[1]).toEqual({
+      type: 'cite',
+      cited_text: 'User retention improved',
+      document_index: 1,
+      start_char_index: 50,
+      end_char_index: 73,
+    });
+  });
+
+  it('AC#6: returns empty array when no citations in response', async () => {
+    // GIVEN: Mock response without citation blocks
+    const context = createAgentContext();
+    const options = createAgentLoopOptions({ context });
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockMessageStream({
+        events: [
+          { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello, no citations here!' } },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 10, output_tokens: 5 } },
+        ],
+      })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Hi', options);
+    let result;
+    while (true) {
+      const next = await gen.next();
+      if (next.done) {
+        result = next.value;
+        break;
+      }
+    }
+
+    // THEN: documentCitations should be empty array (not undefined)
+    expect(result.documentCitations).toEqual([]);
+  });
+
+  it('ignores malformed citation blocks with missing fields', async () => {
+    // GIVEN: Mock response with incomplete citation block
+    const context = createAgentContext();
+    const options = createAgentLoopOptions({ context });
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockMessageStream({
+        events: [
+          { type: 'message_start', message: { model: 'claude-sonnet-4-20250514' } },
+          // Text block (required for verification to pass)
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'The document says: ' } },
+          // Malformed citation - missing cited_text
+          {
+            type: 'content_block_start',
+            index: 1,
+            content_block: {
+              type: 'cite',
+              // cited_text: missing!
+              document_index: 0,
+              start_char_index: 0,
+              end_char_index: 10,
+            },
+          },
+          // Valid citation
+          {
+            type: 'content_block_start',
+            index: 2,
+            content_block: {
+              type: 'cite',
+              cited_text: 'Valid citation',
+              document_index: 0,
+              start_char_index: 0,
+              end_char_index: 14,
+            },
+          },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 10, output_tokens: 5 } },
+        ],
+      })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    let result;
+    while (true) {
+      const next = await gen.next();
+      if (next.done) {
+        result = next.value;
+        break;
+      }
+    }
+
+    // THEN: Only valid citation should be extracted
+    expect(result.documentCitations).toHaveLength(1);
+    expect(result.documentCitations[0].cited_text).toBe('Valid citation');
   });
 });
 
