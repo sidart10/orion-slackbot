@@ -8,7 +8,7 @@ inputDocuments:
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-last_updated: '2026-01-06'
+last_updated: '2026-01-09'
 starterTemplate: 'Custom Structure (Direct API + Agent Skills) - no external template'
 ---
 
@@ -376,18 +376,18 @@ See: `sprint-change-proposal-2026-01-07-skills-migration-to-anthropic.md`
 | Story | Title | Status |
 |-------|-------|--------|
 | 6.1 | Agent Skills Loader (Progressive Disclosure) | done |
-| 6.2 | Skills API Client | pending |
-| 6.3 | Skills Container Config | pending |
-| 6.4 | Skill Registry Service | pending |
-| 6.5 | Files API Client | pending |
-| 6.6 | Files API Slack Integration | pending |
-| 6.7 | Programmatic Tool Calling (PTC) Core | pending |
-| 6.8 | PTC Observability | pending |
-| 6.9 | Upload Custom Skills Script | pending |
-| 6.10 | Skill Migration & Testing | pending |
-| 6.11 | Prompt Builder Cleanup | pending |
-| 6.12 | GKE Sandbox Scope Reduction | pending |
-| 6.13 | Documentation Update | pending |
+| 6.2 | Skills API Client | done |
+| 6.3 | Skills Container Config | done |
+| 6.4 | Skill Registry Service | done |
+| 6.5 | Files API Client | done |
+| 6.6 | Files API Slack Integration | done |
+| 6.7 | Programmatic Tool Calling (PTC) Core | done |
+| 6.8 | PTC Observability | done |
+| 6.9 | Upload Custom Skills Script | done |
+| 6.10 | Skill Migration & Testing | ready-for-testing |
+| 6.11 | Prompt Builder Cleanup | review |
+| 6.12 | GKE Sandbox Scope Reduction | done |
+| 6.13 | Documentation Update | done |
 
 **Archived Stories:**
 - `archived/6-2-execute-code-gke-sandbox.md` — GKE sandbox implemented, now fallback only
@@ -443,52 +443,151 @@ Add discovery, summarization, and UX polish features to complete the Slack exper
 - Response templates → Story 2.1
 - Citations → Story 2.7
 
-**Stories (Updated 2026-01-02):**
+**Stories (Updated 2026-01-11):**
 - 7.1: Dynamic Suggested Prompts (context-aware) ✅
 - 7.2: ~~Thread Summarization~~ — Merged into 7.6
 - 7.3: Contextual Tool Feedback — "Using MSCI Reports: Search Reports — 'Hulu'..." ✅
 - 7.4: Response Completion Indicators — ✅ on answered messages ✅
 - 7.5: Fix Duplicate Response Bug — P0 bug, response appearing twice ✅
-- 7.6: Conversation Summarization — Channels, Group DMs, DMs, Threads (context-aware)
+- 7.6: Conversation Summarization — Channels, Group DMs, DMs, Threads (context-aware) ✅
+
+**Note (2026-01-11):** Stories 7.7, 7.8, 7.9 removed from scope. WIP preserved in branch backup/epic-7-wip-2026-01-11.
 
 ---
 
-### Epic 8: Code Generation & Execution *(Phase 2 — Reduced Scope)*
-Advanced code generation patterns and output validation.
+### Epic 8: Anthropic API Enhancements
+Integrate Anthropic's latest API features: Citations, Tool Search, and enhanced Files API integration.
 
-**User Outcome:** Enhanced code generation with explicit validation and guardrails.
+**User Outcome:** Responses include verifiable source citations, tool discovery scales to 1000s of tools, and users can upload files for Claude to read.
 
-**Scope:** *(Reduced — Most moved to Epic 6)*
-- **FR19:** Code generation patterns, templates, guardrails (deferred)
-- **FR23:** Output validation before returning results (deferred)
+**Scope:**
+- **Citations API:** Enable `citations.enabled=true` for verifiable source references
+- **Tool Search Tool:** Mark tools with `defer_loading: true` for on-demand discovery
+- **Slack File Ingestion:** Download Slack files → upload to Anthropic → Claude reads
+- **MCP Auth Fix:** Fix auth bug for no-auth MCP servers via PTC
 
-**Moved to Epic 6 (Story 6-2):**
-- Sandboxed execution environment (GKE Agent Sandbox) → FR20
-- External API calls via generated code → FR21
-- Data processing via generated code → FR22
-- Security controls (gVisor isolation)
+**FRs:** FR6 (enhanced), FR28 (enhanced), FR51 (new - file ingestion)
+**NFRs:** NFR29 (token optimization via tool search)
 
-**FRs Remaining:** FR19 (partial), FR23
-**NFRs:** NFR8
+**Course Correction (2026-01-09):**
+Epic 8 repurposed from "Code Generation (Phase 2)" to "Anthropic API Enhancements" based on user-identified feature gaps. Code generation patterns (FR19, FR23) remain deferred.
+See: `sprint-change-proposal-2025-01-09.md`
+
+**Stories:**
+| Story | Title | Status | Priority |
+|-------|-------|--------|----------|
+| 8.1 | Citations & Sources Unification | backlog | P1 |
+| 8.2 | Tool Search Tool Integration | backlog | P2 |
+| 8.3 | Slack File Ingestion for Claude Context | backlog | P1 |
+| 8.4 | MCP Auth Fix for PTC Integration | backlog | P1 |
+| 8.5 | Tool Call Summary & Sandbox Output Cleanup | backlog | P1 |
+
+**Story Details:**
+
+**8.1 Citations & Sources Unification**
+
+**Background:** We have two similar systems: (1) existing "sources" showing tool transparency (📎, 🔧) and (2) Anthropic's Citations API for document-level claim verification.
+
+**Architecture Decision:** Keep both systems, unify display format.
+- **Sources** = tool transparency ("I called these tools") — for MCP tool calls
+- **Citations** = claim verification ("This exact text supports my answer") — for document blocks
+- Both rendered in same professional footer format, no emojis
+
+**Scope:**
+- Enable `citations.enabled=true` on document blocks (Anthropic Citations API)
+- Parse citation blocks from Claude response (`cited_text`, `document_index`, `start_char_index`)
+- Clean up existing sources display — remove 📎, 🔧 emojis for professional appearance
+- Unify rendering into single `*References:*` footer block
+- Track citation usage in Langfuse
+- Note: GA (no beta header), incompatible with Structured Outputs
+
+**Unified Format Example:**
+```
+*References:*
+[1] MSCI Reports: Search — "Hulu"
+[2] "Hulu's Q3 revenue grew 12% YoY" — MSCI_Hulu_Report.pdf, page 3
+```
+
+**Acceptance Criteria:**
+1. **No Emojis:** Remove 📎, 🔧 from sources-block.ts — use `*References:*` header instead
+2. **Unified Footer:** Single Block Kit context block for both tool sources AND document citations
+3. **Tool Sources Format:** `[n] Tool Name: Action — "query"` (no emoji)
+4. **Document Citations Format:** `[n] "cited text excerpt..." — Document.pdf, page X`
+5. **Inline Markers:** Claude's `[1]`, `[2]` markers in response body link to footer
+6. **Langfuse Tracking:** Citation count, types (tool vs document), and usage tracked per response
+7. **Backwards Compatible:** Works with existing tool-only responses (no document citations)
+
+**8.2 Tool Search Tool Integration**
+- Enable `advanced-tool-use-2025-11-20` beta header
+- Configure MCP tools with `defer_loading: true`
+- Keep core tools always loaded (memory, web_search, execute_code)
+- Track token savings in Langfuse
+- Requires: Sonnet 4.5+ or Opus 4.5+
+
+**8.3 Slack File Ingestion for Claude Context**
+- Detect `files` array in Slack message events
+- Download file from Slack API
+- Upload to Anthropic Files API (reuse Story 6.5 client)
+- Include as document block with `file_id`
+- Pair with Citations (8.1) for uploaded document citations
+- Support: PDF, images, CSV, TXT, MD, JSON
+
+**8.4 MCP Auth Fix for PTC Integration**
+- Fix: MCP servers with `headers: {}` (no auth) via PTC
+- Fix: MCP servers with `authType: gcp_identity` via PTC
+- Verify: Bearer token auth (like Rube) works via PTC
+- Affects: `audience-manager`, `msci-reports`, `exa`
+
+**8.5 Tool Call Summary & Sandbox Output Cleanup**
+
+**Background:** Users sometimes see ugly/raw output in tool summaries. When Orion sandbox runs, code like `import pandas` can leak through. Tool call summaries shown to users need standardization.
+
+**Scope:**
+- **Standardize Tool Summaries:** Define consistent format for what users see during tool execution
+- **Sandbox Output Filtering:** Filter out Python imports, stack traces, and debug output from user-facing responses
+- **Clean Status Messages:** Ensure status updates shown during processing are user-friendly
+- **Error Message Cleanup:** Technical errors sanitized before showing to users
+
+**Acceptance Criteria:**
+1. **No Code Leakage:** Python `import` statements, stack traces, and raw code NEVER shown to users
+2. **Filtered Sandbox Output:** stdout/stderr from Orion sandbox sanitized before display
+3. **Consistent Summary Format:** All tool calls use standardized summary format (e.g., "Searching MSCI Reports for 'Hulu'...")
+4. **User-Friendly Errors:** Technical sandbox errors converted to helpful messages
+5. **Status Message Guidelines:** Document standard patterns for status messages
+6. **Test Coverage:** Unit tests verify filtering works for common leak scenarios
+
+---
+
+### ~~Epic 8 (Original): Code Generation & Execution~~ *(Phase 2 — Deferred)*
+
+**Deferred:** 2026-01-09
+**Reason:** Epic 8 repurposed for Anthropic API Enhancements. Code generation patterns remain deferred.
+
+**Original Scope (Deferred):**
+- FR19: Code generation patterns, templates, guardrails
+- FR23: Output validation before returning results
+
+**See:** `sprint-change-proposal-2025-01-09.md`
 
 ---
 
 ## Summary
 
-| Epic | Title | Stories | Phase |
-|------|-------|---------|-------|
-| 1 | Foundation & Deployment | 8 (1.1-1.8) | MVP |
-| 2 | Agent Core Loop | 9 (2.1-2.9) | MVP |
-| 3 | Tool Connectivity (MCP) | 5 (3.1-3.5) | MVP |
-| 4 | ~~Subagents~~ | 0 | REMOVED |
-| 5 | Persistent Memory | 3 | MVP |
-| 6 | Skills & Extensions Framework | 13 (6.1-6.13) | MVP |
-| 7 | Slack Polish | 6 (7.1-7.6) | MVP |
-| 8 | Code Generation & Execution | TBD | Phase 2 |
+| Epic | Title | Stories | Status | Phase |
+|------|-------|---------|--------|-------|
+| 1 | Foundation & Deployment | 8 (1.1-1.8) | ✅ done | MVP |
+| 2 | Agent Core Loop | 9 (2.1-2.9) | ✅ done | MVP |
+| 3 | Tool Connectivity (MCP) | 5 (3.1-3.5) | ✅ done | MVP |
+| 4 | ~~Subagents~~ | 0 | ❌ REMOVED | — |
+| 5 | Persistent Memory | 3 (5.1-5.3) | ✅ done | MVP |
+| 6 | Skills & Extensions Framework | 13 (6.1-6.13) | 🔄 11/13 done | MVP |
+| 7 | Slack Polish | 6 (7.1-7.6) | ✅ done | MVP |
+| 8 | Anthropic API Enhancements | 5 (8.1-8.5) | 📋 draft | Sprint 8 |
 
-**MVP Total:** ~41 stories across 6 epics (Epic 4 removed)
-**Updated:** 2026-01-07 (Skills migration to Anthropic container — Stories 6.2-6.3 archived, 6.2-6.13 added)
-**Phase 2:** Epic 8 (deferred)
+**MVP Status:** 38 stories across 7 epics — **36 done, 2 remaining** (6.10 ready-for-testing, 6.11 in-review)
+**Updated:** 2026-01-11 (Epic 7 scope reduced - 7.7, 7.8, 7.9 removed)
+**Sprint 8:** Epic 8 (8.1-8.5) — 5 stories
+**Phase 2 (Deferred):** Code generation patterns (FR19, FR23)
 
 ### UX Integration (Hybrid Approach)
 
@@ -502,7 +601,7 @@ Foundational UX moved into Epic 1/2 for day-1 quality:
 | 2.4 | Error Response Template | FR50 |
 | 2.7 | Block Kit Citation Context | UX spec |
 
-### Epic 7 (Slack Polish) — Expanded Scope (2026-01-02)
+### Epic 7 (Slack Polish) — Final Scope (2026-01-11)
 
 | Story | Title | FRs/Notes |
 |-------|-------|-----------|
@@ -511,7 +610,9 @@ Foundational UX moved into Epic 1/2 for day-1 quality:
 | 7.3 | Contextual Tool Feedback | FR47 enhanced - rich status messages ✅ |
 | 7.4 | Response Completion Indicators | UX - ✅ reaction on completion ✅ |
 | 7.5 | Fix Duplicate Response Bug | P0 Bug - response appearing twice ✅ |
-| 7.6 | Conversation Summarization | FR18 - All types: Channels, MPIMs, DMs, Threads |
+| 7.6 | Conversation Summarization | FR18 - All types: Channels, MPIMs, DMs, Threads ✅ |
+
+**Removed (2026-01-11):** 7.7, 7.8, 7.9 — WIP code preserved in branch `backup/epic-7-wip-2026-01-11`
 
 ---
 

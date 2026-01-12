@@ -14,16 +14,16 @@ lastStep: 11
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-17'
-last_updated: '2026-01-04'
-course_correction: 'Claude Agent SDK → Direct Anthropic API migration; Epic 4 (Subagents) removed in favor of native parallel tool_use; GKE Agent Sandbox for code execution (2026-01-03); Anthropic Skills + Files API adoption, GKE becomes fallback (2026-01-07)'
-prd_version: '1.4'
+last_updated: '2026-01-09'
+course_correction: 'Claude Agent SDK → Direct Anthropic API migration; Epic 4 (Subagents) removed in favor of native parallel tool_use; GKE Agent Sandbox for code execution (2026-01-03); Anthropic Skills + Files API adoption, GKE becomes fallback (2026-01-07); Epic 8 repurposed for Anthropic API Enhancements (2026-01-09)'
+prd_version: '1.5'
 ---
 
 # Product Requirements Document - 2025-12 orion-slack-agent
 
 **Author:** Sid
 **Date:** 2025-12-17
-**Last Updated:** 2026-01-04 (v1.4: GKE Agent Sandbox for code execution; FR20-22 moved to MVP)
+**Last Updated:** 2026-01-09 (v1.5: Added FR51 File Ingestion for Slack file uploads)
 
 ## Executive Summary
 
@@ -580,6 +580,10 @@ Orion connects to enterprise systems through a unified tool layer:
 - FR44: System maintains persistent memory across sessions via Anthropic Memory Tool SDK helper (`betaMemoryTool`) with 6 operations (view, create, str_replace, insert, delete, rename) and Google Cloud Storage backend
 - FR45: System organizes memory in three scopes: global (shared learnings), user-level (per Slack user preferences), and session-level (per thread context)
 - FR46: Claude automatically checks `/memories` directory at conversation start to restore relevant context
+
+### File Ingestion
+
+- FR51: System ingests files uploaded in Slack messages — downloads via Slack API, uploads to Anthropic Files API, includes as document blocks in Claude context (supports PDF, images, CSV, TXT, MD, JSON)
 
 ## Non-Functional Requirements
 

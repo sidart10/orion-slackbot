@@ -13,8 +13,8 @@ completedAt: '2025-12-22'
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-last_updated: '2026-01-07'
-course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22); MCP SDK adoption (2025-12-31); GKE Agent Sandbox for code execution (2026-01-03); Anthropic Skills + Files API adoption, GKE becomes fallback (2026-01-07)'
+last_updated: '2026-01-09'
+course_correction: 'Claude Agent SDK → Direct Anthropic API (2025-12-22); MCP SDK adoption (2025-12-31); GKE Agent Sandbox for code execution (2026-01-03); Anthropic Skills + Files API adoption, GKE becomes fallback (2026-01-07); Epic 8 repurposed for Anthropic API Enhancements (2026-01-09)'
 hasProjectContext: false
 ---
 
@@ -35,12 +35,13 @@ Orion's 43 functional requirements span 7 architectural domains:
 | Agent Core | FR1-6 | Agent loop execution, verification, parallel tools, context management |
 | Research | FR7-12 | Multi-source search, synthesis, parallel information gathering |
 | Communication | FR13-18 | Slack integration, streaming, thread context, suggested prompts |
-| Code Execution | FR19-23 | On-the-fly code generation, sandboxed execution, API calls *(Phase 2)* |
+| Code Execution | FR19-23 | On-the-fly code generation, sandboxed execution, API calls *(FR20-22 MVP, FR19/23 Phase 2)* |
 | Extensions | FR24-29 | Skills, Commands, MCP servers — composable tool layer |
 | Knowledge | FR30-34 | Q&A, troubleshooting, domain-specific recommendations |
 | Observability | FR35-40 | Langfuse tracing, prompt versioning, cost tracking |
 | Persistent Memory | FR44-46 | Cross-session memory via GCS, user/session scopes |
 | Slack AI App | FR47-50 | Feedback buttons, dynamic status, error messaging |
+| File Ingestion | FR51 | Slack file upload → Anthropic Files API → Claude context |
 
 **Non-Functional Requirements:**
 
@@ -792,6 +793,297 @@ scripts/
 
 ---
 
+## Epic 8 Repurposed: Anthropic API Enhancements (ADR-2026-01-09)
+
+### Context
+
+Epic 8 was originally reserved for Phase 2 code generation patterns (FR19, FR23). Based on user feedback and Anthropic API maturity, Epic 8 is repurposed for Anthropic's latest API features that enhance response quality and scalability.
+
+### Decision
+
+**Repurpose Epic 8** from "Code Generation (Phase 2)" to "Anthropic API Enhancements":
+
+| Story | Feature | Priority |
+|-------|---------|----------|
+| 8.1 | Anthropic Citations API Integration | P1 |
+| 8.2 | Tool Search Tool Integration | P2 |
+| 8.3 | Slack File Ingestion for Claude Context | P1 |
+| 8.4 | MCP Auth Fix for PTC Integration | P1 |
+
+### Implementation Details
+
+#### 8.1 Citations API
+
+**Purpose:** Enable verifiable source references in responses.
+
+```typescript
+// Enable citations on document content blocks
+const message = await anthropic.messages.create({
+  model: config.anthropic.model,
+  messages,
+  // Citations is GA — no beta header required
+});
+
+// Document blocks with citations enabled
+const documentBlock = {
+  type: 'document',
+  source: {
+    type: 'text',
+    media_type: 'text/plain',
+    data: documentContent,
+  },
+  citations: { enabled: true },  // ← Enable citations
+};
+```
+
+**Constraints:**
+- GA feature (no beta header required)
+- **Incompatible with Structured Outputs** — cannot use both simultaneously
+- Citation blocks returned in `response.content` array
+
+**Slack Integration:**
+- Parse citation blocks from response
+- Format as inline references: `[1]`, `[2]`
+- Add citation footer block with source details
+
+#### 8.2 Tool Search Tool
+
+**Purpose:** Reduce token usage when 100s of MCP tools available by lazy-loading tools on demand.
+
+```typescript
+// Beta header required (already in allBetas)
+betas: ['advanced-tool-use-2025-11-20', ...]
+
+// Configure MCP tools for deferred loading
+const mcpTool = {
+  name: 'confluence_search',
+  description: 'Search Confluence documentation',
+  defer_loading: true,  // ← Claude discovers on demand
+  input_schema: { ... },
+};
+
+// Always-loaded tools (no defer_loading)
+const coreTools = ['memory', 'web_search', 'code_execution'];
+```
+
+**Model Requirements:**
+- Sonnet 4.5+ (`claude-sonnet-4-20250514`) or Opus 4.5+
+- Older models do not support tool search
+
+**Observability:**
+- Track token savings in Langfuse: `tool_search.tokens_saved`
+- Log which tools were discovered vs. always loaded
+
+#### 8.3 Slack File Ingestion (FR51)
+
+**Purpose:** Allow users to upload files in Slack that Claude can read and analyze.
+
+```typescript
+// Detect files in Slack message
+if (message.files && message.files.length > 0) {
+  for (const file of message.files) {
+    // 1. Download from Slack
+    const content = await slackClient.files.info({ file: file.id });
+    const fileBuffer = await downloadSlackFile(content.file.url_private_download);
+
+    // 2. Upload to Anthropic Files API
+    const anthropicFile = await filesApi.upload({
+      file: fileBuffer,
+      purpose: 'assistants',
+    });
+
+    // 3. Reference in message as document block
+    documentBlocks.push({
+      type: 'document',
+      source: {
+        type: 'file',
+        file_id: anthropicFile.id,
+      },
+      citations: { enabled: true },  // Pair with Citations (8.1)
+    });
+  }
+}
+```
+
+**Supported Formats:**
+| Format | Extension | Max Size |
+|--------|-----------|----------|
+| PDF | `.pdf` | 100MB |
+| Images | `.png`, `.jpg`, `.gif` | 20MB |
+| CSV | `.csv` | 100MB |
+| Text | `.txt`, `.md`, `.json` | 100MB |
+
+**Flow:**
+1. User uploads file in Slack message
+2. Orion detects `files` array in event
+3. Download file via Slack API (`files.info` → `url_private_download`)
+4. Upload to Anthropic Files API (reuse Story 6.5 client)
+5. Include as document block with `file_id`
+6. Claude reads and analyzes file content
+
+#### 8.4 MCP Auth Fix for PTC
+
+**Purpose:** Fix authentication bugs for MCP servers accessed via Programmatic Tool Calling.
+
+**Bug 1: No-Auth MCP Servers**
+```typescript
+// Problem: MCP servers with headers: {} fail via PTC
+// Solution: Ensure empty auth context is properly passed
+
+// Before (broken)
+allowed_callers: [{ tool_name: 'exa_search' }]
+
+// After (fixed)
+allowed_callers: [{
+  tool_name: 'exa_search',
+  auth_context: {},  // Explicit empty auth
+}]
+```
+
+**Bug 2: GCP Identity Auth**
+```typescript
+// Problem: authType: 'gcp_identity' not forwarded through PTC
+// Solution: Pass identity token in allowed_callers
+
+allowed_callers: [{
+  tool_name: 'audience_manager_search',
+  auth_context: {
+    type: 'bearer',
+    token: await getGcpIdentityToken(),
+  },
+}]
+```
+
+**Affected MCP Servers:**
+- `audience-manager` (GCP Identity)
+- `msci-reports` (GCP Identity)
+- `exa` (no auth)
+
+### Rationale
+
+| Option | Verdict |
+|--------|---------|
+| Keep Epic 8 for Phase 2 code gen | ❌ Lower priority; code gen works naturally |
+| Repurpose for Anthropic API features | ✅ **ADOPTED** — Immediate user value |
+
+### Status
+
+- **Decision Date:** 2026-01-09
+- **Status:** Approved
+- **Implementation:** Epic 8 Stories 8.1-8.4
+- **Reference:** `sprint-change-proposal-2025-01-09.md`
+
+---
+
+## StatusUpdater Abstraction (Story 7.9)
+
+### Context
+
+The two Slack handlers implement status updates differently:
+
+| Handler | Status API | Debounce | Cleanup |
+|---------|------------|----------|---------|
+| `user-message.ts` | `setStatus()` | None (Slack handles) | `setStatus('')` |
+| `app-mention.ts` | `chat.postMessage/update/delete` | 300ms manual | `chat.delete()` |
+
+This creates code duplication and testing complexity.
+
+### Decision
+
+**Introduce `StatusUpdater` interface** with two implementations and a factory.
+
+### Architecture
+
+```
+StatusUpdater (interface)
+├── update(status: string): Promise<void>
+├── cleanup(): Promise<void>
+└── isActive(): boolean
+
+AssistantStatusUpdater
+├── Wraps setStatus() from Assistant API
+├── cleanup() calls setStatus('')
+└── No debouncing (Slack handles)
+
+ChannelStatusUpdater
+├── Uses chat.postMessage/update/delete
+├── 300ms debounce on updates
+├── cleanup() deletes status message
+└── Tracks messageTs for updates
+
+createStatusUpdater(context)
+├── If context.setStatus exists → AssistantStatusUpdater
+└── Else → ChannelStatusUpdater
+```
+
+### File Structure
+
+```
+src/slack/status/
+├── types.ts              # StatusUpdater interface
+├── assistant-updater.ts  # wraps setStatus()
+├── channel-updater.ts    # post/update/delete with debounce
+├── index.ts              # factory + re-exports
+└── index.test.ts         # unit tests
+```
+
+### Implementation
+
+```typescript
+// src/slack/status/types.ts
+export interface StatusUpdater {
+  update(status: string): Promise<void>;
+  cleanup(): Promise<void>;
+  isActive(): boolean;
+}
+
+export interface StatusContext {
+  setStatus?: (payload: { status: string; loading_messages?: string[] }) => Promise<void>;
+  client: WebClient;
+  channel: string;
+  thread_ts: string;
+}
+
+// src/slack/status/index.ts
+export function createStatusUpdater(context: StatusContext): StatusUpdater {
+  if (context.setStatus) {
+    return new AssistantStatusUpdater(context.setStatus);
+  }
+  return new ChannelStatusUpdater(context.client, context.channel, context.thread_ts);
+}
+```
+
+### Usage in Handlers
+
+```typescript
+// Before (user-message.ts) — inline implementation
+const safeSetStatus = (payload: unknown): Promise<void> => { ... };
+await safeSetStatus({ status: 'working...', loading_messages: [...] });
+
+// After — unified abstraction
+const statusUpdater = createStatusUpdater({ setStatus, client, channel, thread_ts });
+await statusUpdater.update('working...');
+// ... agent processing ...
+await statusUpdater.cleanup();
+```
+
+### Benefits
+
+- **Unified interface** — Same API for both handler types
+- **Testability** — Mock `StatusUpdater` interface in unit tests
+- **Maintainability** — Status logic isolated in single module
+- **Type safety** — TypeScript enforces correct usage
+
+### Status
+
+- **Decision Date:** 2026-01-09
+- **Status:** Approved
+- **Priority:** P3
+- **Estimate:** 1-2 hours
+- **Reference:** `implementation-readiness-report-2026-01-09.md`
+
+---
+
 ## Code Execution Architecture
 
 Orion's code execution follows a **primary-fallback pattern** established in ADR-2026-01-07.
@@ -1368,8 +1660,8 @@ tests/
 | **Epic 4** | ~~Subagents~~ REMOVED | N/A | Removed 2025-12-31 |
 | **Epic 5** | Persistent Memory | `src/tools/memory/`, `src/memory/` | MVP |
 | **Epic 6** | Skills & Extensions | `.skills/`, `src/skills/`, `src/tools/code-execution/` | MVP |
-| **Epic 7** | Slack Polish | `src/slack/` (suggested prompts, summarization) | MVP |
-| **Epic 8** | Code Generation (reduced) | N/A (FR19/FR23 only) | Phase 2 |
+| **Epic 7** | Slack Polish | `src/slack/` (suggested prompts, summarization, status) | MVP |
+| **Epic 8** | Anthropic API Enhancements | `src/files/`, `src/slack/handlers/` | Sprint 8 |
 
 *Note: Observability is cross-cutting, implemented via `src/observability/` across all epics.*
 
@@ -1734,10 +2026,10 @@ Project structure supports all decisions with clear boundaries.
 | Epic 4 | ~~Subagents~~ | ❌ Removed 2025-12-31 |
 | Epic 5 | Persistent Memory | ✅ `src/tools/memory/`, `src/memory/` |
 | Epic 6 | Skills & Extensions | ✅ `.skills/`, `src/skills/`, `src/tools/code-execution/` |
-| Epic 7 | Slack Polish | ✅ `src/slack/suggested-prompts.ts`, handlers |
-| Epic 8 | Code Generation (reduced) | ⏳ FR19/FR23 only (Phase 2) |
+| Epic 7 | Slack Polish | ✅ `src/slack/suggested-prompts.ts`, `src/slack/status/`, handlers |
+| Epic 8 | Anthropic API Enhancements | ✅ `src/files/`, `src/slack/handlers/` (Citations, Tool Search, File Ingestion, MCP Auth) |
 
-**Functional Requirements Coverage:** 50/50 FRs covered (FR1-46 + FR47-50)
+**Functional Requirements Coverage:** 51/51 FRs covered (FR1-46 + FR47-51)
 
 **Non-Functional Requirements Coverage:** 28/28 NFRs addressed
 
@@ -1886,4 +2178,4 @@ pnpm install
 
 **Document Maintenance:** Update this architecture when major technical decisions are made during implementation.
 
-**Last Updated:** 2025-12-31 — Added ADR for MCP SDK adoption; removed subagent references per Epic 4 removal.
+**Last Updated:** 2026-01-09 — Added ADR for Epic 8 repurpose (Anthropic API Enhancements); added StatusUpdater abstraction (Story 7.9); added FR51 (File Ingestion).
