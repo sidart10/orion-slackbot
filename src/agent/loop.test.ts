@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { messagesCreateMock, containerLifecycleMock } = vi.hoisted(() => ({
+const { messagesCreateMock, containerLifecycleMock, supportsToolSearchMock } = vi.hoisted(() => ({
   messagesCreateMock: vi.fn(),
   containerLifecycleMock: {
     getContainerId: vi.fn(),
@@ -18,6 +18,8 @@ const { messagesCreateMock, containerLifecycleMock } = vi.hoisted(() => ({
     destroy: vi.fn(),
     _clear: vi.fn(),
   },
+  // Story 8.6: Mock for model capability detection
+  supportsToolSearchMock: vi.fn(() => true),
 }));
 
 // Mock config (imported by loop.ts)
@@ -68,6 +70,15 @@ vi.mock('../skills/index.js', () => ({
     skills: skillIds.map((id) => ({ type: 'custom', skill_id: id, version: 'latest' })),
   })),
   containerLifecycle: containerLifecycleMock,
+}));
+
+// Story 8.6: Mock model-capabilities for tool search testing
+vi.mock('./model-capabilities.js', () => ({
+  supportsToolSearch: supportsToolSearchMock,
+  getModelCapabilities: vi.fn((model: string | undefined | null) => ({
+    toolSearch: supportsToolSearchMock(model),
+    ptc: supportsToolSearchMock(model),
+  })),
 }));
 
 // ✅ REMOVED: Local helper functions now come from test factories
@@ -2704,6 +2715,196 @@ describe('Story 8.1: Citations API Integration', () => {
     // THEN: Only valid citation should be extracted
     expect(result.documentCitations).toHaveLength(1);
     expect(result.documentCitations[0].cited_text).toBe('Valid citation');
+  });
+});
+
+/**
+ * Story 8.6: Tool Search Bug Fix - tool_search_tool_bm25 inclusion
+ *
+ * The tool_search_tool_bm25 is a built-in tool that MUST be explicitly added
+ * to the tools array for Claude to discover deferred tools. Without it,
+ * tools with defer_loading: true are never discoverable.
+ *
+ * Code Review Fix: Added afterEach for proper test isolation (Issue #2)
+ */
+describe('Story 8.6: tool_search_tool_bm25 inclusion', () => {
+  // Store original config for restoration
+  const originalToolSearch = { enabled: true, coreTools: ['memory', 'code_execution', 'summarize'] };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset model capability mock to default (supports tool search)
+    supportsToolSearchMock.mockReturnValue(true);
+  });
+
+  // Code Review Fix: Proper test isolation - restore config after each test
+  afterEach(async () => {
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).toolSearch = { ...originalToolSearch };
+  });
+
+  it('includes tool_search_tool_bm25 when deferred tools exist and tool search enabled (AC#1)', async () => {
+    // GIVEN: Tool search enabled, model supports it, and deferred tools exist
+    const { getToolDefinitions } = await import('./tools.js');
+    vi.mocked(getToolDefinitions).mockReturnValue([
+      { name: 'mcp_tool', description: 'An MCP tool', input_schema: { type: 'object' }, defer_loading: true },
+    ]);
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: tools array should include tool_search_tool_bm25
+    expect(messagesCreateMock).toHaveBeenCalled();
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    const toolSearchTool = callArgs.tools?.find(
+      (t: { name?: string; type?: string }) => t.name === 'tool_search_tool_bm25' || t.type?.includes('tool_search')
+    );
+    expect(toolSearchTool).toBeDefined();
+    expect(toolSearchTool.type).toBe('tool_search_tool_bm25_20251119');
+    expect(toolSearchTool.name).toBe('tool_search_tool_bm25');
+  });
+
+  it('excludes tool_search_tool_bm25 when tool search disabled (AC#2)', async () => {
+    // GIVEN: Tool search disabled in config
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).toolSearch = { enabled: false, coreTools: ['memory', 'code_execution', 'summarize'] };
+
+    const { getToolDefinitions } = await import('./tools.js');
+    vi.mocked(getToolDefinitions).mockReturnValue([
+      { name: 'mcp_tool', description: 'An MCP tool', input_schema: { type: 'object' }, defer_loading: true },
+    ]);
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: tools array should NOT include tool_search_tool_bm25
+    expect(messagesCreateMock).toHaveBeenCalled();
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    const toolSearchTool = callArgs.tools?.find(
+      (t: { name?: string; type?: string }) => t.name === 'tool_search_tool_bm25' || t.type?.includes('tool_search')
+    );
+    expect(toolSearchTool).toBeUndefined();
+    // afterEach handles config restoration
+  });
+
+  it('excludes tool_search_tool_bm25 when no deferred tools exist (AC#2)', async () => {
+    // GIVEN: Tool search enabled but no deferred tools
+    const { getToolDefinitions } = await import('./tools.js');
+    vi.mocked(getToolDefinitions).mockReturnValue([
+      // No defer_loading: true on any tool
+      { name: 'core_tool', description: 'A core tool', input_schema: { type: 'object' } },
+    ]);
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: tools array should NOT include tool_search_tool_bm25
+    expect(messagesCreateMock).toHaveBeenCalled();
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    const toolSearchTool = callArgs.tools?.find(
+      (t: { name?: string; type?: string }) => t.name === 'tool_search_tool_bm25' || t.type?.includes('tool_search')
+    );
+    expect(toolSearchTool).toBeUndefined();
+  });
+
+  // Code Review Fix: Added missing test for model capability fallback (Issue #3)
+  it('excludes tool_search_tool_bm25 when model does not support tool search (AC#2)', async () => {
+    // GIVEN: Tool search enabled in config but model doesn't support it
+    supportsToolSearchMock.mockReturnValue(false);
+
+    const { getToolDefinitions } = await import('./tools.js');
+    vi.mocked(getToolDefinitions).mockReturnValue([
+      { name: 'mcp_tool', description: 'An MCP tool', input_schema: { type: 'object' }, defer_loading: true },
+    ]);
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: tools array should NOT include tool_search_tool_bm25 (model fallback)
+    expect(messagesCreateMock).toHaveBeenCalled();
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    const toolSearchTool = callArgs.tools?.find(
+      (t: { name?: string; type?: string }) => t.name === 'tool_search_tool_bm25' || t.type?.includes('tool_search')
+    );
+    expect(toolSearchTool).toBeUndefined();
+  });
+
+  // Code Review Fix: Added observability test for AC#4 (Issue #4)
+  it('logs toolSearchToolIncluded in tool_search.config event (AC#4)', async () => {
+    // GIVEN: Tool search enabled with deferred tools
+    const { getToolDefinitions } = await import('./tools.js');
+    vi.mocked(getToolDefinitions).mockReturnValue([
+      { name: 'mcp_tool', description: 'An MCP tool', input_schema: { type: 'object' }, defer_loading: true },
+    ]);
+
+    const loggerModule = await import('../utils/logger.js');
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: logger.info should include toolSearchToolIncluded field
+    const toolSearchConfigCall = vi.mocked(loggerModule.logger.info).mock.calls.find(
+      (call) => call[0] && typeof call[0] === 'object' && (call[0] as Record<string, unknown>).event === 'tool_search.config'
+    );
+    expect(toolSearchConfigCall).toBeDefined();
+    expect((toolSearchConfigCall![0] as Record<string, unknown>).toolSearchToolIncluded).toBe(true);
+  });
+
+  it('logs toolSearchToolIncluded: false when tool search disabled (AC#4)', async () => {
+    // GIVEN: Tool search disabled
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).toolSearch = { enabled: false, coreTools: ['memory', 'code_execution', 'summarize'] };
+
+    const { getToolDefinitions } = await import('./tools.js');
+    vi.mocked(getToolDefinitions).mockReturnValue([
+      { name: 'mcp_tool', description: 'An MCP tool', input_schema: { type: 'object' }, defer_loading: true },
+    ]);
+
+    const loggerModule = await import('../utils/logger.js');
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: logger.info should have toolSearchToolIncluded: false
+    const toolSearchConfigCall = vi.mocked(loggerModule.logger.info).mock.calls.find(
+      (call) => call[0] && typeof call[0] === 'object' && (call[0] as Record<string, unknown>).event === 'tool_search.config'
+    );
+    expect(toolSearchConfigCall).toBeDefined();
+    expect((toolSearchConfigCall![0] as Record<string, unknown>).toolSearchToolIncluded).toBe(false);
   });
 });
 

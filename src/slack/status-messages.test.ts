@@ -3,6 +3,7 @@
  *
  * @see Story 2.2 - Agent Loop Implementation
  * @see Story 7.3 - Contextual Tool Feedback
+ * @see Story 8.5 - Tool Call Summary & Sandbox Output Cleanup (AC3)
  * @see FR47 - Dynamic status messages via setStatus({ loading_messages: [...] })
  */
 
@@ -15,12 +16,14 @@ describe('buildLoadingMessages', () => {
     it('should return a default rotating list', () => {
       const msgs = buildLoadingMessages();
       expect(msgs.length).toBeGreaterThanOrEqual(1);
-      expect(msgs[0]).toContain('…');
+      // Either has ellipsis (legacy) or follows new format
+      expect(msgs[0]?.length).toBeGreaterThan(0);
     });
 
     it('should handle toolName only (legacy)', () => {
       const msgs = buildLoadingMessages({ toolName: 'some_tool' });
-      expect(msgs[0]).toContain('…');
+      // Returns generic message
+      expect(msgs[0]).toBe('Working on your request…');
     });
   });
 
@@ -46,23 +49,32 @@ describe('buildLoadingMessages', () => {
     });
   });
 
-  describe('Story 7.3: Tool with query (AC1, AC2)', () => {
-    it('should format MCP tool with query', () => {
+  /**
+   * Story 7.3 + Story 8.5: Tool with query (AC1, AC2, AC3)
+   *
+   * Story 8.5 changes format from "Using X" to "{Action} X - "{context}""
+   * Action is inferred from tool name (search, fetch, call, etc.)
+   */
+  describe('Story 7.3 + 8.5: Tool with query (AC1, AC2, AC3)', () => {
+    it('should format MCP search tool with query', () => {
       const msgs = buildLoadingMessages({
         phase: 'tool',
         toolName: 'msci-reports__search_reports',
         toolInput: { query: 'Hulu' },
       });
-      expect(msgs[0]).toBe('Using Msci Reports: Search Reports — "Hulu"…');
+      // Story 8.5: Uses inferred action verb based on tool name
+      // search_reports -> action: 'search' -> 'Searching'
+      expect(msgs[0]).toBe('Searching Msci Reports: Search Reports - "Hulu"');
     });
 
-    it('should format tool without query (action only)', () => {
+    it('should format fetch tool without query', () => {
       const msgs = buildLoadingMessages({
         phase: 'tool',
         toolName: 'jira__get_issue',
         toolInput: {},
       });
-      expect(msgs[0]).toBe('Using Jira: Get Issue…');
+      // get_issue -> action: 'fetch' -> 'Fetching'
+      expect(msgs[0]).toBe('Fetching Jira: Get Issue');
     });
 
     it('should truncate long queries', () => {
@@ -72,8 +84,8 @@ describe('buildLoadingMessages', () => {
         toolName: 'rube__search',
         toolInput: { query: longQuery },
       });
-      // summarizeToolInput truncates at 60 chars
-      expect(msgs[0]).toContain('…');
+      // Story 8.5: Uses maxContextLength: 50 in buildSingleToolMessage
+      expect(msgs[0]).toContain('...');
       expect(msgs[0].length).toBeLessThan(150);
     });
 
@@ -83,7 +95,8 @@ describe('buildLoadingMessages', () => {
         toolName: 'newserver__action',
         toolInput: { query: 'test' },
       });
-      expect(msgs[0]).toBe('Using Newserver: Action — "test"…');
+      // action -> defaults to 'call' -> 'Calling'
+      expect(msgs[0]).toBe('Calling Newserver: Action - "test"');
     });
 
     it('should handle static tools (no server prefix)', () => {
@@ -92,11 +105,12 @@ describe('buildLoadingMessages', () => {
         toolName: 'memory_recall',
         toolInput: { query: 'user prefs' },
       });
-      expect(msgs[0]).toBe('Using Memory Recall — "user prefs"…');
+      // memory_recall has no keyword match -> defaults to 'call' -> 'Calling'
+      expect(msgs[0]).toBe('Calling Memory Recall - "user prefs"');
     });
   });
 
-  describe('Story 7.3: Multi-tool parallel display (AC4)', () => {
+  describe('Story 7.3 + 8.5: Multi-tool parallel display (AC4)', () => {
     it('should show all tools when multiple execute in parallel', () => {
       const msgs = buildLoadingMessages({
         phase: 'tool',
@@ -120,8 +134,8 @@ describe('buildLoadingMessages', () => {
         toolInput: { query: 'test' },
         allTools: [{ name: 'rube__search', input: { query: 'test' } }],
       });
-      // Single tool = full format, not multi-tool format
-      expect(msgs[0]).toBe('Using Rube: Search — "test"…');
+      // Single tool = full format with action verb (Story 8.5)
+      expect(msgs[0]).toBe('Searching Rube: Search - "test"');
     });
   });
 
@@ -137,20 +151,23 @@ describe('buildLoadingMessages', () => {
         toolName: 'test__action',
         toolInput: undefined,
       });
-      expect(msgs[0]).toBe('Using Test: Action…');
+      // Story 8.5: action -> defaults to 'call' -> 'Calling', no context
+      expect(msgs[0]).toBe('Calling Test: Action');
     });
   });
 
   /**
-   * Story 6.3: PTC status messages
+   * Story 6.3 + 8.5: PTC status messages
    *
    * Tests for Programmatic Tool Calling (PTC) status message.
-   * When Claude uses PTC, status should show "Running multi-tool analysis..."
+   * Story 8.5 changed PTC message format to use formatToolSummary:
+   * 'Executing code - "running analysis"'
    *
    * @see Story 6.3 - Anthropic Managed Programmatic Tool Calling
+   * @see Story 8.5 - Tool Call Summary & Sandbox Output Cleanup (AC3)
    * @see AC#9 - Slack status updates for PTC
    */
-  describe('Story 6.3: PTC status messages (AC9)', () => {
+  describe('Story 6.3 + 8.5: PTC status messages (AC9)', () => {
     // AC9: PTC status message for code_execution tool
     it('PTC: should return PTC status for code_execution tool (AC9)', () => {
       // Given: Tool phase with code_execution tool
@@ -159,8 +176,8 @@ describe('buildLoadingMessages', () => {
         toolName: 'code_execution',
       });
 
-      // Then: Should show PTC-specific message
-      expect(msgs[0]).toBe('Running multi-tool analysis…');
+      // Then: Story 8.5 format: 'Executing code - "running analysis"'
+      expect(msgs[0]).toBe('Executing code - "running analysis"');
     });
 
     // AC9: PTC mode input handling
@@ -172,8 +189,8 @@ describe('buildLoadingMessages', () => {
         toolInput: { mode: 'programmatic_batch' },
       });
 
-      // Then: Should show PTC-specific message
-      expect(msgs[0]).toBe('Running multi-tool analysis…');
+      // Then: Story 8.5 format: 'Executing code - "running analysis"'
+      expect(msgs[0]).toBe('Executing code - "running analysis"');
     });
 
     // AC9: Differentiate from regular tool messages
@@ -190,7 +207,9 @@ describe('buildLoadingMessages', () => {
 
       // Then: Messages should be different
       expect(ptcMsgs[0]).not.toBe(regularMsgs[0]);
-      expect(ptcMsgs[0]).toContain('multi-tool');
+      // Story 8.5: PTC uses 'Executing code' format
+      expect(ptcMsgs[0]).toContain('Executing');
+      expect(ptcMsgs[0]).toContain('code');
     });
   });
 });

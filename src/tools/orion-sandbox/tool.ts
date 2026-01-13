@@ -109,21 +109,20 @@ export function __resetCacheForTests(): void {
  */
 export const orionSandboxToolDefinition: Anthropic.Tool = {
   name: 'orion_sandbox',
-  description: `Execute Python code in a secure sandbox with network access.
+  description: `FALLBACK GKE sandbox for skills requiring Playwright or local builds.
 
-Use this tool when you need to:
-- Run complex logic with loops, conditionals, or data processing
-- Call multiple MCP tools programmatically
-- Make HTTP requests to external APIs
-- Execute skill scripts for orchestrated workflows
+⚠️ DO NOT USE THIS TOOL for general code execution!
+Use code_execution (Anthropic container) instead for:
+- Data processing, calculations, transformations
+- API calls and HTTP requests
+- General Python code
 
-The sandbox has:
-- Python 3.11 with common packages (requests, pandas, numpy, etc.)
-- Network access to call APIs and MCP servers
-- 30-second default timeout (configurable up to 120s)
+ONLY use orion_sandbox for these GKE-only skills:
+- webapp-testing (Playwright browser automation)
+- web-artifacts-builder (local filesystem builds)
 
-For skill scripts, use: skill_script: "skill:skill_name/script_name.py"
-To load a skill's full SKILL.md on-demand, use: skill_doc: "skill:skill_name"`,
+For skill scripts: skill_script: "skill:webapp-testing/script.py"
+For skill docs: skill_doc: "skill:webapp-testing"`,
   input_schema: {
     type: 'object' as const,
     properties: {

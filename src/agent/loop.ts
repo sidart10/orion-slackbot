@@ -44,6 +44,20 @@ import {
   containerLifecycle,
   type ContainerParameter,
 } from '../skills/index.js';
+// Story 8.2: Tool Search model capability detection
+import { supportsToolSearch } from './model-capabilities.js';
+import { type ClaudeToolWithDeferLoading } from '../tools/registry.js';
+// Story 8.5: Output sanitization for clean user-facing messages
+import { sanitizeCodeOutput } from '../tools/output-sanitizer.js';
+import { humanizeError } from '../tools/error-humanizer.js';
+// Story 8.1: Citations API integration - extractCitations and types
+import {
+  extractCitations,
+  type DocumentCitation,
+  type DocumentMetadata,
+} from '../slack/citations/index.js';
+// Re-export DocumentCitation from canonical location for external consumers
+export type { DocumentCitation } from '../slack/citations/index.js';
 
 // Union type for trace - accepts both legacy and new SDK types
 type TraceType = LangfuseTrace | NewLangfuseSpan;
@@ -80,6 +94,8 @@ function createAgentSpan(
   return null;
 }
 
+// DocumentCitation is re-exported from '../slack/citations/index.js' (see import above)
+
 export interface AgentLoopResult extends AgentResult {
   sources: ContextSource[];
   verification: VerificationResult;
@@ -94,6 +110,26 @@ export interface AgentLoopResult extends AgentResult {
    * @see Story 6.6 - Files API Slack Integration (AC#7)
    */
   generatedFileIds: string[];
+  /**
+   * Document citations from Anthropic Citations API.
+   * Empty array if no documents sent or no citations in response.
+   * @see Story 8.1 - Citations & Sources Unification (AC#4)
+   */
+  documentCitations: DocumentCitation[];
+}
+
+/**
+ * Document block for user-uploaded files.
+ * @see Story 8.3 - Slack File Ingestion for Claude Context
+ */
+export interface DocumentBlockParam {
+  type: 'document';
+  source: {
+    type: 'file';
+    file_id: string;
+  };
+  title?: string;
+  citations?: { enabled: boolean };
 }
 
 export interface AgentLoopOptions {
@@ -127,6 +163,12 @@ export interface AgentLoopOptions {
   }) => Promise<unknown>;
   /** Override the max tool loop count (default 10) */
   maxToolLoops?: number;
+  /**
+   * Document blocks from user-uploaded files (Story 8.3).
+   * These are prepended to the first user message per Anthropic's document understanding API.
+   * @see AC#13 - Include document blocks in messages array before calling agent loop
+   */
+  documentBlocks?: DocumentBlockParam[];
 }
 
 // Initialize Anthropic client (uses ANTHROPIC_API_KEY env var automatically)
@@ -278,19 +320,42 @@ export function extractMarkdownLinks(text: string): Array<{ title: string; url: 
 /**
  * Extract plain GCS/image URLs from text (not markdown formatted).
  * Used for Imagen/Veo responses that include URLs in plain text.
+ * Handles both gs:// and https://storage.googleapis.com URLs.
  */
 function extractPlainImageUrls(text: string): Array<{ title: string; url: string }> {
   const links: Array<{ title: string; url: string }> = [];
-  // GCS URLs (multiple domains) ending with image/video extensions
-  const gcsPattern = /https?:\/\/storage\.(?:googleapis|mtls\.cloud\.google)\.com\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp|mp4)(?:\?[^\s<>"]*)?/gi;
-  const matches = text.matchAll(gcsPattern);
-  for (const match of matches) {
-    if (match[0]) {
-      const url = match[0];
-      const filename = url.split('/').pop()?.split('?')[0] || 'Generated Media';
-      links.push({ title: filename, url });
+  const seen = new Set<string>();
+
+  // Pattern 1: GCS signed URLs (https://storage...) with extensions
+  const gcsHttpPattern = /https?:\/\/storage\.(?:googleapis|mtls\.cloud\.google)\.com\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp|mp4)(?:\?[^\s<>"]*)?/gi;
+  for (const match of text.matchAll(gcsHttpPattern)) {
+    if (match[0] && !seen.has(match[0])) {
+      seen.add(match[0]);
+      const filename = match[0].split('/').pop()?.split('?')[0] || 'Generated Media';
+      links.push({ title: filename, url: match[0] });
     }
   }
+
+  // Pattern 2: gs:// URLs from orion-genmedia bucket (Veo/Imagen - extension optional)
+  const gsGenmediaPattern = /gs:\/\/orion-genmedia\/(?:imagen_outputs|veo_outputs)\/[^\s<>"]+/gi;
+  for (const match of text.matchAll(gsGenmediaPattern)) {
+    if (match[0] && !seen.has(match[0])) {
+      seen.add(match[0]);
+      const filename = match[0].split('/').pop() || 'Generated Media';
+      links.push({ title: filename, url: match[0] });
+    }
+  }
+
+  // Pattern 3: gs:// URLs with known media extensions (any bucket)
+  const gsExtPattern = /gs:\/\/[^/]+\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp|mp4)/gi;
+  for (const match of text.matchAll(gsExtPattern)) {
+    if (match[0] && !seen.has(match[0])) {
+      seen.add(match[0]);
+      const filename = match[0].split('/').pop() || 'Generated Media';
+      links.push({ title: filename, url: match[0] });
+    }
+  }
+
   return links;
 }
 
@@ -322,6 +387,21 @@ function extractUrlSourcesFromResult(
           url: link.url,
         });
       }
+
+      // Also extract plain gs:// URLs (for Veo/Imagen responses in plain text)
+      const plainUrls = extractPlainImageUrls(result);
+      for (const link of plainUrls) {
+        // Dedupe - avoid adding if already captured from markdown
+        if (!sources.some((s) => s.url === link.url)) {
+          sources.push({
+            type: 'tool',
+            title: link.title.slice(0, 80),
+            reference: toolName,
+            url: link.url,
+          });
+        }
+      }
+
       return sources.slice(0, 50);
     }
   }
@@ -339,11 +419,15 @@ function extractUrlSourcesFromResult(
     const url = o.url ?? o.link ?? o.href;
     const title = o.title ?? o.name ?? o.headline ?? o.description;
     
-    if (typeof url === 'string' && url.startsWith('http') && !seen.has(url)) {
+    if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('gs://')) && !seen.has(url)) {
       seen.add(url);
+      // For gs:// URLs, extract filename as title; for http, use hostname
+      const defaultTitle = url.startsWith('gs://')
+        ? url.split('/').pop() || 'Generated Media'
+        : new URL(url).hostname;
       sources.push({
         type: 'tool',
-        title: typeof title === 'string' ? title.slice(0, 80) : new URL(url).hostname,
+        title: typeof title === 'string' ? title.slice(0, 80) : defaultTitle,
         reference: toolName,
         url,
       });
@@ -438,7 +522,7 @@ type StreamingToolUse = {
 type ServerToolUseBlock = {
   type: 'server_tool_use';
   id: string;
-  name: 'code_execution';
+  name: 'code_execution' | 'tool_search_tool_bm25' | 'tool_search_tool_regex';
   input: unknown;
 };
 
@@ -555,8 +639,63 @@ export async function* executeAgentLoop(
     }
   }
 
-  // Get MCP + static tools from registry, add memory tool if configured
-  const registryTools = getToolDefinitions();
+  // Story 8.2: Tool Search - Determine if model supports deferred tool loading
+  // When enabled, non-core tools are annotated with defer_loading: true
+  // This reduces token usage by letting Claude discover tools on-demand
+  const modelSupportsToolSearch = supportsToolSearch(config.anthropicModel);
+  const toolSearchEnabled = config.toolSearch.enabled && modelSupportsToolSearch;
+
+  // Log tool search status for observability (AC#6: Graceful Degradation)
+  if (config.toolSearch.enabled && !modelSupportsToolSearch) {
+    logger.warn({
+      event: 'tool_search.fallback',
+      traceId: context.traceId,
+      model: config.anthropicModel,
+      reason: 'Model does not support tool search, using all-tools-in-context',
+    });
+  }
+
+  // Get MCP + static tools from registry with defer_loading based on tool search config
+  // The registry handles annotating non-core tools with defer_loading: true
+  const registryTools = getToolDefinitions() as ClaudeToolWithDeferLoading[];
+
+  // Story 8.2: Track tool search metrics for observability (AC#5)
+  const deferredToolCount = registryTools.filter((t) => t.defer_loading === true).length;
+  const coreToolCount = registryTools.length - deferredToolCount;
+
+  // Story 8.2 AC#5: Log token savings estimate
+  // ~200 tokens per deferred tool that doesn't need to be in initial context
+  const estimatedTokenSavings = deferredToolCount * 200;
+
+  // Story 8.6: Calculate toolSearchToolIncluded here for logging
+  // (full variable is defined later after checking deferredToolCount)
+  const willIncludeToolSearchTool = deferredToolCount > 0 && toolSearchEnabled;
+
+  logger.info({
+    event: 'tool_search.config',
+    traceId: context.traceId,
+    enabled: toolSearchEnabled,
+    modelSupported: modelSupportsToolSearch,
+    coreToolCount,
+    deferredToolCount,
+    estimatedTokenSavings,
+    toolSearchToolIncluded: willIncludeToolSearchTool, // Story 8.6 AC#4
+  });
+
+  // Story 8.2 AC#5: Emit Langfuse event for tool search metrics
+  const toolSearchLangfuse = getLangfuse();
+  if (toolSearchLangfuse?.event && deferredToolCount > 0) {
+    toolSearchLangfuse.event({
+      name: 'tool_search.tokens_saved',
+      metadata: {
+        traceId: context.traceId,
+        deferredToolCount,
+        coreToolCount,
+        estimatedTokenSavings,
+        model: config.anthropicModel,
+      },
+    });
+  }
 
   // Story 6.3: Add code_execution built-in tool for PTC (Programmatic Tool Calling)
   // This allows Claude to orchestrate multiple MCP tools through Python code
@@ -566,6 +705,17 @@ export async function* executeAgentLoop(
     type: 'code_execution_20250825' as const,
     name: 'code_execution',
   };
+
+  // Story 8.6: Add tool_search_tool_bm25 when deferred tools exist
+  // This built-in tool allows Claude to discover tools with defer_loading: true
+  // Without it, deferred tools are never discoverable (Story 8.2 implementation gap)
+  // Note: willIncludeToolSearchTool is defined earlier (line 630) for logging
+  const toolSearchTool = willIncludeToolSearchTool
+    ? {
+        type: 'tool_search_tool_bm25_20251119' as const,
+        name: 'tool_search_tool_bm25',
+      }
+    : null;
 
   // Memory tool uses BetaRunnableTool type from @anthropic-ai/sdk/helpers/beta/memory
   // This type is NOT Anthropic.Tool, but the SDK's messages.create() accepts both.
@@ -578,6 +728,7 @@ export async function* executeAgentLoop(
     ...registryTools,
     codeExecutionTool as unknown as Anthropic.Tool,
     ...(memoryTool ? [memoryTool as unknown as Anthropic.Tool] : []),
+    ...(toolSearchTool ? [toolSearchTool as unknown as Anthropic.Tool] : []),
   ];
   void options.setStatus?.({ phase: 'gather' });
   const gatherSpan = createAgentSpan(trace, 'agent.gather', {
@@ -606,9 +757,35 @@ export async function* executeAgentLoop(
 
   // Build messages array from thread history + current message.
   // gatherContext does NOT mutate messages; it only affects the system prompt for now.
+  //
+  // Story 8.3: Document blocks from user-uploaded files are prepended to the first
+  // user message's content array. Per Anthropic's API, document blocks must be in a
+  // user role message, and we want them in context before the user's question.
+  const documentBlocks = options.documentBlocks ?? [];
+  const hasDocumentBlocks = documentBlocks.length > 0;
+
+  // Build the final user message content
+  // If we have document blocks, we need to use an array content format
+  let userMessageContent: string | Anthropic.ContentBlockParam[];
+  if (hasDocumentBlocks) {
+    // Document blocks must come FIRST per Anthropic requirements
+    userMessageContent = [
+      ...documentBlocks.map((doc) => doc as unknown as Anthropic.ContentBlockParam),
+      { type: 'text' as const, text: userMessage },
+    ];
+    logger.info({
+      event: 'agent.loop.document_blocks_added',
+      traceId: context.traceId,
+      documentBlockCount: documentBlocks.length,
+      documentTitles: documentBlocks.map((d) => d.title).filter(Boolean),
+    });
+  } else {
+    userMessageContent = userMessage;
+  }
+
   const messages: Anthropic.MessageParam[] = [
     ...context.threadHistory,
-    { role: 'user', content: userMessage },
+    { role: 'user', content: userMessageContent },
   ];
 
   const MAX_TOOL_LOOPS = options.maxToolLoops ?? DEFAULT_MAX_TOOL_LOOPS;
@@ -625,6 +802,24 @@ export async function* executeAgentLoop(
 
   // Story 6.6: Track generated file IDs for Slack upload (AC#7)
   const generatedFileIds: string[] = [];
+
+  // Story 8.1: Track citation content blocks from streaming response (AC#1)
+  // Accumulated from content_block_start events with type 'cite'
+  const accumulatedCitations: Array<{
+    type: 'cite';
+    cited_text: string;
+    document_index: number;
+    start_char_index: number;
+    end_char_index: number;
+  }> = [];
+
+  // Story 8.1: Build document metadata from document blocks for citation enrichment
+  // This maps document_index to human-readable names for display
+  const documentMetadata: DocumentMetadata[] = documentBlocks.map((doc, index) => ({
+    index,
+    name: doc.title ?? `Document ${index + 1}`,
+    source_type: 'file' as const,
+  }));
 
   // Story 2.3: Verification retry state
   let verificationAttempts = 0;
@@ -869,19 +1064,53 @@ export async function* executeAgentLoop(
           // Story 6.3: Cast to string to support beta PTC types not yet in SDK types
           const blockType = event.content_block?.type as string | undefined;
 
-          // Story 6.3: Handle server_tool_use (PTC code execution started)
+          // Story 6.3 + Story 8.2: Handle server_tool_use (PTC code execution or tool_search)
           if (blockType === 'server_tool_use') {
             const serverBlock = event.content_block as unknown as ServerToolUseBlock;
+
+            // Story 8.2: Handle tool_search built-in tool
+            if (serverBlock.name === 'tool_search_tool_bm25' || serverBlock.name === 'tool_search_tool_regex') {
+              logger.info({
+                event: 'agent.loop.tool_search_started',
+                serverToolUseId: serverBlock.id,
+                searchType: serverBlock.name,
+                traceId: context.traceId,
+              });
+              // Update Slack status for tool search
+              void options.setStatus?.({
+                phase: 'tool',
+                toolName: 'tool_search',
+                toolInput: serverBlock.input as Record<string, unknown> | undefined,
+              });
+              continue;
+            }
+
+            // Story 6.3: Handle code_execution (PTC)
+            // Try to extract skill name from the Python code being executed
+            const codeInput = serverBlock.input as { code?: string } | undefined;
+            const pythonCode = codeInput?.code ?? '';
+            // Look for skill imports like: from skills.samba_slides import ...
+            // or skill references like: skills.get('samba-slides')
+            const skillImportMatch = pythonCode.match(/from\s+skills\.(\w+)/);
+            const skillGetMatch = pythonCode.match(/skills\.get\(['"]([^'"]+)['"]\)/);
+            const detectedSkillName = skillImportMatch?.[1]?.replace(/_/g, '-')
+              ?? skillGetMatch?.[1]
+              ?? undefined;
+
             logger.info({
               event: 'agent.loop.ptc_code_execution_started',
               serverToolUseId: serverBlock.id,
               traceId: context.traceId,
+              detectedSkill: detectedSkillName,
             });
-            // Update Slack status for PTC
+            // Update Slack status for PTC - include skill name if detected
             void options.setStatus?.({
               phase: 'tool',
               toolName: 'code_execution',
-              toolInput: { mode: 'programmatic_batch' },
+              toolInput: {
+                mode: 'programmatic_batch',
+                skillName: detectedSkillName,
+              },
             });
             continue;
           }
@@ -910,6 +1139,42 @@ export async function* executeAgentLoop(
             });
             // Initialize buffer for potential streamed input
             toolInputBuffers.set(blockIndex, '');
+          }
+
+          // Story 8.1 AC#1: Handle citation content blocks from Anthropic Citations API
+          // Citation blocks are returned when documents have citations: { enabled: true }
+          if (blockType === 'cite') {
+            const citeBlock = event.content_block as unknown as {
+              type: 'cite';
+              cited_text?: string;
+              document_index?: number;
+              start_char_index?: number;
+              end_char_index?: number;
+            };
+
+            // Validate all required fields are present
+            if (
+              typeof citeBlock.cited_text === 'string' &&
+              typeof citeBlock.document_index === 'number' &&
+              typeof citeBlock.start_char_index === 'number' &&
+              typeof citeBlock.end_char_index === 'number'
+            ) {
+              accumulatedCitations.push({
+                type: 'cite',
+                cited_text: citeBlock.cited_text,
+                document_index: citeBlock.document_index,
+                start_char_index: citeBlock.start_char_index,
+                end_char_index: citeBlock.end_char_index,
+              });
+
+              logger.debug({
+                event: 'agent.loop.citation_block_received',
+                traceId: context.traceId,
+                documentIndex: citeBlock.document_index,
+                citedTextLength: citeBlock.cited_text.length,
+                citationCount: accumulatedCitations.length,
+              });
+            }
           }
 
           // Story 6.3: Handle code_execution_tool_result (PTC completed)
@@ -1302,11 +1567,20 @@ export async function* executeAgentLoop(
               const parsed = memoryTool.parse(toolUse.input);
               result = await memoryTool.run(parsed);
             } catch (e) {
+              // Story 8.5: Humanize error for user-friendly message
+              const humanized = humanizeError(e);
+              logger.error({
+                event: 'tool.memory.error',
+                toolName: toolUse.name,
+                errorType: humanized.errorType,
+                technicalDetails: humanized.technicalDetails.slice(0, 500),
+                traceId: context.traceId,
+              });
               result = {
                 success: false,
                 error: {
                   code: 'MEMORY_TOOL_ERROR',
-                  message: e instanceof Error ? e.message : String(e),
+                  message: humanized.userMessage,
                   retryable: false,
                 },
               };
@@ -1387,6 +1661,22 @@ export async function* executeAgentLoop(
             }
           } else {
             toolContent = typeof result === 'string' ? result : JSON.stringify(result);
+          }
+
+          // Story 8.5 AC#1, AC#2: Sanitize code execution output
+          // Apply to tools that may produce Python/code output
+          if (toolUse.name === 'code_execution' || toolUse.name.includes('execute') || toolUse.name.includes('run_code')) {
+            const originalLength = toolContent.length;
+            toolContent = sanitizeCodeOutput(toolContent);
+            if (toolContent.length !== originalLength) {
+              logger.debug({
+                event: 'tool.output.sanitized',
+                toolName: toolUse.name,
+                originalLength,
+                sanitizedLength: toolContent.length,
+                traceId: context.traceId,
+              });
+            }
           }
 
           return {
@@ -1637,7 +1927,25 @@ export async function* executeAgentLoop(
   // Merge gather sources with tool sources
   const toolSources = Array.from(toolSourcesMap.values());
   const allSources = [...sources, ...toolSources];
-  
+
+  // Story 8.1 AC#1, AC#4: Extract document citations from accumulated content blocks
+  // The accumulatedCitations array is populated during streaming from 'cite' blocks
+  // Note: We cast to the parser's ContentBlock type which has the same structure
+  const documentCitations = extractCitations(
+    accumulatedCitations as unknown as Parameters<typeof extractCitations>[0]
+  );
+
+  // Story 8.1 AC#5: Log citation metrics for observability
+  if (documentCitations.length > 0 || hasDocumentBlocks) {
+    logger.info({
+      event: 'agent.loop.citations_extracted',
+      traceId: context.traceId,
+      documentBlockCount: documentBlocks.length,
+      citationCount: documentCitations.length,
+      documentMetadataCount: documentMetadata.length,
+    });
+  }
+
   return {
     inputTokens: totalInputTokens,
     outputTokens: totalOutputTokens,
@@ -1649,6 +1957,7 @@ export async function* executeAgentLoop(
     verificationAttempts,
     gracefulFailure,
     generatedFileIds,
+    documentCitations,
   };
 }
 

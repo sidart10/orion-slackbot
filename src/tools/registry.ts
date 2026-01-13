@@ -3,15 +3,26 @@
  *
  * Story 3.2: Tool Discovery & Registration
  * Story 6.1: Agent Skills Loader - Dynamic Tool Registration
+ * Story 8.2: Tool Search - defer_loading support
  *
  * Notes:
  * - Static tools have no server prefix (serverName = null)
  * - MCP tools are exposed to Claude as: `${serverName}__${toolName}`
  * - Skill tools are exposed as: `${skillName}__${toolName}` (registered dynamically)
+ * - Core tools (memory, code_execution, summarize) are never deferred
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { logger } from '../utils/logger.js';
+import { config } from '../config/environment.js';
+
+/**
+ * Story 8.2: Extended tool definition with defer_loading support.
+ * When defer_loading is true, Anthropic's tool search discovers the tool on-demand.
+ */
+export type ClaudeToolWithDeferLoading = Anthropic.Tool & {
+  defer_loading?: boolean;
+};
 
 /**
  * Parse MCP-routed tool name.
@@ -137,11 +148,91 @@ export class ToolRegistry {
     return removed;
   }
 
-  getToolsForClaude(): Anthropic.Tool[] {
-    const staticTools = Array.from(this.staticTools.values()).map((t) => t.claudeTool);
-    const mcpTools = Array.from(this.mcpTools.values()).map((t) => t.claudeTool);
-    const skillTools = Array.from(this.skillTools.values()).map((t) => t.claudeTool);
-    return [...staticTools, ...mcpTools, ...skillTools].sort((a, b) => a.name.localeCompare(b.name));
+  /**
+   * Get all tools formatted for Claude API.
+   *
+   * Story 8.2: When tool search is enabled and model supports it,
+   * non-core tools are annotated with defer_loading: true for on-demand discovery.
+   *
+   * @param options - Optional configuration
+   * @param options.enableDeferLoading - Override to force enable/disable defer_loading
+   * @returns Array of Claude tool definitions, sorted by name
+   */
+  getToolsForClaude(options?: { enableDeferLoading?: boolean }): ClaudeToolWithDeferLoading[] {
+    const coreToolNames = new Set(config.toolSearch.coreTools);
+
+    // Determine if we should add defer_loading
+    // Default: based on config, unless explicitly overridden
+    const shouldDefer = options?.enableDeferLoading ?? config.toolSearch.enabled;
+
+    // Static tools are always-loaded (no defer_loading)
+    const staticTools = Array.from(this.staticTools.values()).map(
+      (t) => t.claudeTool as ClaudeToolWithDeferLoading
+    );
+
+    // MCP tools get defer_loading unless they're in core tools list
+    const mcpTools = Array.from(this.mcpTools.values()).map((t) => {
+      const tool = t.claudeTool as ClaudeToolWithDeferLoading;
+      // Check if tool name or original name matches a core tool
+      const isCore = coreToolNames.has(tool.name) || coreToolNames.has(t.originalName);
+      if (shouldDefer && !isCore) {
+        return { ...tool, defer_loading: true };
+      }
+      return tool;
+    });
+
+    // Skill tools get defer_loading unless they're in core tools list
+    const skillTools = Array.from(this.skillTools.values()).map((t) => {
+      const tool = t.claudeTool as ClaudeToolWithDeferLoading;
+      // Check if tool name or original name matches a core tool
+      const isCore = coreToolNames.has(tool.name) || coreToolNames.has(t.originalName);
+      if (shouldDefer && !isCore) {
+        return { ...tool, defer_loading: true };
+      }
+      return tool;
+    });
+
+    return [...staticTools, ...mcpTools, ...skillTools].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }
+
+  /**
+   * Story 8.2: Get a core tool by name.
+   *
+   * Core tools are those configured in CORE_TOOLS (default: memory, code_execution, summarize).
+   * These tools are always in context and never have defer_loading.
+   *
+   * @param name - Tool name to look up
+   * @returns Tool definition if found and is a core tool, undefined otherwise
+   */
+  getCoreTool(name: string | undefined | null): ClaudeToolWithDeferLoading | undefined {
+    if (!name) return undefined;
+
+    const coreToolNames = new Set(config.toolSearch.coreTools);
+    if (!coreToolNames.has(name)) return undefined;
+
+    // Check static tools first (most core tools are static)
+    const staticTool = this.staticTools.get(name);
+    if (staticTool) {
+      return staticTool.claudeTool as ClaudeToolWithDeferLoading;
+    }
+
+    // Check MCP tools (in case a core tool is provided by MCP)
+    for (const [, mcpTool] of this.mcpTools) {
+      if (mcpTool.claudeTool.name === name || mcpTool.originalName === name) {
+        return mcpTool.claudeTool as ClaudeToolWithDeferLoading;
+      }
+    }
+
+    // Check skill tools
+    for (const [, skillTool] of this.skillTools) {
+      if (skillTool.claudeTool.name === name || skillTool.originalName === name) {
+        return skillTool.claudeTool as ClaudeToolWithDeferLoading;
+      }
+    }
+
+    return undefined;
   }
 
   getStaticTool(toolName: string): RegisteredStaticTool | undefined {

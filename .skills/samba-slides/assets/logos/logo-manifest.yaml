@@ -1,0 +1,67 @@
+# Samba Logo Manifest
+# Defines logo variants by context and theme, plus auto-branding behavior
+#
+# To add new logos:
+# 1. Add PNG files to this directory
+# 2. Update the appropriate context section below
+# 3. Logos are selected based on: context + theme (dark/light)
+
+logos:
+  # Default fallback logos
+  default:
+    dark: samba-logo-white.png
+    light: samba-logo-black.png
+
+  # Internal presentations (team meetings, updates)
+  internal:
+    dark: samba-logo-white.png
+    light: samba-logo-black.png
+
+  # External/client-facing presentations
+  external:
+    dark: samba-logo-white.png      # TODO: Add samba-logo-tagline-white.png
+    light: samba-logo-black.png     # TODO: Add samba-logo-tagline-black.png
+
+  # Investor/board presentations
+  investor:
+    dark: samba-logo-white.png      # TODO: Add samba-logo-full-white.png
+    light: samba-logo-black.png     # TODO: Add samba-logo-full-black.png
+
+  # Partner/co-branded presentations
+  partner:
+    dark: samba-logo-white.png      # TODO: Add samba-logo-badge-white.png
+    light: samba-logo-black.png     # TODO: Add samba-logo-badge-black.png
+
+
+# Auto-branding configuration
+# Defines which slides automatically get logos and their placement
+auto_branding:
+  internal:
+    title:
+      position: bottom-right
+      size: small
+    end:
+      position: center
+      size: large
+
+  external:
+    title:
+      position: bottom-right
+      size: medium
+    end:
+      position: center
+      size: large
+
+  investor:
+    title:
+      position: bottom-right
+      size: medium
+    end:
+      position: center
+      size: large
+
+  partner:
+    # No logo on title (may have partner co-branding)
+    end:
+      position: center
+      size: large

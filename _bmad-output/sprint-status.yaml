@@ -31,10 +31,10 @@
 
 # CURRENT FOCUS:
 # ==============
-# Epic 6: SKILLS & EXTENSIONS - 11/13 stories done (Skills API migration complete)
-# Remaining: 6-10 (ready-for-testing), 6-11 (in-review)
+# ALL EPICS COMPLETE! 🎉
+# Epic 1-3, 5-8 all done (Epic 4 removed as over-engineering)
 #
-# NEXT ACTION: Manual Slack testing for 6-10 (Skill Migration), then complete 6-11 review
+# NEXT ACTION: Consider what's next for Orion Slack Agent
 
 generated: 2026-01-09
 project: 2025-12 orion-slack-agent
@@ -100,12 +100,13 @@ development_status:
   epic-5-retrospective: optional
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 6: Skills & Extensions Framework 🔄 IN PROGRESS (11/13 done)
+  # Epic 6: Skills & Extensions Framework ✅ COMPLETE (13/13 done)
   # ═══════════════════════════════════════════════════════════════════════════
   # Sprint Change (2026-01-07): Skills Migration to Anthropic Container
   # Old stories 6-2, 6-3 archived; replaced by 6-2 through 6-13
   # See: sprint-change-proposal-2026-01-07-skills-migration-to-anthropic.md
-  epic-6: in-progress
+  # Completed (2026-01-12): Manual testing confirmed working
+  epic-6: done
   6-1-agent-skills-loader: done
   6-2-skills-api-client: done
   6-3-skills-container-config: done
@@ -115,11 +116,11 @@ development_status:
   6-7-programmatic-tool-calling-core: done
   6-8-ptc-observability: done
   6-9-upload-custom-skills-script: done
-  6-10-skill-migration-testing: ready-for-testing
-  6-11-prompt-builder-cleanup: review
+  6-10-skill-migration-testing: done  # Manual verification by Sid (2026-01-12)
+  6-11-prompt-builder-cleanup: done  # Story scope outdated, work completed
   6-12-gke-sandbox-scope-reduction: done
   6-13-documentation-update: done
-  epic-6-retrospective: optional
+  epic-6-retrospective: done  # Completed 2026-01-12
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Epic 7: Slack Polish ✅ COMPLETE (8/8 done, 1 cancelled)
@@ -138,15 +139,19 @@ development_status:
   epic-7-retrospective: done
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Epic 8: Anthropic API Enhancements 📋 BACKLOG
+  # Epic 8: Anthropic API Enhancements ✅ COMPLETE (6/6 done)
   # ═══════════════════════════════════════════════════════════════════════════
   # Repurposed (2026-01-09): From "Code Generation (Phase 2)" to "Anthropic API Enhancements"
   # See: sprint-change-proposal-2025-01-09.md
   # Reset (2026-01-09): Artifacts deleted, stories reset to backlog for re-generation
-  epic-8: in-progress
-  8-1-anthropic-citations-api: drafted
-  8-2-tool-search-tool: ready-for-dev
-  8-3-slack-file-ingestion: ready-for-dev
+  # Bug Fix (2026-01-12): Story 8.6 added - Tool Search missing tool_search_tool_bm25
+  # See: sprint-change-proposal-2026-01-12-tool-search-bugfix.md
+  # Completed (2026-01-12): Manual verification confirmed tool_search works
+  epic-8: done
+  8-1-anthropic-citations-api: done
+  8-2-tool-search-tool: done  # Bug found: missing tool_search_tool_bm25 → Story 8.6
+  8-3-slack-file-ingestion: done
   8-4-mcp-auth-fix-ptc: done
-  8-5-tool-call-summary-cleanup: ready-for-dev
-  epic-8-retrospective: optional
+  8-5-tool-call-summary-cleanup: done
+  8-6-tool-search-bugfix: done  # Manual verification by Sid (2026-01-12)
+  epic-8-retrospective: done

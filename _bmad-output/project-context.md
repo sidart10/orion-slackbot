@@ -2,8 +2,8 @@
 project_name: 'orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-last_updated: '2026-01-07'
-sections_completed: ['technology_stack', 'implementation_rules', 'edge_cases', 'operational', 'ptc_skills']
+last_updated: '2026-01-12'
+sections_completed: ['technology_stack', 'implementation_rules', 'edge_cases', 'operational', 'ptc_skills', 'skill_file_sync']
 elicitation_methods: ['pre-mortem', 'failure-mode', 'red-team-blue-team', 'code-review-gauntlet', 'critical-perspective']
 ---
 
@@ -22,6 +22,7 @@ _Critical rules and patterns that AI agents must follow when implementing code. 
 5. **Config:** Import order matters — `instrumentation.ts` first in `index.ts`
 6. **PTC/Skills:** Use `config.anthropic.allBetas` array, not individual beta strings
 7. **Container reuse:** Track `container.id` by `threadTs` via `containerLifecycle`
+8. **References:** Use `*References:*` header (NO emoji), format: `[n] Tool - "query"`
 
 ---
 
@@ -179,6 +180,48 @@ This is NOT Markdown. It's Slack's mrkdwn format.
 | Link | `<https://url\|text>` | ~~`[text](url)`~~ |
 | List | `• item` or `1. item` | Same ✓ |
 | Quote | (avoid in responses) | ~~`> quote`~~ |
+
+---
+
+## References Block Pattern (Story 8.1)
+
+Orion uses a unified `*References:*` footer block for source attribution.
+
+### Format Rules
+
+```
+*References:*
+[1] Tool Name - "search query"
+[2] <https://url|Title>
+[3] "cited excerpt..." - Document.pdf, page 5
+```
+
+- **Header:** `*References:*` (bold in mrkdwn, NO emoji)
+- **Tool sources:** `[n] Tool Name - "query"` (no emoji prefix)
+- **URL sources:** `[n] <url|title>` (clickable link)
+- **Document citations:** `[n] "excerpt..." - Document.pdf, page N`
+
+### Module Organization
+
+```
+src/slack/citations/
+  types.ts        # DocumentCitation, ToolSource, UnifiedReference
+  parser.ts       # extractCitations() - parse Anthropic response
+  formatter.ts    # formatReferencesBlock() - create Block Kit
+  index.ts        # Public exports
+```
+
+### Integration Points
+
+1. **Agent Loop:** Returns `documentCitations: DocumentCitation[]` in AgentLoopResult
+2. **Slack Handler:** Calls `formatReferencesBlock(toolSources, documentCitations)`
+3. **Langfuse:** `citation.response` event with `tool_source_count`, `document_citation_count`, `citation_types`
+
+### Backwards Compatibility
+
+- Empty `documentCitations[]` when no documents sent to Claude
+- Parser gracefully returns `[]` for responses without citations
+- Existing tool source tracking unchanged
 
 ---
 
@@ -610,6 +653,45 @@ logger.debug({
 | Files not extracted | Check `response.container?.files` and use Files API |
 | Skills not loaded | Call `initializeSkills()` at startup |
 | Wrong tool type format | Use `code_execution_20250825` (dated version) |
+| Missing tool_search_tool | Add `tool_search_tool_bm25` to tools array when deferred tools exist |
+
+### Skill File Loading and Sync
+
+Skills support arbitrary file types including assets (fonts, images, logos).
+
+**What Gets Uploaded:**
+- ALL files in `.skills/{name}/` directory (not just SKILL.md and scripts)
+- Binary files (fonts, images) read as Buffer
+- Text files read as UTF-8
+
+**Exclusions:**
+- `.venv/`, `node_modules/`, `__pycache__/`, `.git/`
+- Hidden files (starting with `.`)
+
+**Hash-Based Versioning:**
+- `hashSkillDirectory()` hashes ALL files in the skill directory
+- Changes to any file (including assets) trigger a new skill version upload
+- Ensures fonts, logos, and other resources stay in sync
+
+**Container Path:**
+Skills are mounted at `/skills/{skill-name}/` in the Anthropic container.
+
+**SKILL.md Quick Start Section:**
+Every skill should include a Quick Start section showing:
+```markdown
+## Quick Start
+
+```python
+import sys
+sys.path.insert(0, '/skills/my-skill/scripts')
+from my_module import MyClass
+
+# Set assets directory for fonts/images
+ASSETS_DIR = '/skills/my-skill/assets'
+```
+```
+
+This ensures Claude knows the exact import path and asset location.
 
 ### File Locations
 
@@ -618,11 +700,258 @@ logger.debug({
 | `src/skills/api-client.ts` | Skills API CRUD operations |
 | `src/skills/container-builder.ts` | Build `container` parameter |
 | `src/skills/container-lifecycle.ts` | Track container IDs by thread |
-| `src/skills/sync-service.ts` | Sync .skills/ to API at startup |
+| `src/skills/sync-service.ts` | Sync .skills/ to API at startup (loads ALL files) |
 | `src/skills/init.ts` | Initialize skills on app start |
 | `src/skills/types.ts` | All skill-related types |
 | `src/files/api-client.ts` | Files API download client |
+| `src/slack/utils/media-upload.ts` | Media URL extraction, stripping, and Slack upload |
 | `scripts/upload-skills.ts` | CI/CD skill upload script |
+
+---
+
+## Media Upload Handling (Genmedia)
+
+### Overview
+
+When genmedia tools (Imagen, Veo) or other tools generate files, Orion:
+1. **Strips media URLs** from streamed response text (users don't see raw GCS URLs)
+2. **Downloads files** from GCS (gs:// or signed https:// URLs)
+3. **Uploads to Slack** with proper filetype for inline rendering
+
+### Supported File Types
+
+| Category | Extensions |
+|----------|------------|
+| **Images** | png, jpg, jpeg, gif, webp, bmp, svg, ico, tiff |
+| **Videos** | mp4, mov, avi, mkv, webm, m4v, flv, wmv |
+| **Audio** | mp3, wav, ogg, m4a, flac, aac |
+| **Documents** | pdf, doc, docx, xls, xlsx, ppt, pptx, txt, rtf, csv |
+| **Web/Code** | html, css, js, json, xml, yaml, md |
+| **Archives** | zip, tar, gz, rar, 7z |
+
+### Key Functions
+
+```typescript
+// Strip GCS/media URLs from text before streaming to Slack
+stripImageUrls(text: string): string
+
+// Extract media URLs from response text
+extractImageUrls(text: string): string[]
+
+// Download files and upload to Slack thread
+uploadImagesFromResponse(client, channelId, threadTs, responseText, traceId)
+```
+
+### URL Patterns Handled
+
+| Pattern | Example |
+|---------|---------|
+| GCS URI | `gs://bucket/path/video.mp4` |
+| GCS Signed URL | `https://storage.mtls.cloud.google.com/bucket/file.mp4` |
+| GCS Standard | `https://storage.googleapis.com/bucket/file.pdf` |
+
+**Security:** Only GCS URLs are processed (trusted source). Random HTTP URLs are ignored.
+
+### Handler Integration
+
+Both `app-mention.ts` and `user-message.ts` handlers:
+1. Call `stripImageUrls(chunk)` during streaming (removes URLs from displayed text)
+2. Keep raw `fullResponse` for URL extraction
+3. Call `uploadImagesFromResponse()` after streaming completes
+
+### File Location
+
+| File | Purpose |
+|------|---------|
+| `src/slack/utils/media-upload.ts` | Core media handling utilities |
+
+---
+
+## Tool Search (Story 8.2)
+
+### Overview
+
+Orion uses Anthropic's **Tool Search** capability to reduce token usage when many MCP tools are available. Instead of passing all tool definitions in context, non-core tools are annotated with `defer_loading: true` and discovered on-demand.
+
+### Benefits
+
+- **Token savings:** 100+ tools at ~200 tokens each = 20k+ tokens saved per request
+- **Latency improvement:** Smaller context = faster API calls
+- **Scalability:** Can add unlimited MCP tools without context window pressure
+
+### Configuration
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `TOOL_SEARCH_ENABLED` | `true` | Enable/disable tool search feature |
+| `CORE_TOOLS` | `memory,code_execution,summarize` | Comma-separated list of always-loaded tools |
+
+### Model Requirements
+
+Tool Search requires Sonnet 4.5+ or Opus 4.5+ models:
+
+```typescript
+// Supported models (pattern matching)
+/^claude-sonnet-4-/  // e.g., claude-sonnet-4-20250514
+/^claude-opus-4-/    // e.g., claude-opus-4-20250801
+
+// NOT supported
+/^claude-3-/         // claude-3-opus, claude-3-sonnet
+/^claude-3-5-/       // claude-3-5-sonnet, claude-3-5-haiku
+```
+
+### How It Works
+
+1. **Request:** Core tools (always loaded) + MCP tools with `defer_loading: true` + `tool_search_tool_bm25`
+2. **Discovery:** Claude uses `tool_search_tool_bm25` to discover relevant deferred tools
+3. **Claude calls:** `tool_search_tool_bm25` with search query, receives matching tool definitions
+4. **Execution:** Discovered tools called via normal `tool_use` blocks
+5. **Processing:** Our `executeTool` handler processes them unchanged
+
+**IMPORTANT:** The `tool_search_tool_bm25` must be explicitly added to the tools array - it is NOT automatically provided by the API.
+
+### Core Tools (Never Deferred)
+
+These tools require immediate availability:
+
+| Tool | Reason |
+|------|--------|
+| `memory` | Auto-context feature requires immediate availability |
+| `code_execution` | PTC container lifecycle requires immediate availability |
+| `summarize` | Conversation summarization |
+
+### Graceful Degradation
+
+- If model doesn't support tool search, falls back to all-tools-in-context
+- Warning logged when fallback occurs
+- No user-facing errors from tool search configuration
+
+### Observability
+
+```typescript
+// Langfuse event for token savings
+langfuse.event({
+  name: 'tool_search.tokens_saved',
+  metadata: {
+    deferredToolCount,
+    coreToolCount,
+    estimatedTokenSavings,
+    model,
+  },
+});
+
+// Log when fallback occurs
+logger.warn({
+  event: 'tool_search.fallback',
+  model,
+  reason: 'Model does not support tool search',
+});
+```
+
+### File Locations
+
+| File | Purpose |
+|------|---------|
+| `src/config/environment.ts` | TOOL_SEARCH_ENABLED, CORE_TOOLS config |
+| `src/tools/registry.ts` | defer_loading annotation, getCoreTool() |
+| `src/agent/model-capabilities.ts` | supportsToolSearch() detection |
+| `src/agent/loop.ts` | Tool search integration + observability |
+
+---
+
+## Tool Status Message Guidelines (Story 8.5)
+
+### Format
+
+Status messages during tool execution use a standardized format:
+
+```
+{Action Verb} {Tool Name} - "{context}"
+```
+
+Or without context:
+
+```
+{Action Verb} {Tool Name}
+```
+
+### Action Verbs
+
+| Action | Verb | Use For |
+|--------|------|---------|
+| `search` | Searching | Search/query operations |
+| `call` | Calling | API calls |
+| `execute` | Executing | Code execution |
+| `analyze` | Analyzing | Document/data analysis |
+| `generate` | Generating | File/report generation |
+| `fetch` | Fetching | Data retrieval |
+
+### Examples
+
+```
+Searching MSCI Reports - "revenue trends"
+Calling Audience Manager - "segment lookup"
+Executing code - "generating Excel report"
+Analyzing document - "Q4_summary.pdf"
+Generating report - "weekly metrics"
+Fetching data - "user preferences"
+```
+
+### Module Usage
+
+```typescript
+import { formatToolSummary, inferActionFromToolName } from '../tools/tool-summary.js';
+
+// With context
+formatToolSummary({ toolName: 'MSCI Reports', action: 'search', context: 'Hulu Q3 revenue' })
+// => 'Searching MSCI Reports - "Hulu Q3 revenue"'
+
+// Without context
+formatToolSummary({ toolName: 'API', action: 'call' })
+// => 'Calling API'
+
+// Auto-infer action from tool name
+const action = inferActionFromToolName('search_reports'); // => 'search'
+```
+
+### Forbidden Content in Status Messages
+
+- Python import statements (`import pandas as pd`)
+- Stack traces or error details
+- Debug/verbose logging output (`DEBUG:`, `[DEBUG]`, `VERBOSE:`)
+- Raw stdout from code execution
+- Internal file paths (`File "/app/script.py"`)
+- REPL artifacts (`>>> `, `... `)
+
+### Output Sanitization
+
+Code execution output MUST be filtered through `sanitizeCodeOutput()` before display:
+
+```typescript
+import { sanitizeCodeOutput } from '../tools/output-sanitizer.js';
+
+const cleanOutput = sanitizeCodeOutput(rawPythonOutput);
+// Filters: imports, stack traces, debug statements, REPL artifacts
+```
+
+### Error Humanization
+
+Technical errors MUST be converted to user-friendly messages:
+
+```typescript
+import { humanizeError } from '../tools/error-humanizer.js';
+
+const { userMessage, technicalDetails, errorType } = humanizeError(error);
+// Log technicalDetails, show userMessage to user
+```
+
+| Technical Error | User-Friendly Message |
+|-----------------|----------------------|
+| `ModuleNotFoundError` | "The requested operation requires a capability that isn't available." |
+| `TimeoutError` | "This operation took too long. Try simplifying your request." |
+| `PermissionError` | "I don't have access to that resource." |
+| `ConnectionError` | "Couldn't connect to the external service." |
+| Unknown | "Something went wrong. I'll try a different approach." |
 
 ---
 
@@ -657,4 +986,8 @@ logger.debug({
 | New container every turn | Reuse via `containerLifecycle` |
 | `type: 'code_execution'` | `type: 'code_execution_20250825'` |
 | GKE for simple code | Use PTC (Anthropic container) |
+| Show `import pandas` in status | Filter with `sanitizeCodeOutput()` |
+| Display raw stack traces | Use `humanizeError()` for user message |
+| Ad-hoc status message strings | Use `formatToolSummary()` |
+| Log user-friendly errors | Log `technicalDetails`, show `userMessage` |
 

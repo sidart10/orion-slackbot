@@ -28,8 +28,14 @@ import { createStreamer } from '../../utils/streaming.js';
 import { formatSlackMrkdwn } from '../../utils/formatting.js';
 import { fetchThreadHistory } from '../thread-context.js';
 import { feedbackBlock } from '../feedback-block.js';
-import { createSourcesContextBlock, type SourceCitation } from '../sources-block.js';
 import { filterClickableSources } from '../source-builder.js';
+// Story 8.1: Unified references block combining tool sources and document citations
+import {
+  formatReferencesBlock,
+  contextSourceToToolSource,
+  parseCitationsWithMetadata,
+  type DocumentMetadata,
+} from '../citations/index.js';
 import { runOrionAgent, type AgentResult } from '../../agent/orion.js';
 import { detectUncitedClaims } from '../../agent/citations.js';
 import { getLangfuse } from '../../observability/langfuse.js';
@@ -63,11 +69,18 @@ import {
   clearSummarizeToolContext,
 } from '../../tools/summarize/index.js';
 import { getSkillMetadata, buildSkillsHint } from '../../skills/index.js';
-import { uploadImagesFromResponse } from '../utils/image-upload.js';
+import { stripImageUrls, uploadImagesFromResponse } from '../utils/media-upload.js';
 import { createSlackFileUploader } from '../utils/file-uploader.js';
-import { createFilesApiClient } from '../../files/index.js';
+import { createFilesApiClient, ingestSlackFiles } from '../../files/index.js';
 import { clearMemoryToolContext } from '../../tools/memory/index.js';
 import { loadRelevantMemories, formatMemoriesForContext } from '../../tools/memory/loader.js';
+// Story 8.3: Slack file ingestion
+import type { SlackFile } from '../files/types.js';
+import {
+  buildDocumentBlocks,
+  formatFileErrors,
+  type DocumentBlock,
+} from '../../agent/document-blocks.js';
 
 /**
  * Handles user messages in assistant threads (Assistant callback signature).
@@ -296,6 +309,59 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             traceId: trace.id,
           });
 
+          // Story 8.3: File ingestion for Claude context (AC#1-AC#14)
+          // Detect files array in message event and ingest to Anthropic Files API
+          let documentBlocksForAgent: DocumentBlock[] = [];
+          let fileIngestionErrors: string[] = [];
+
+          // Extract files from message event (AC#1)
+          // Slack message events include a `files` array when files are uploaded
+          const messageFiles = (message as unknown as { files?: SlackFile[] }).files;
+
+          if (messageFiles && messageFiles.length > 0) {
+            logger.info({
+              event: 'file_ingestion.start',
+              fileCount: messageFiles.length,
+              filenames: messageFiles.map((f) => f.name),
+              traceId: trace.id,
+            });
+
+            // AC#2: Support multiple files in a single message
+            const ingestionResult = await ingestSlackFiles(messageFiles, {
+              traceId: trace.id ?? undefined,
+            });
+
+            // AC#11-AC#12: Build document blocks with citations enabled
+            const { documentBlocks, errors, processedFiles, failedFiles } =
+              buildDocumentBlocks(ingestionResult.results, {
+                enableCitations: true,
+                traceId: trace.id ?? undefined,
+              });
+
+            documentBlocksForAgent = documentBlocks;
+            fileIngestionErrors = errors;
+
+            logger.info({
+              event: 'file_ingestion.complete',
+              documentBlockCount: documentBlocks.length,
+              errorCount: errors.length,
+              processedFiles,
+              failedFiles,
+              traceId: trace.id,
+            });
+
+            // AC#19-AC#23: Send user-friendly error messages for failed files
+            if (fileIngestionErrors.length > 0) {
+              const errorMessage = formatFileErrors(fileIngestionErrors);
+              if (errorMessage) {
+                await say({
+                  text: errorMessage,
+                  thread_ts: threadTs,
+                });
+              }
+            }
+          }
+
           // Load system prompt from .orion/agents/orion.md (AC#2)
           let systemPrompt: string;
           try {
@@ -493,6 +559,10 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
               const messages = buildLoadingMessages({ phase, toolName, toolInput, allTools });
               void statusUpdater.update(messages[0] ?? 'Working...');
             },
+            // Story 8.3: Pass document blocks from ingested files (AC#13)
+            documentBlocks: documentBlocksForAgent.length > 0
+              ? documentBlocksForAgent as unknown as import('../../agent/orion.js').DocumentBlockParam[]
+              : undefined,
           });
 
           // Stream formatted response (AC#3)
@@ -511,12 +581,15 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             }
 
             const chunk = next.value;
+            // Strip image URLs from chunk - images are uploaded as files separately
+            // Keep fullResponse with raw chunk for image URL extraction later
+            const cleanedChunk = stripImageUrls(chunk);
             // Format chunk for Slack mrkdwn
-            const formattedChunk = formatSlackMrkdwn(chunk);
+            const formattedChunk = formatSlackMrkdwn(cleanedChunk);
             // append() is sync with internal debounce; we must yield to the event loop occasionally
             // so the debounce timer can flush (otherwise Slack shows the full response at once).
             streamer.append(formattedChunk);
-            fullResponse += chunk; // Store raw for logging
+            fullResponse += chunk; // Store raw for logging (and image URL extraction)
 
             const now = Date.now();
             if (now - lastYieldToEventLoop >= 50) {
@@ -581,33 +654,43 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             throw stopError;
           }
 
-          // Story 2.7 + Source Citations Fix: Only use sources from tool results
+          // Story 2.7 + Story 8.1: Unified References Footer Block
+          // Combines tool sources and document citations into single *References:* block
           // NOTE: Thread messages are NOT sources - they're the conversation context.
           // Only tool results (web search, MCP, summarization) can provide sources.
-          const toolSources = agentResult?.sources ?? [];
-          const clickableSources = filterClickableSources(toolSources);
-          const sourcesGatheredCount = toolSources.length;
+          const agentSources = agentResult?.sources ?? [];
+          const clickableSources = filterClickableSources(agentSources);
+          const sourcesGatheredCount = agentSources.length;
           const clickableCount = clickableSources.length;
           let sourcesBlockSent = false;
 
-          if (clickableCount > 0) {
-            const sourceCitations: SourceCitation[] = clickableSources.map((s, i) => ({
-              id: i + 1,
-              title: s.title,
-              url: s.url,
-              isMemory: s.type === 'memory',
-              isTool: s.type === 'tool',
-              toolContext: s.toolContext,
-            }));
+          // Story 8.1 AC#3-4: Build unified references from tool sources and document citations
+          const formattedToolSources = clickableSources.map(contextSourceToToolSource);
 
-            const sourcesBlock = createSourcesContextBlock(sourceCitations);
-            if (sourcesBlock) {
+          // Build document metadata from document blocks for citation enrichment
+          const docMetadata: DocumentMetadata[] = documentBlocksForAgent.map((doc, index) => ({
+            index,
+            name: doc.title ?? `Document ${index + 1}`,
+            source_type: 'file' as const,
+          }));
+
+          // Parse document citations with metadata for display
+          const rawDocCitations = agentResult?.documentCitations ?? [];
+          const parsedDocCitations = parseCitationsWithMetadata(rawDocCitations, docMetadata);
+
+          // Create unified references block (tool sources + document citations)
+          const hasToolSources = formattedToolSources.length > 0;
+          const hasDocCitations = parsedDocCitations.length > 0;
+
+          if (hasToolSources || hasDocCitations) {
+            const referencesBlock = formatReferencesBlock(formattedToolSources, parsedDocCitations);
+            if (referencesBlock) {
               try {
                 await client.chat.postMessage({
                   channel: channelId,
                   thread_ts: threadTs ?? undefined,
                   text: ' ', // Fallback text
-                  blocks: [sourcesBlock as unknown as Block],
+                  blocks: [referencesBlock as unknown as Block],
                   metadata: {
                     event_type: 'orion_sources',
                     event_payload: { traceId: trace.id ?? '' },
@@ -638,12 +721,22 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
             excerpt: s.excerpt,
           }));
           const uncitedResult = detectUncitedClaims(fullResponse, citationsForDetection);
+
+          // Story 8.1 AC#5: Calculate citation types for observability
+          const toolSourceCount = clickableSources.filter((s) => s.type === 'tool').length;
+          const documentCitationCount = agentResult?.documentCitations?.length ?? 0;
+          const citationTypes: Array<'tool' | 'document'> = [];
+          if (toolSourceCount > 0) citationTypes.push('tool');
+          if (documentCitationCount > 0) citationTypes.push('document');
+
           const langfuseClient = getLangfuse();
           if (langfuseClient?.event) {
+            // Story 2.7 + Story 8.1 AC#5: citation.response event with unified metrics
             langfuseClient.event({
-              name: 'citation_metrics',
+              name: 'citation.response',
               metadata: {
                 traceId: trace.id,
+                // Story 2.7 metrics
                 sourcesGatheredCount,
                 clickableSourcesCount: clickableCount,
                 sourcesCitedCount: sourcesBlockSent ? clickableCount : 0,
@@ -651,6 +744,10 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
                 inlineCitationMarkerCount: uncitedResult.citationCount,
                 isEligibleResponse: clickableCount > 0,
                 isCitedResponse: clickableCount > 0 && sourcesBlockSent,
+                // Story 8.1 AC#5: New unified metrics
+                tool_source_count: toolSourceCount,
+                document_citation_count: documentCitationCount,
+                citation_types: citationTypes,
               },
             });
 

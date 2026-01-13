@@ -1,11 +1,16 @@
 /**
- * Tests for Sources Block Kit Module (Story 2.7)
+ * Tests for Sources Block Kit Module (Story 2.7, Story 8.1)
  *
  * Updated for Source Citations Fix: "clickable sources only" policy.
  * Sources without URLs are filtered out (except memory sources).
  *
+ * Story 8.1 Updates:
+ * - "*References:*" header (no emoji)
+ * - Tool format: `Tool Name - "query"` (no emoji prefix)
+ *
  * @see Story 2.7 - Source Citations
- * @see Tech-Spec: Source Citations Fix
+ * @see Story 8.1 - Citations & Sources Unification
+ * @see AC#2 - Remove Emojis from Sources Display
  */
 
 import { describe, it, expect } from 'vitest';
@@ -34,12 +39,13 @@ describe('createSourcesContextBlock', () => {
 
     const result = createSourcesContextBlock(sources);
 
+    // Story 8.1 AC#2: *References:* header (no emoji)
     expect(result).toEqual({
       type: 'context',
       elements: [
         {
           type: 'mrkdwn',
-          text: '📎 *Sources:*\n[1] <https://example.com|Test Source>',
+          text: '*References:*\n[1] <https://example.com|Test Source>',
         },
       ],
     });
@@ -54,12 +60,13 @@ describe('createSourcesContextBlock', () => {
 
     const result = createSourcesContextBlock(sources);
 
+    // Story 8.1 AC#2: *References:* header (no emoji)
     expect(result).toEqual({
       type: 'context',
       elements: [
         {
           type: 'mrkdwn',
-          text: '📎 *Sources:*\n[1] <https://example.com/1|First Source>\n[2] <https://example.com/2|Second Source>\n[3] <https://example.com/3|Third Source>',
+          text: '*References:*\n[1] <https://example.com/1|First Source>\n[2] <https://example.com/2|Second Source>\n[3] <https://example.com/3|Third Source>',
         },
       ],
     });
@@ -72,8 +79,9 @@ describe('createSourcesContextBlock', () => {
 
     const result = createSourcesContextBlock(sources);
 
+    // Story 8.1 AC#2: *References:* header (no emoji)
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] <https://confluence.samba.tv/page|Company Overview>'
+      '*References:*\n[1] <https://confluence.samba.tv/page|Company Overview>'
     );
   });
 
@@ -83,8 +91,9 @@ describe('createSourcesContextBlock', () => {
     ];
 
     const result = createSourcesContextBlock(sources);
+    // Story 8.1 AC#2: *References:* header (no emoji)
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] <https://example.com/a%7Cb%3Ec%3Cd|Hello¦World › ‹>'
+      '*References:*\n[1] <https://example.com/a%7Cb%3Ec%3Cd|Hello¦World › ‹>'
     );
   });
 
@@ -98,8 +107,9 @@ describe('createSourcesContextBlock', () => {
     const result = createSourcesContextBlock(sources);
 
     // Only sources with URLs rendered, renumbered [1], [2]
+    // Story 8.1 AC#2: *References:* header (no emoji)
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] <https://example.com|Linked Source>\n[2] <https://docs.example.com|Another Link>'
+      '*References:*\n[1] <https://example.com|Linked Source>\n[2] <https://docs.example.com|Another Link>'
     );
   });
 
@@ -112,8 +122,9 @@ describe('createSourcesContextBlock', () => {
     const result = createSourcesContextBlock(sources);
 
     // IDs are renumbered based on position in filtered list
+    // Story 8.1 AC#2: *References:* header (no emoji)
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] <https://example.com/5|Source Five>\n[2] <https://example.com/10|Source Ten>'
+      '*References:*\n[1] <https://example.com/5|Source Five>\n[2] <https://example.com/10|Source Ten>'
     );
   });
 
@@ -124,8 +135,9 @@ describe('createSourcesContextBlock', () => {
 
     const result = createSourcesContextBlock(sources);
 
+    // Story 8.1 AC#2: *References:* header (no emoji)
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] From your preferences'
+      '*References:*\n[1] From your preferences'
     );
   });
 
@@ -138,8 +150,9 @@ describe('createSourcesContextBlock', () => {
 
     const result = createSourcesContextBlock(sources);
 
+    // Story 8.1 AC#2: *References:* header (no emoji)
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] <https://slack.com/archives/C123/p456|Thread message>\n[2] Your preferences'
+      '*References:*\n[1] <https://slack.com/archives/C123/p456|Thread message>\n[2] Your preferences'
     );
   });
 
@@ -150,8 +163,9 @@ describe('createSourcesContextBlock', () => {
 
     const result = createSourcesContextBlock(sources);
 
+    // Story 8.1 AC#2: No emoji, format: `Tool Name - "query"`
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] 🔧 MSCI Reports: Search Reports — _Hulu_'
+      '*References:*\n[1] MSCI Reports: Search Reports - "Hulu"'
     );
   });
 
@@ -163,8 +177,9 @@ describe('createSourcesContextBlock', () => {
     const result = createSourcesContextBlock(sources);
 
     // Context is truncated to 50 chars in formatSourceLink
+    // Story 8.1 AC#2: No emoji, format: `Tool Name - "query"`
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] 🔧 Audience Manager: Search — _NFL football audiences in major markets with demog_'
+      '*References:*\n[1] Audience Manager: Search - "NFL football audiences in major markets with demog"'
     );
   });
 
@@ -175,8 +190,9 @@ describe('createSourcesContextBlock', () => {
 
     const result = createSourcesContextBlock(sources);
 
+    // Story 8.1 AC#2: No emoji
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] 🔧 Some Tool'
+      '*References:*\n[1] Some Tool'
     );
   });
 
@@ -190,8 +206,9 @@ describe('createSourcesContextBlock', () => {
 
     const result = createSourcesContextBlock(sources);
 
+    // Story 8.1 AC#2: No emoji, *References:* header
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] <https://example.com|Web result>\n[2] 🔧 MSCI Reports — _Search query_\n[3] Your preferences'
+      '*References:*\n[1] <https://example.com|Web result>\n[2] MSCI Reports - "Search query"\n[3] Your preferences'
     );
   });
 
@@ -206,8 +223,9 @@ describe('createSourcesContextBlock', () => {
     const result = createSourcesContextBlock(sources);
 
     // Only the tool source WITHOUT URL should appear
+    // Story 8.1 AC#2: No emoji, format: `Tool Name - "query"`
     expect(result?.elements[0]?.text).toBe(
-      '📎 *Sources:*\n[1] 🔧 Audience Manager — _college football_'
+      '*References:*\n[1] Audience Manager - "college football"'
     );
   });
 

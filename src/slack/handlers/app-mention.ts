@@ -28,23 +28,36 @@ import { isDuplicateEvent } from '../event-dedup.js';
 import { formatSlackMrkdwn } from '../../utils/formatting.js';
 import { fetchThreadHistory } from '../thread-context.js';
 import { feedbackBlock } from '../feedback-block.js';
-import { createSourcesContextBlock, type SourceCitation } from '../sources-block.js';
 import { filterClickableSources } from '../source-builder.js';
+// Story 8.1: Unified references block combining tool sources and document citations
+import {
+  formatReferencesBlock,
+  contextSourceToToolSource,
+  parseCitationsWithMetadata,
+  type DocumentMetadata,
+} from '../citations/index.js';
 import { buildLoadingMessages } from '../status-messages.js';
 import { createStatusUpdater } from '../status/index.js';
 import { runOrionAgent, type AgentResult } from '../../agent/orion.js';
 import { loadAgentPrompt } from '../../agent/loader.js';
 import { config } from '../../config/environment.js';
 import { getChannelName, getUserDisplayName } from '../identity.js';
-import { uploadImagesFromResponse } from '../utils/image-upload.js';
+import { stripImageUrls, uploadImagesFromResponse } from '../utils/media-upload.js';
 import { createSlackFileUploader } from '../utils/file-uploader.js';
-import { createFilesApiClient } from '../../files/index.js';
+import { createFilesApiClient, ingestSlackFiles } from '../../files/index.js';
 import {
   setSummarizeToolContext,
   clearSummarizeToolContext,
 } from '../../tools/summarize/index.js';
 import { clearMemoryToolContext } from '../../tools/memory/index.js';
 import { getSkillMetadata, buildSkillsHint } from '../../skills/index.js';
+// Story 8.3: Slack file ingestion
+import type { SlackFile } from '../files/types.js';
+import {
+  buildDocumentBlocks,
+  formatFileErrors,
+  type DocumentBlock,
+} from '../../agent/document-blocks.js';
 
 /**
  * Extract message text by stripping the leading bot mention.
@@ -204,6 +217,59 @@ export async function handleAppMention({
           traceId: trace.id,
         });
 
+        // Story 8.3: File ingestion for Claude context (AC#1-AC#14)
+        // Detect files array in message event and ingest to Anthropic Files API
+        let documentBlocksForAgent: DocumentBlock[] = [];
+        let fileIngestionErrors: string[] = [];
+
+        // Extract files from mention event (AC#1)
+        const messageFiles = (mentionEvent as unknown as { files?: SlackFile[] }).files;
+
+        if (messageFiles && messageFiles.length > 0) {
+          logger.info({
+            event: 'file_ingestion.start',
+            fileCount: messageFiles.length,
+            filenames: messageFiles.map((f) => f.name),
+            traceId: trace.id,
+          });
+
+          // AC#2: Support multiple files in a single message
+          const ingestionResult = await ingestSlackFiles(messageFiles, {
+            traceId: trace.id ?? undefined,
+          });
+
+          // AC#11-AC#12: Build document blocks with citations enabled
+          const { documentBlocks, errors, processedFiles, failedFiles } =
+            buildDocumentBlocks(ingestionResult.results, {
+              enableCitations: true,
+              traceId: trace.id ?? undefined,
+            });
+
+          documentBlocksForAgent = documentBlocks;
+          fileIngestionErrors = errors;
+
+          logger.info({
+            event: 'file_ingestion.complete',
+            documentBlockCount: documentBlocks.length,
+            errorCount: errors.length,
+            processedFiles,
+            failedFiles,
+            traceId: trace.id,
+          });
+
+          // AC#19-AC#23: Send user-friendly error messages for failed files
+          if (fileIngestionErrors.length > 0) {
+            const errorMessage = formatFileErrors(fileIngestionErrors);
+            if (errorMessage) {
+              await client.chat.postMessage({
+                channel: channelId,
+                thread_ts: threadTs,
+                text: errorMessage,
+              });
+            }
+          }
+        }
+
         // Load system prompt from .orion/agents/orion.md
         let systemPrompt: string;
         try {
@@ -288,6 +354,10 @@ export async function handleAppMention({
               void statusUpdater.update(messages[0] ?? 'Working...');
             }
           },
+          // Story 8.3: Pass document blocks from ingested files (AC#13)
+          documentBlocks: documentBlocksForAgent.length > 0
+            ? documentBlocksForAgent as unknown as import('../../agent/orion.js').DocumentBlockParam[]
+            : undefined,
         });
 
         // Stream response chunks (AC#3 - real-time streaming)
@@ -303,11 +373,14 @@ export async function handleAppMention({
           }
 
           const chunk = next.value;
+          // Strip image URLs from chunk - images are uploaded as files separately
+          // Keep fullResponse with raw chunk for image URL extraction later
+          const cleanedChunk = stripImageUrls(chunk);
           // Format chunk for Slack mrkdwn
-          const formattedChunk = formatSlackMrkdwn(chunk);
+          const formattedChunk = formatSlackMrkdwn(cleanedChunk);
           // append() is sync with internal debounce; yield to event loop periodically
           streamer.append(formattedChunk);
-          fullResponse += chunk; // Store raw for logging
+          fullResponse += chunk; // Store raw for logging (and image URL extraction)
 
           const now = Date.now();
           if (now - lastYieldToEventLoop >= 50) {
@@ -371,29 +444,39 @@ export async function handleAppMention({
         // Story 7.9: Use StatusUpdater for consistent status handling
         await statusUpdater.cleanup();
 
-        // Story 2.7 + Source Citations Fix: Only use sources from tool results
+        // Story 2.7 + Story 8.1: Unified References Footer Block
+        // Combines tool sources and document citations into single *References:* block
         // NOTE: Thread messages are NOT sources - they're the conversation context.
         // Only tool results (web search, MCP, summarization) can provide sources.
         const clickableSources = filterClickableSources(agentResult?.sources ?? []);
 
-        if (clickableSources.length > 0) {
-          const sourceCitations: SourceCitation[] = clickableSources.map((s, i) => ({
-            id: i + 1,
-            title: s.title,
-            url: s.url,
-            isMemory: s.type === 'memory',
-            isTool: s.type === 'tool',
-            toolContext: s.toolContext,
-          }));
+        // Story 8.1 AC#3-4: Build unified references from tool sources and document citations
+        const formattedToolSources = clickableSources.map(contextSourceToToolSource);
 
-          const sourcesBlock = createSourcesContextBlock(sourceCitations);
-          if (sourcesBlock) {
+        // Build document metadata from document blocks for citation enrichment
+        const docMetadata: DocumentMetadata[] = documentBlocksForAgent.map((doc, index) => ({
+          index,
+          name: doc.title ?? `Document ${index + 1}`,
+          source_type: 'file' as const,
+        }));
+
+        // Parse document citations with metadata for display
+        const rawDocCitations = agentResult?.documentCitations ?? [];
+        const parsedDocCitations = parseCitationsWithMetadata(rawDocCitations, docMetadata);
+
+        // Create unified references block (tool sources + document citations)
+        const hasToolSources = formattedToolSources.length > 0;
+        const hasDocCitations = parsedDocCitations.length > 0;
+
+        if (hasToolSources || hasDocCitations) {
+          const referencesBlock = formatReferencesBlock(formattedToolSources, parsedDocCitations);
+          if (referencesBlock) {
             try {
               await client.chat.postMessage({
                 channel: channelId,
                 thread_ts: threadTs,
                 text: ' ',
-                blocks: [sourcesBlock as unknown as Block],
+                blocks: [referencesBlock as unknown as Block],
                 metadata: {
                   event_type: 'orion_sources',
                   event_payload: { traceId: trace.id ?? '' },

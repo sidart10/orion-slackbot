@@ -17,7 +17,7 @@ mcp_servers:
   audience-manager:
     type: http
     enabled: true
-    description: "Samba Audience Manager - audience segmentation and targeting"
+    description: "Samba Audience Manager - TV viewership data, sports audiences (NFL, college football, NBA), demographics, media consumption analytics, audience segmentation and targeting"
     url: "https://audience-manager-mcp-vjlizxe2vq-uc.a.run.app/mcp"
     headers: {}
     # Cloud Run requires IAM auth - fetch identity token at runtime (Story 8.4)
@@ -26,7 +26,7 @@ mcp_servers:
   msci-reports:
     type: http
     enabled: true
-    description: "Samba MSCI Reports - report generation and analytics"
+    description: "Samba MSCI Reports - data reports, analytics dashboards, business intelligence, data analysis"
     url: "https://report-generator-mcp-vjlizxe2vq-uc.a.run.app/mcp"
     headers: {}
     # Cloud Run requires IAM auth - fetch identity token at runtime (Story 8.4)
@@ -60,7 +60,7 @@ mcp_servers:
   genmedia-imagen:
     type: http
     enabled: true
-    description: "Google Imagen - image generation via Vertex AI (Imagen 3/4/4 Ultra)"
+    description: "Google Imagen - generate images, create pictures, illustrations, artwork, photos via AI. Image generation via Vertex AI (Imagen 3/4/4 Ultra)"
     url: "https://mcp-imagen-201626763325.us-central1.run.app/mcp"
     headers: {}
     # Cloud Run requires IAM auth - fetch identity token at runtime
@@ -75,7 +75,7 @@ mcp_servers:
   genmedia-veo:
     type: http
     enabled: true
-    description: "Google Veo - video generation via Vertex AI (Veo 2/3/3.1)"
+    description: "Google Veo - generate videos, create animations, video clips via AI. Video generation via Vertex AI (Veo 2/3/3.1)"
     url: "https://mcp-veo-201626763325.us-central1.run.app/mcp"
     headers: {}
     # Cloud Run requires IAM auth - fetch identity token at runtime

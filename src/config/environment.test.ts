@@ -157,4 +157,97 @@ describe('environment config', () => {
       expect(config.anthropic.skillsEnabled).toBe(true);
     });
   });
+
+  // ==========================================================================
+  // Story 8.2: Tool Search Configuration (AC#2)
+  // ==========================================================================
+
+  describe('toolSearch config (Story 8.2 AC#2)', () => {
+    it('should default TOOL_SEARCH_ENABLED to true', async () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.TOOL_SEARCH_ENABLED;
+      const { config } = await import('./environment.js');
+
+      // THEN: Tool search should be enabled by default
+      expect(config.toolSearch).toBeDefined();
+      expect(config.toolSearch.enabled).toBe(true);
+    });
+
+    it('should disable tool search when TOOL_SEARCH_ENABLED=false', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.TOOL_SEARCH_ENABLED = 'false';
+      const { config } = await import('./environment.js');
+
+      // THEN: Tool search should be disabled
+      expect(config.toolSearch.enabled).toBe(false);
+    });
+
+    it('should enable tool search when TOOL_SEARCH_ENABLED=true', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.TOOL_SEARCH_ENABLED = 'true';
+      const { config } = await import('./environment.js');
+
+      // THEN: Tool search should be enabled
+      expect(config.toolSearch.enabled).toBe(true);
+    });
+
+    it('should treat non-false TOOL_SEARCH_ENABLED values as true', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.TOOL_SEARCH_ENABLED = '1';
+      const { config } = await import('./environment.js');
+
+      // THEN: Non-false values should enable tool search
+      expect(config.toolSearch.enabled).toBe(true);
+    });
+
+    it('should default CORE_TOOLS to memory, code_execution, summarize', async () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.CORE_TOOLS;
+      const { config } = await import('./environment.js');
+
+      // THEN: Should have default core tools
+      expect(config.toolSearch.coreTools).toEqual(['memory', 'code_execution', 'summarize']);
+    });
+
+    it('should parse CORE_TOOLS from comma-separated string', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.CORE_TOOLS = 'memory,code_execution,summarize,custom_tool';
+      const { config } = await import('./environment.js');
+
+      // THEN: Should contain all four tool names
+      expect(config.toolSearch.coreTools).toEqual([
+        'memory',
+        'code_execution',
+        'summarize',
+        'custom_tool',
+      ]);
+    });
+
+    it('should trim whitespace from CORE_TOOLS values', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.CORE_TOOLS = ' memory , code_execution , summarize ';
+      const { config } = await import('./environment.js');
+
+      // THEN: Tools should be trimmed
+      expect(config.toolSearch.coreTools).toEqual(['memory', 'code_execution', 'summarize']);
+    });
+
+    it('should fall back to defaults when CORE_TOOLS is empty string', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.CORE_TOOLS = '';
+      const { config } = await import('./environment.js');
+
+      // THEN: Should fall back to default core tools
+      expect(config.toolSearch.coreTools).toEqual(['memory', 'code_execution', 'summarize']);
+    });
+
+    it('should fall back to defaults when CORE_TOOLS is only whitespace', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.CORE_TOOLS = '   ';
+      const { config } = await import('./environment.js');
+
+      // THEN: Should fall back to default core tools
+      expect(config.toolSearch.coreTools).toEqual(['memory', 'code_execution', 'summarize']);
+    });
+  });
 });

@@ -1,13 +1,13 @@
 /**
- * Image Upload Utility for Slack
+ * Media Upload Utility for Slack
  *
- * Detects image URLs in agent responses, downloads them,
+ * Detects media/file URLs in agent responses, downloads them,
  * and uploads them to Slack for inline display.
  *
  * Supports:
- * - GCS gs:// URLs (from Imagen/Veo)
+ * - GCS gs:// URLs (from Imagen/Veo and other tools)
  * - GCS signed URLs (https://storage.googleapis.com/...)
- * - Direct image URLs (png, jpg, gif, webp)
+ * - Direct file URLs (images, videos, documents, etc.)
  */
 
 import type { WebClient } from '@slack/web-api';
@@ -17,20 +17,113 @@ import { logger } from '../../utils/logger.js';
 /** GCS client for downloading from gs:// URLs */
 const storage = new Storage();
 
-/** Regex to find GCS gs:// URLs */
-const GCS_URI_PATTERN = /gs:\/\/([^/]+)\/([^\s<>"]+\.(?:png|jpg|jpeg|gif|webp))/gi;
+/**
+ * Supported file extensions for Slack upload.
+ * Includes images, videos, documents, and other common formats.
+ */
+const SUPPORTED_EXTENSIONS = [
+  // Images
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tiff', 'tif',
+  // Videos
+  'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'flv', 'wmv',
+  // Audio
+  'mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac',
+  // Documents
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf', 'csv',
+  // Web/Code
+  'html', 'htm', 'css', 'js', 'json', 'xml', 'yaml', 'yml', 'md',
+  // Archives
+  'zip', 'tar', 'gz', 'rar', '7z',
+].join('|');
 
-/** Regex to find GCS signed URLs (multiple domains) or direct image URLs */
-const HTTP_IMAGE_URL_PATTERN =
-  /https?:\/\/storage\.(?:googleapis|mtls\.cloud\.google)\.com\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<>"]*)?|https?:\/\/[^\s<>"]+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<>"]*)?/gi;
+/**
+ * Regex to find GCS gs:// URLs.
+ * Matches URLs WITH extensions (any supported type) OR
+ * URLs from orion-genmedia bucket (Veo/Imagen outputs may lack extensions).
+ */
+const GCS_URI_PATTERN = new RegExp(
+  // Match: gs://bucket/path/file.ext OR gs://orion-genmedia/veo_outputs/... (no extension required)
+  `gs:\\/\\/(?:` +
+    // Option 1: orion-genmedia bucket (Imagen/Veo) - extension optional
+    `orion-genmedia\\/(?:imagen_outputs|veo_outputs)\\/[^\\s<>"]+` +
+    `|` +
+    // Option 2: Any bucket with known extension
+    `[^/]+\\/[^\\s<>"]+\\.(?:${SUPPORTED_EXTENSIONS})` +
+  `)`,
+  'gi'
+);
 
-/** Supported image MIME types */
-const IMAGE_MIME_TYPES: Record<string, string> = {
+/**
+ * Regex to find GCS signed URLs (multiple domains).
+ * Matches URLs WITH extensions OR from orion-genmedia bucket (extension optional).
+ */
+const HTTP_MEDIA_URL_PATTERN = new RegExp(
+  `https?:\\/\\/storage\\.(?:googleapis|mtls\\.cloud\\.google)\\.com\\/(?:` +
+    // Option 1: orion-genmedia bucket - extension optional
+    `orion-genmedia\\/(?:imagen_outputs|veo_outputs)\\/[^\\s<>"?]+(?:\\?[^\\s<>"]*)?` +
+    `|` +
+    // Option 2: Any path with known extension
+    `[^\\s<>"]+\\.(?:${SUPPORTED_EXTENSIONS})(?:\\?[^\\s<>"]*)?` +
+  `)`,
+  'gi'
+);
+
+/** Supported MIME types for Slack upload */
+const MEDIA_MIME_TYPES: Record<string, string> = {
+  // Images
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  tiff: 'image/tiff',
+  tif: 'image/tiff',
+  // Videos
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  avi: 'video/x-msvideo',
+  mkv: 'video/x-matroska',
+  webm: 'video/webm',
+  m4v: 'video/x-m4v',
+  flv: 'video/x-flv',
+  wmv: 'video/x-ms-wmv',
+  // Audio
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  m4a: 'audio/mp4',
+  flac: 'audio/flac',
+  aac: 'audio/aac',
+  // Documents
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain',
+  rtf: 'application/rtf',
+  csv: 'text/csv',
+  // Web/Code
+  html: 'text/html',
+  htm: 'text/html',
+  css: 'text/css',
+  js: 'application/javascript',
+  json: 'application/json',
+  xml: 'application/xml',
+  yaml: 'text/yaml',
+  yml: 'text/yaml',
+  md: 'text/markdown',
+  // Archives
+  zip: 'application/zip',
+  tar: 'application/x-tar',
+  gz: 'application/gzip',
+  rar: 'application/vnd.rar',
+  '7z': 'application/x-7z-compressed',
 };
 
 interface ImageUploadResult {
@@ -41,7 +134,7 @@ interface ImageUploadResult {
 }
 
 /**
- * Extract image URLs from text content.
+ * Extract media/file URLs from text content.
  * Handles both gs:// URIs and HTTP URLs.
  */
 export function extractImageUrls(text: string): string[] {
@@ -53,8 +146,8 @@ export function extractImageUrls(text: string): string[] {
     if (match[0]) urls.push(match[0]);
   }
 
-  // Find HTTP image URLs
-  const httpMatches = text.matchAll(HTTP_IMAGE_URL_PATTERN);
+  // Find HTTP media URLs (GCS signed URLs)
+  const httpMatches = text.matchAll(HTTP_MEDIA_URL_PATTERN);
   for (const match of httpMatches) {
     if (match[0]) urls.push(match[0]);
   }
@@ -64,20 +157,79 @@ export function extractImageUrls(text: string): string[] {
 }
 
 /**
+ * Strip media/file URLs from text content.
+ * Used to clean up response text before displaying in Slack since files
+ * are uploaded separately.
+ *
+ * Preserves single trailing spaces (needed for streaming word boundaries)
+ * but collapses multiple spaces and excessive newlines.
+ *
+ * @param text - Text that may contain media URLs
+ * @returns Text with media URLs removed and cleaned up
+ */
+export function stripImageUrls(text: string): string {
+  // Remove gs:// URLs
+  let cleaned = text.replace(GCS_URI_PATTERN, '');
+
+  // Remove HTTP media URLs (GCS signed URLs)
+  cleaned = cleaned.replace(HTTP_MEDIA_URL_PATTERN, '');
+
+  // Clean up artifacts only if URLs were actually removed (preserve original spacing for normal text)
+  if (cleaned !== text) {
+    cleaned = cleaned
+      .replace(/ {2,}/g, ' ')      // Multiple spaces -> single space
+      .replace(/ +$/gm, '')        // Remove trailing spaces on each line
+      .replace(/\n{3,}/g, '\n\n')  // 3+ newlines -> double newline
+      .trim();
+  }
+
+  return cleaned;
+}
+
+/**
+ * Get file extension from filename for Slack filetype parameter.
+ * Returns the extension as-is for most types (Slack auto-detects from extension).
+ */
+function getFiletypeFromFilename(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  // Slack recognizes most extensions directly
+  // Only normalize a few special cases
+  const filetypeMap: Record<string, string> = {
+    jpeg: 'jpg',
+    tiff: 'tif',
+    htm: 'html',
+    yml: 'yaml',
+  };
+  return filetypeMap[ext] || ext || 'binary';
+}
+
+/**
  * Determine filename from URL.
+ * For Veo outputs (veo_outputs/), defaults to .mp4 if no extension.
+ * For Imagen outputs (imagen_outputs/), defaults to .png if no extension.
  */
 function getFilenameFromUrl(url: string): string {
   try {
-    const urlObj = new URL(url);
+    // Handle gs:// URLs by converting to parseable format
+    const parseableUrl = url.startsWith('gs://')
+      ? url.replace('gs://', 'https://storage.googleapis.com/')
+      : url;
+
+    const urlObj = new URL(parseableUrl);
     const pathname = urlObj.pathname;
     const segments = pathname.split('/');
-    const lastSegment = segments[segments.length - 1] || 'image';
+    const lastSegment = segments[segments.length - 1] || 'media';
 
     // Remove query params from filename
     const filename = lastSegment.split('?')[0];
 
-    // If no extension, default to png
+    // If no extension, infer from path type
     if (!filename.includes('.')) {
+      // Check if this is a Veo video output
+      if (pathname.includes('veo_outputs')) {
+        return `${filename}.mp4`;
+      }
+      // Default to png for images
       return `${filename}.png`;
     }
     return filename;
@@ -91,7 +243,7 @@ function getFilenameFromUrl(url: string): string {
  */
 function getMimeType(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() || 'png';
-  return IMAGE_MIME_TYPES[ext] || 'image/png';
+  return MEDIA_MIME_TYPES[ext] || 'application/octet-stream';
 }
 
 /**
@@ -231,11 +383,15 @@ async function uploadToSlack(
   traceId?: string
 ): Promise<string | null> {
   try {
+    // Determine filetype for Slack to properly render as image
+    const filetype = getFiletypeFromFilename(filename);
+
     const result = await client.filesUploadV2({
       channel_id: channelId,
       thread_ts: threadTs,
       file: imageBuffer,
       filename,
+      filetype,  // Explicit filetype helps Slack render images correctly
       title: altText || filename,
       alt_text: altText,
     });
@@ -298,7 +454,7 @@ export async function uploadImagesFromResponse(
 
   const results: ImageUploadResult[] = [];
 
-  // Process images sequentially to avoid rate limits
+  // Process media files sequentially to avoid rate limits
   for (const url of imageUrls) {
     const downloaded = await downloadImage(url, traceId);
 
@@ -307,13 +463,18 @@ export async function uploadImagesFromResponse(
       continue;
     }
 
+    // Determine media type from filename extension
+    const ext = downloaded.filename.split('.').pop()?.toLowerCase() ?? '';
+    const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'flv', 'wmv'];
+    const mediaTitle = videoExtensions.includes(ext) ? 'Generated Video' : 'Generated Image';
+
     const fileId = await uploadToSlack(
       client,
       channelId,
       threadTs,
       downloaded.buffer,
       downloaded.filename,
-      'Generated Image',
+      mediaTitle,
       traceId
     );
 

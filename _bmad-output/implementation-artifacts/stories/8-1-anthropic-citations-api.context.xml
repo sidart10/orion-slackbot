@@ -1,0 +1,311 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="8-1-anthropic-citations-api" epic="8">
+  <metadata>
+    <created>2026-01-12T00:00:00Z</created>
+    <status>ready-for-dev</status>
+    <story-file>story-8-1-anthropic-citations-api.md</story-file>
+    <atdd-file>atdd-checklist-8-1-anthropic-citations-api.md</atdd-file>
+  </metadata>
+
+  <story>
+    <overview>
+      Unify tool transparency (Sources) and document-level citations (Anthropic Citations API) into a single professional References footer block. Remove emojis from sources display for enterprise appearance. Enable Claude's Citations API for document blocks to provide verifiable claim-to-source mapping.
+    </overview>
+
+    <user-story>
+      As a Slack user, I want Orion to display professional, unified source references that show both tool transparency AND document-level citations, so that I can verify where information comes from and trust Orion's responses are grounded in real sources.
+    </user-story>
+
+    <acceptance-criteria>
+      <criterion id="AC1" title="Anthropic Citations API Integration">
+        Enable `citations: { enabled: true }` on document content blocks. Parse citation blocks from Claude's response (`type: 'cite'` in content array). Extract `cited_text`, `document_index`, `start_char_index`, `end_char_index` from citation blocks. Handle responses that have no citations gracefully (backwards compatible).
+      </criterion>
+      <criterion id="AC2" title="Remove Emojis from Sources Display">
+        Remove all emojis from `src/slack/sources-block.ts` output. Replace current "Sources:" header with `*References:*` (Slack bold). Tool references format: `[n] Tool Name: Action - "query"` (no emoji prefix). No visual distinction between tool sources and document citations in header.
+      </criterion>
+      <criterion id="AC3" title="Unified References Footer Block">
+        Single Block Kit context block at end of responses. Combines both tool sources AND document citations in numbered list. Tool sources format: `[n] Tool Name: Action - "query"`. Document citations format: `[n] "cited excerpt..." - Document.pdf, page X` (if page available). Inline markers from Claude (`[1]`, `[2]`) link to footer entries.
+      </criterion>
+      <criterion id="AC4" title="Citations-Only Mode for Documents">
+        When response includes document citations, Claude's inline `[n]` markers preserved. Document citations reference actual documents (PDF, uploaded files) not MCP tools. If no document citations but tool sources exist, show tool sources only. If both exist, merge into unified numbered list (tools first, then documents).
+      </criterion>
+      <criterion id="AC5" title="Langfuse Observability">
+        Event `citation.response` logged per response with: `tool_source_count`, `document_citation_count`, `citation_types` array. Track citation usage trends for quality metrics.
+      </criterion>
+      <criterion id="AC6" title="Backwards Compatibility">
+        Existing tool-only responses (no document citations) continue to work. API responses without citation blocks handled gracefully. No breaking changes to existing `formatSourcesBlock()` callers.
+      </criterion>
+      <criterion id="AC7" title="Documentation and Testing">
+        Unit tests for citation parsing logic. Unit tests for unified references formatter. Integration test with mock citation response from Claude. Update `project-context.md` with citations configuration.
+      </criterion>
+    </acceptance-criteria>
+
+    <dependencies>
+      <dependency type="internal">Story 2.7 (source-citations) - Current sources system to be unified</dependency>
+      <dependency type="internal">Story 8.2 (tool-search-tool) - Coordinates changes to src/agent/loop.ts</dependency>
+      <dependency type="external">Anthropic Citations API - GA feature, no beta header required</dependency>
+    </dependencies>
+
+    <technical-notes>
+      <note id="1" title="Citations API is GA">
+        Citations is a GA feature - no beta header required. However, it is incompatible with Structured Outputs - cannot use both simultaneously.
+      </note>
+      <note id="2" title="Citation Response Structure">
+        Claude response includes `type: 'cite'` blocks with: cited_text (string), document_index (number), start_char_index (number), end_char_index (number).
+      </note>
+      <note id="3" title="Document Block Configuration">
+        Enable citations by adding `citations: { enabled: true }` property to document content blocks.
+      </note>
+      <note id="4" title="Slack mrkdwn Format">
+        Use `*References:*` for bold (not `**References:**`). Links use `<url|text>` format.
+      </note>
+      <note id="5" title="Story 8.2 Coordination">
+        Both stories modify `src/agent/loop.ts`. Story 8.1 adds `documentCitations` to AgentLoopResult. Story 8.2 adds `defer_loading` to tool definitions. Changes can coexist.
+      </note>
+    </technical-notes>
+  </story>
+
+  <tasks>
+    <task id="1" title="Enable Anthropic Citations API" ac="1">
+      <subtask id="1.1">Modify document block construction to include `citations: { enabled: true }`</subtask>
+      <subtask id="1.2">Create `src/slack/citations/parser.ts` to extract citations from response</subtask>
+      <subtask id="1.3">Define `Citation` interface with `cited_text`, `document_index`, char positions</subtask>
+      <subtask id="1.4">Handle empty/missing citation blocks gracefully</subtask>
+    </task>
+    <task id="2" title="Remove Emojis from Sources" ac="2">
+      <subtask id="2.1">Update `src/slack/sources-block.ts` to remove emoji constants</subtask>
+      <subtask id="2.2">Change header from "Sources:" to `*References:*`</subtask>
+      <subtask id="2.3">Update tool source format to `[n] Tool Name: Action - "query"`</subtask>
+      <subtask id="2.4">Update all unit tests in `sources-block.test.ts`</subtask>
+    </task>
+    <task id="3" title="Unified References Formatter" ac="3,4">
+      <subtask id="3.1">Create `src/slack/citations/formatter.ts` with `formatReferencesBlock()`</subtask>
+      <subtask id="3.2">Accept both `ToolSource[]` and `Citation[]` arrays</subtask>
+      <subtask id="3.3">Generate unified numbered list (tools first, documents second)</subtask>
+      <subtask id="3.4">Return Block Kit context block ready for Slack</subtask>
+      <subtask id="3.5">Integrate into response flow (replace existing sources block attachment)</subtask>
+    </task>
+    <task id="4" title="Agent Loop Integration" ac="1,4">
+      <subtask id="4.1">Modify `executeAgentLoop()` to pass citations config to messages</subtask>
+      <subtask id="4.2">Extract citations from `response.content` blocks of type `cite`</subtask>
+      <subtask id="4.3">Add `documentCitations: Citation[]` to `AgentLoopResult` type</subtask>
+      <subtask id="4.4">Pass citations to Slack handler for formatting</subtask>
+    </task>
+    <task id="5" title="Slack Handler Integration" ac="3,6">
+      <subtask id="5.1">Update `user-message.ts` handler to use new `formatReferencesBlock()`</subtask>
+      <subtask id="5.2">Update `app-mention.ts` handler to use new `formatReferencesBlock()`</subtask>
+      <subtask id="5.3">Ensure backwards compatibility with tool-only responses</subtask>
+      <subtask id="5.4">Remove old `formatSourcesBlock()` calls (migrate to unified function)</subtask>
+    </task>
+    <task id="6" title="Observability" ac="5">
+      <subtask id="6.1">Add Langfuse event `citation.response` in agent loop</subtask>
+      <subtask id="6.2">Track `tool_source_count`, `document_citation_count`, `citation_types`</subtask>
+      <subtask id="6.3">Log citation details at debug level for troubleshooting</subtask>
+    </task>
+    <task id="7" title="Testing and Documentation" ac="7">
+      <subtask id="7.1">Unit tests for `src/slack/citations/parser.ts`</subtask>
+      <subtask id="7.2">Unit tests for `src/slack/citations/formatter.ts`</subtask>
+      <subtask id="7.3">Update `sources-block.test.ts` for new format</subtask>
+      <subtask id="7.4">Integration test with mock Claude citation response</subtask>
+      <subtask id="7.5">Update `project-context.md` with citations section</subtask>
+    </task>
+  </tasks>
+
+  <tests>
+    <atdd-checklist-ref>atdd-checklist-8-1-anthropic-citations-api.md</atdd-checklist-ref>
+    <test-summary>
+      <total-tests>58</total-tests>
+      <by-type>
+        <happy-path>29</happy-path>
+        <edge-cases>20</edge-cases>
+        <error-handling>9</error-handling>
+      </by-type>
+    </test-summary>
+    <key-test-scenarios>
+      <scenario ac="1">Parse citation blocks from Claude response with all fields extracted</scenario>
+      <scenario ac="1">Handle response with no citation blocks gracefully (empty array)</scenario>
+      <scenario ac="2">Sources block output contains no emoji characters</scenario>
+      <scenario ac="2">Header is exactly `*References:*` (Slack mrkdwn bold)</scenario>
+      <scenario ac="3">Generate Block Kit context block with type: 'context'</scenario>
+      <scenario ac="3">Unified numbered list: tools [1], [2], documents [3], [4]</scenario>
+      <scenario ac="4">Claude's inline markers preserved in response text</scenario>
+      <scenario ac="4">Tool sources only shown when no document citations exist</scenario>
+      <scenario ac="5">Langfuse event includes tool_source_count and document_citation_count</scenario>
+      <scenario ac="6">Existing tool-only responses work without breaking changes</scenario>
+      <scenario ac="7">Integration test with mock citation response end-to-end</scenario>
+    </key-test-scenarios>
+  </tests>
+
+  <architecture>
+    <relevant-sections>
+      <section title="Epic 8 Repurposed (ADR-2026-01-09)">
+        Epic 8 repurposed from "Code Generation (Phase 2)" to "Anthropic API Enhancements". Story 8.1 implements Citations API integration with priority P1.
+      </section>
+      <section title="Slack mrkdwn Reference">
+        Bold: `*text*` (NOT `**text**`). Links: `<url|text>` (NOT `[text](url)`). This is Slack's mrkdwn format, not Markdown.
+      </section>
+      <section title="Tool Handler Pattern">
+        Every tool handler MUST wrap its entire body in try/catch. Return ToolResult with success/error, never throw.
+      </section>
+      <section title="Observability Rules">
+        Span naming: `{component}.{operation}`. Logging: Include traceId in every log entry. Langfuse: best-effort, never block response on trace flush.
+      </section>
+    </relevant-sections>
+
+    <patterns-to-follow>
+      <pattern id="1" title="ESM Import Extension">
+        Always use `.js` extension for relative imports: `import { x } from './module.js'`
+      </pattern>
+      <pattern id="2" title="File Naming">
+        Files use `kebab-case.ts`. Tests co-located as `kebab-case.test.ts`.
+      </pattern>
+      <pattern id="3" title="Error Handling">
+        Tool errors return `ToolResult<T>` with success/error, never throw.
+      </pattern>
+      <pattern id="4" title="Logging">
+        Include `traceId` in every log entry. Use `logger.*` methods, not `console.log`.
+      </pattern>
+      <pattern id="5" title="Block Kit">
+        Return Block Kit structures for Slack. Context blocks use `type: 'context'` with `elements` array.
+      </pattern>
+      <pattern id="6" title="Test Organization">
+        Unit tests co-located with source files. Use Vitest framework.
+      </pattern>
+    </patterns-to-follow>
+
+    <file-structure>
+      <file-group title="New Files to Create">
+        <file path="src/slack/citations/index.ts">Re-exports for citations module</file>
+        <file path="src/slack/citations/types.ts">Citation interfaces (Citation, ParsedCitation)</file>
+        <file path="src/slack/citations/parser.ts">Extract citations from Claude response</file>
+        <file path="src/slack/citations/parser.test.ts">Unit tests for parser</file>
+        <file path="src/slack/citations/formatter.ts">Format unified references block</file>
+        <file path="src/slack/citations/formatter.test.ts">Unit tests for formatter</file>
+      </file-group>
+      <file-group title="Files to Modify">
+        <file path="src/slack/sources-block.ts">Remove emojis, update format</file>
+        <file path="src/slack/sources-block.test.ts">Update tests for new format</file>
+        <file path="src/slack/handlers/user-message.ts">Use unified references formatter</file>
+        <file path="src/slack/handlers/app-mention.ts">Use unified references formatter</file>
+        <file path="src/agent/loop.ts">Enable citations, extract from response</file>
+        <file path="src/agent/types.ts">Add documentCitations to AgentLoopResult</file>
+        <file path="_bmad-output/project-context.md">Add citations configuration section</file>
+      </file-group>
+    </file-structure>
+  </architecture>
+
+  <code-examples>
+    <example title="Citation Interface">
+      <![CDATA[
+interface Citation {
+  type: 'cite';
+  cited_text: string;           // The exact text being cited
+  document_index: number;       // Which document (0-indexed)
+  start_char_index: number;     // Start position in source document
+  end_char_index: number;       // End position in source document
+}
+      ]]>
+    </example>
+    <example title="Enable Citations on Document Block">
+      <![CDATA[
+const documentBlock = {
+  type: 'document',
+  source: {
+    type: 'text', // or 'file' for uploaded files
+    media_type: 'text/plain',
+    data: documentContent,
+  },
+  citations: { enabled: true },  // Enable citations for this document
+};
+      ]]>
+    </example>
+    <example title="Unified References Formatter">
+      <![CDATA[
+export function formatReferencesBlock(
+  toolSources: ToolSource[],
+  documentCitations: Citation[]
+): KnownBlock | null {
+  const lines: string[] = [];
+  let index = 1;
+
+  // Tool sources first
+  for (const source of toolSources) {
+    lines.push(`[${index++}] ${source.tool}: ${source.action} - "${source.query}"`);
+  }
+
+  // Document citations second
+  for (const citation of documentCitations) {
+    const excerpt = truncate(citation.cited_text, 50);
+    lines.push(`[${index++}] "${excerpt}" - ${citation.document_name}`);
+  }
+
+  if (lines.length === 0) return null;
+
+  return {
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: `*References:*\n${lines.join('\n')}`,
+    }],
+  };
+}
+      ]]>
+    </example>
+    <example title="Extract Citations from Response">
+      <![CDATA[
+function extractCitations(content: ContentBlock[]): Citation[] {
+  return content
+    .filter((block): block is Citation => block.type === 'cite')
+    .map(block => ({
+      type: 'cite',
+      cited_text: block.cited_text,
+      document_index: block.document_index,
+      start_char_index: block.start_char_index,
+      end_char_index: block.end_char_index,
+    }));
+}
+      ]]>
+    </example>
+    <example title="Unified References Output Format">
+      <![CDATA[
+*References:*
+[1] MSCI Reports: Search - "Hulu"
+[2] Confluence: Search Pages - "onboarding"
+[3] "Q3 revenue grew 12% YoY" - MSCI_Hulu_Report.pdf
+[4] "User retention improved 5%" - Analytics_Summary.pdf
+      ]]>
+    </example>
+    <example title="Langfuse Event">
+      <![CDATA[
+langfuse.event({
+  name: 'citation.response',
+  traceId,
+  metadata: {
+    tool_source_count: toolSources.length,
+    document_citation_count: documentCitations.length,
+    citation_types: [
+      ...(toolSources.length > 0 ? ['tool'] : []),
+      ...(documentCitations.length > 0 ? ['document'] : []),
+    ],
+  },
+});
+      ]]>
+    </example>
+  </code-examples>
+
+  <anti-patterns>
+    <anti-pattern title="Keep emojis">Do not keep emojis "for visual interest" - remove all for professional appearance</anti-pattern>
+    <anti-pattern title="Separate blocks">Do not create separate citation and source blocks - unify into single `*References:*` block</anti-pattern>
+    <anti-pattern title="Hardcode document names">Do not hardcode document names - extract from document metadata or use placeholder</anti-pattern>
+    <anti-pattern title="Fail if no citations">Do not fail if no citations - handle gracefully, tool sources still work</anti-pattern>
+    <anti-pattern title="Log full cited text">Do not log full cited text - log citation count and types only</anti-pattern>
+    <anti-pattern title="Use Markdown syntax">Do not use `**bold**` or `[text](url)` - use Slack mrkdwn: `*bold*` and `<url|text>`</anti-pattern>
+  </anti-patterns>
+
+  <constraints>
+    <constraint title="Incompatible with Structured Outputs">Citations API cannot be used simultaneously with Structured Outputs</constraint>
+    <constraint title="GA Feature">Citations is GA - no beta header required</constraint>
+    <constraint title="Document blocks only">Citations work on document content blocks, not tool results</constraint>
+    <constraint title="Inline markers">Claude manages `[n]` markers in response text - preserve them</constraint>
+  </constraints>
+</story-context>

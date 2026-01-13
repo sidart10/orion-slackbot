@@ -4,7 +4,7 @@
  * Exports utilities for Slack file operations.
  *
  * @see Story 6.6 - Files API Slack Integration (file-uploader)
- * @see Story 7.3 - Contextual Tool Feedback (image-upload)
+ * @see Story 7.3 - Contextual Tool Feedback (media-upload)
  */
 
 // File uploader - Downloads from Anthropic Files API, uploads to Slack
@@ -20,5 +20,5 @@ export type {
   FileUploaderErrorCode,
 } from './file-uploader.js';
 
-// Image uploader - Extracts and uploads images from responses
-export { extractImageUrls, uploadImagesFromResponse } from './image-upload.js';
+// Media uploader - Extracts, strips URLs from text, and uploads media from responses
+export { extractImageUrls, stripImageUrls, uploadImagesFromResponse } from './media-upload.js';

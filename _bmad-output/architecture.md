@@ -112,7 +112,7 @@ Orion's 43 functional requirements span 7 architectural domains:
 
 ### Agent Skills Implementation (Progressive Disclosure)
 
-Agent Skills is an open standard from [agentskills.io](https://agentskills.io/home) — folders of instructions, scripts, and resources that agents can discover and use.
+Agent Skills is an open standard from [agentskills.io](https://agentskills.io/home) — folders of instructions, scripts, assets, and resources that agents can discover and use.
 
 **Three-Level Progressive Disclosure:**
 
@@ -120,7 +120,7 @@ Agent Skills is an open standard from [agentskills.io](https://agentskills.io/ho
 |-------|-------------|------------|---------|
 | **Level 1: Metadata** | Always (startup) | ~100 tokens/skill | `name` + `description` from YAML frontmatter |
 | **Level 2: Instructions** | When triggered | Variable | Full SKILL.md body (read via execute_code) |
-| **Level 3: Resources** | As needed | Unlimited | Bundled scripts executed in GKE sandbox |
+| **Level 3: Resources** | As needed | Unlimited | All bundled files: scripts, fonts, images, assets |
 
 **Implementation pattern:**
 
@@ -179,13 +179,18 @@ orion-slack-agent/
 │   │       └── discovery.ts
 │   ├── observability/              # ✅ Already implemented
 │   └── utils/                      # ✅ Already implemented
-├── .skills/                        # Agent Skills (SKILL.md files)
+├── .skills/                        # Agent Skills (all files uploaded)
 │   ├── slack-research/
 │   │   └── SKILL.md
 │   ├── code-review/
 │   │   └── SKILL.md
-│   └── deep-research/
-│       └── SKILL.md
+│   └── samba-slides/               # Example with assets
+│       ├── SKILL.md                # Must have Quick Start section
+│       ├── scripts/
+│       │   └── samba_presentation.py
+│       └── assets/
+│           ├── fonts/              # Binary files supported
+│           └── logos/
 ├── docker/
 │   └── Dockerfile
 ├── package.json
@@ -639,15 +644,19 @@ export const skillsApi = new SkillsApiClient();
 #### Skills API Lifecycle
 
 **Upload Phase (Startup):**
-1. `initializeSkills()` scans `.skills/` directory for SKILL.md files
-2. For each skill:
+1. `initializeSkills()` scans `.skills/` directory
+2. For each skill directory:
    - Read SKILL.md metadata (name, description)
-   - If `scripts/` exists, bundle into .zip with SKILL.md
+   - Load ALL files in the directory (not just SKILL.md and scripts/)
+   - Binary files (fonts, images) read as Buffer, text files as UTF-8
+   - Excludes: `.venv/`, `node_modules/`, `__pycache__/`, `.git/`, hidden files
+   - Bundle into .zip with full directory structure
    - Call `createSkill(name, description, files)` via Skills API
    - Store returned `skill_id` in memory registry
 3. Compares with remote Skills API (`GET /skills`)
-4. Uploads only new/changed skills (`POST /skills` with ZIP)
-5. Caches `skill_id` mappings in memory
+4. `hashSkillDirectory()` hashes ALL files to detect changes (including assets)
+5. Uploads only new/changed skills (`POST /skills` with ZIP)
+6. Caches `skill_id` mappings in memory
 
 **Reference Phase (Per Message):**
 1. `buildContainerParameter()` builds `{ skills: [skill_ids] }`

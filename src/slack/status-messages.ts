@@ -3,10 +3,17 @@
  *
  * @see Story 2.2 - Agent Loop Implementation
  * @see Story 7.3 - Contextual Tool Feedback (AC1-AC5)
+ * @see Story 8.5 - Tool Call Summary & Sandbox Output Cleanup (AC3)
  * @see FR47 - Dynamic status messages via setStatus({ loading_messages: [...] })
  */
 
 import { formatToolDisplayName, summarizeToolInput } from '../agent/loop.js';
+import {
+  formatToolSummary,
+  inferActionFromToolName,
+  formatToolName,
+  type ToolAction,
+} from '../tools/tool-summary.js';
 
 /**
  * Parameters for building loading messages.
@@ -27,9 +34,11 @@ export interface LoadingMessageParams {
 /**
  * Build a single tool message with server name and query.
  *
+ * Story 8.5 AC3: Uses standardized format: `{Action} {Tool Name} - "{context}"`
+ *
  * @example
  * buildSingleToolMessage('msci-reports__search_reports', { query: 'Hulu' })
- * // => 'Using Msci Reports: Search Reports — "Hulu"…'
+ * // => 'Searching Msci Reports: Search Reports - "Hulu"'
  */
 function buildSingleToolMessage(
   toolName: string,
@@ -37,22 +46,28 @@ function buildSingleToolMessage(
 ): string {
   const displayName = formatToolDisplayName(toolName);
   const query = input ? summarizeToolInput(input) : '';
+  const action = inferActionFromToolName(toolName);
 
-  if (query) {
-    return `Using ${displayName} — "${query}"…`;
-  }
-  return `Using ${displayName}…`;
+  // Story 8.5 AC3: Use standardized formatToolSummary for consistent format
+  return formatToolSummary({
+    toolName: displayName,
+    action,
+    context: query || undefined,
+    maxContextLength: 50, // Slightly longer for status messages
+  });
 }
 
 /**
  * Build a multi-tool message for parallel execution.
+ *
+ * Story 8.5 AC3: Uses action verbs for multi-tool display.
  *
  * @example
  * buildMultiToolMessage([
  *   { name: 'rube__search', input: { query: 'SF restaurants' } },
  *   { name: 'google__calendar', input: {} }
  * ])
- * // => 'Search "SF restaurants" + Calendar…'
+ * // => 'Searching + Fetching Calendar...'
  */
 function buildMultiToolMessage(
   tools: Array<{ name: string; input: Record<string, unknown> }>
@@ -60,21 +75,22 @@ function buildMultiToolMessage(
   const actions = tools.map((t) => {
     const displayName = formatToolDisplayName(t.name);
     const query = summarizeToolInput(t.input);
+    const action = inferActionFromToolName(t.name);
 
-    // Extract just the action part for multi-tool display (Server: Action → Action)
+    // Extract just the action/tool part for multi-tool display
     const actionPart = displayName.includes(':')
       ? displayName.split(':')[1]?.trim() ?? displayName
       : displayName;
 
     // Truncate query for multi-tool display
     if (query) {
-      const shortQuery = query.length > 30 ? `${query.slice(0, 27)}…` : query;
+      const shortQuery = query.length > 25 ? `${query.slice(0, 22)}...` : query;
       return `${actionPart} "${shortQuery}"`;
     }
     return actionPart;
   });
 
-  return `${actions.join(' + ')}…`;
+  return `${actions.join(' + ')}...`;
 }
 
 /**
@@ -128,9 +144,41 @@ export function buildLoadingMessages(params?: LoadingMessageParams): string[] {
 
   // Tool phase: build contextual tool message
   if (phase === 'tool') {
-    // Story 6.3 AC9: PTC-specific status message
+    // Story 6.3 AC9 + Story 8.5 AC3: PTC-specific status message with standardized format
     if (toolName === 'code_execution') {
-      return ['Running multi-tool analysis…'];
+      // Check if a skill name was detected from the Python code
+      const skillName = typeof toolInput === 'object' && toolInput !== null && 'skillName' in toolInput
+        ? (toolInput as { skillName?: string }).skillName
+        : undefined;
+
+      if (skillName) {
+        // Show skill name when detected (e.g., "Running skill: samba-slides")
+        return [formatToolSummary({
+          toolName: skillName,
+          action: 'run',
+          context: 'skill',
+        })];
+      }
+
+      // Fallback for generic code execution
+      return [formatToolSummary({
+        toolName: 'code',
+        action: 'execute',
+        context: 'running analysis',
+      })];
+    }
+
+    // Story 8.2: Tool Search status message - show when discovering deferred tools
+    if (toolName === 'tool_search') {
+      // Extract search query from input if available
+      const query = typeof toolInput === 'object' && toolInput !== null && 'query' in toolInput
+        ? String((toolInput as { query?: string }).query)
+        : undefined;
+      return [formatToolSummary({
+        toolName: 'tools',
+        action: 'search',
+        context: query ? query.slice(0, 50) : 'discovering capabilities',
+      })];
     }
 
     // Story 7.3 AC4: Multi-tool parallel display

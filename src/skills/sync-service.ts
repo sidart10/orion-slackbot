@@ -71,36 +71,67 @@ export function _resetCacheForTests(): void {
 /**
  * Compute SHA-256 hash of a skill directory.
  *
- * Used to detect changes and determine if a new version is needed.
+ * Hashes ALL files in the skill directory to detect any changes
+ * (SKILL.md, scripts, assets, etc.).
  *
  * @param skillPath - Path to skill directory
  * @returns SHA-256 hash prefixed with "sha256:"
  */
 export async function hashSkillDirectory(skillPath: string): Promise<string> {
-  const skillMdPath = join(skillPath, 'SKILL.md');
-  const content = await readFile(skillMdPath, 'utf-8');
-
   const hash = createHash('sha256');
-  hash.update(content);
 
-  // Include scripts directory hash if exists
-  const scriptsPath = join(skillPath, 'scripts');
-  if (existsSync(scriptsPath)) {
-    const scriptFiles = await glob('**/*.py', { cwd: scriptsPath });
-    for (const file of scriptFiles.sort()) {
-      const scriptContent = await readFile(join(scriptsPath, file), 'utf-8');
-      hash.update(file);
-      hash.update(scriptContent);
-    }
+  // Find ALL files in the skill directory (same ignore pattern as loadSkillFiles)
+  const allFiles = await glob('**/*', {
+    cwd: skillPath,
+    nodir: true,
+    ignore: [
+      '**/node_modules/**',
+      '**/.venv/**',
+      '**/__pycache__/**',
+      '**/.git/**',
+      '**/.DS_Store',
+      '**/.*',
+    ],
+  });
+
+  // Sort for deterministic hashing
+  for (const file of allFiles.sort()) {
+    const filePath = join(skillPath, file);
+    const content = await readFile(filePath);
+    hash.update(file);
+    hash.update(content);
   }
 
   const digest = hash.digest('hex');
-  // Return with sha256: prefix if not already present
   return digest.startsWith('sha256:') ? digest : `sha256:${digest}`;
 }
 
 /**
+ * Check if a file is binary based on extension.
+ */
+function isBinaryFile(filename: string): boolean {
+  const binaryExtensions = [
+    '.ttf', '.otf', '.woff', '.woff2',  // fonts
+    '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.svg',  // images
+    '.pdf', '.zip', '.tar', '.gz',  // archives
+    '.mp3', '.mp4', '.wav', '.webm',  // media
+  ];
+  const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase();
+  return binaryExtensions.includes(ext);
+}
+
+/**
  * Load all files from a skill directory for upload.
+ *
+ * Includes ALL files in the skill directory:
+ * - SKILL.md (required)
+ * - scripts/ (Python scripts and other code)
+ * - assets/ (fonts, logos, images, etc.)
+ * - references/ (documentation)
+ * - Any other files
+ *
+ * Binary files (fonts, images) are read as Buffer.
+ * Text files are read as UTF-8 strings.
  *
  * @param skillPath - Path to skill directory
  * @returns Array of files ready for API upload
@@ -108,20 +139,31 @@ export async function hashSkillDirectory(skillPath: string): Promise<string> {
 export async function loadSkillFiles(skillPath: string): Promise<SkillFile[]> {
   const files: SkillFile[] = [];
 
-  // Load SKILL.md (required)
-  const skillMdPath = join(skillPath, 'SKILL.md');
-  if (existsSync(skillMdPath)) {
-    const content = await readFile(skillMdPath, 'utf-8');
-    files.push({ name: 'SKILL.md', content });
-  }
+  // Find ALL files in the skill directory (excluding hidden files and common ignores)
+  const allFiles = await glob('**/*', {
+    cwd: skillPath,
+    nodir: true,  // Only files, not directories
+    ignore: [
+      '**/node_modules/**',
+      '**/.venv/**',
+      '**/__pycache__/**',
+      '**/.git/**',
+      '**/.DS_Store',
+      '**/.*',  // Hidden files
+    ],
+  });
 
-  // Load scripts if present
-  const scriptsPath = join(skillPath, 'scripts');
-  if (existsSync(scriptsPath)) {
-    const scriptFiles = await glob('**/*.py', { cwd: scriptsPath });
-    for (const file of scriptFiles) {
-      const content = await readFile(join(scriptsPath, file), 'utf-8');
-      files.push({ name: `scripts/${file}`, content });
+  for (const file of allFiles) {
+    const filePath = join(skillPath, file);
+
+    if (isBinaryFile(file)) {
+      // Read binary files as Buffer
+      const content = await readFile(filePath);
+      files.push({ name: file, content });
+    } else {
+      // Read text files as UTF-8
+      const content = await readFile(filePath, 'utf-8');
+      files.push({ name: file, content });
     }
   }
 

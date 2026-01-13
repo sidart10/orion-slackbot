@@ -32,6 +32,31 @@ function loadDefaultAnthropicModelFromOrionConfig(): string {
 
 const defaultAnthropicModel = loadDefaultAnthropicModelFromOrionConfig();
 
+/**
+ * Story 8.2: Default core tools that are always in context (never deferred).
+ * These tools require immediate availability for the agent loop to function.
+ */
+const DEFAULT_CORE_TOOLS = ['memory', 'code_execution', 'summarize'] as const;
+
+/**
+ * Story 8.2: Parse CORE_TOOLS environment variable.
+ * Returns array of tool names that should never have defer_loading.
+ *
+ * @param envValue - Comma-separated list of tool names or undefined
+ * @returns Array of trimmed tool names, defaults to DEFAULT_CORE_TOOLS
+ */
+function parseCoreTools(envValue: string | undefined): string[] {
+  if (!envValue || envValue.trim() === '') {
+    return [...DEFAULT_CORE_TOOLS];
+  }
+  const parsed = envValue
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  // Return default if parsing resulted in empty array
+  return parsed.length > 0 ? parsed : [...DEFAULT_CORE_TOOLS];
+}
+
 export const config = {
   // Slack
   slackBotToken: process.env.SLACK_BOT_TOKEN ?? '',
@@ -49,13 +74,26 @@ export const config = {
   anthropic: {
     allBetas: [
       'context-management-2025-06-27', // Memory tool auto-context (Story 5.1)
-      'advanced-tool-use-2025-11-20', // PTC - Programmatic Tool Calling (Story 6.3)
+      'advanced-tool-use-2025-11-20', // PTC - Programmatic Tool Calling (Story 6.3) + Tool Search (Story 8.2)
       'code-execution-2025-08-25', // Skills execution + container (Story 6.2)
       'skills-2025-10-02', // Skills API CRUD operations (Story 6.2)
       'files-api-2025-04-14', // File downloads from container (Story 6.2)
     ],
     // Enable/disable skills feature (default: true)
     skillsEnabled: process.env.ANTHROPIC_SKILLS_ENABLED !== 'false',
+  },
+
+  // Tool Search (Story 8.2)
+  // Enables Anthropic's Tool Search capability for on-demand tool discovery
+  // When enabled, MCP tools are annotated with defer_loading: true and Claude
+  // discovers them via the built-in tool_search tool
+  toolSearch: {
+    // Enable/disable tool search (default: true)
+    // When disabled, all tools are passed in context (no defer_loading)
+    enabled: process.env.TOOL_SEARCH_ENABLED !== 'false',
+    // Core tools that are always in context (never deferred)
+    // Default: memory, code_execution, summarize
+    coreTools: parseCoreTools(process.env.CORE_TOOLS),
   },
 
   // Context compaction (Story 2.6) - all optional; handler applies safe defaults

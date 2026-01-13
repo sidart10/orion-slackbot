@@ -482,11 +482,12 @@ See: `sprint-change-proposal-2025-01-09.md`
 **Stories:**
 | Story | Title | Status | Priority |
 |-------|-------|--------|----------|
-| 8.1 | Citations & Sources Unification | backlog | P1 |
-| 8.2 | Tool Search Tool Integration | backlog | P2 |
-| 8.3 | Slack File Ingestion for Claude Context | backlog | P1 |
-| 8.4 | MCP Auth Fix for PTC Integration | backlog | P1 |
-| 8.5 | Tool Call Summary & Sandbox Output Cleanup | backlog | P1 |
+| 8.1 | Citations & Sources Unification | done | P1 |
+| 8.2 | Tool Search Tool Integration | done | P2 |
+| 8.3 | Slack File Ingestion for Claude Context | done | P1 |
+| 8.4 | MCP Auth Fix for PTC Integration | done | P1 |
+| 8.5 | Tool Call Summary & Sandbox Output Cleanup | done | P1 |
+| 8.6 | Tool Search Bug Fix - Add tool_search_tool_bm25 | ready-for-dev | P0 |
 
 **Story Details:**
 

@@ -16,6 +16,8 @@ import { executeAgentLoop } from './loop.js';
 import type { LangfuseTrace } from '../observability/langfuse.js';
 import type { NewLangfuseSpan } from '../observability/tracing.js';
 import type { ContextSource } from './gather.js';
+// Story 8.1: Import DocumentCitation from canonical location
+import type { DocumentCitation } from '../slack/citations/index.js';
 import { randomUUID } from 'node:crypto';
 import { executeTool as executeToolWithPolicies } from '../tools/executor.js';
 import { executeToolCall } from '../tools/router.js';
@@ -37,6 +39,20 @@ export interface AgentContext {
   threadTs?: string;
   /** Langfuse trace ID for observability correlation */
   traceId?: string;
+}
+
+/**
+ * Document block for user-uploaded files.
+ * @see Story 8.3 - Slack File Ingestion for Claude Context
+ */
+export interface DocumentBlockParam {
+  type: 'document';
+  source: {
+    type: 'file';
+    file_id: string;
+  };
+  title?: string;
+  citations?: { enabled: boolean };
 }
 
 /**
@@ -62,6 +78,12 @@ export interface AgentOptions {
     /** All tools when parallel execution (Story 7.3 AC4) */
     allTools?: Array<{ name: string; input: Record<string, unknown> }>;
   }) => void | Promise<void>;
+  /**
+   * Document blocks from user-uploaded files (Story 8.3).
+   * These are prepended to the first user message per Anthropic's document understanding API.
+   * @see AC#13 - Include document blocks in messages array before calling agent loop
+   */
+  documentBlocks?: DocumentBlockParam[];
 }
 
 /**
@@ -69,6 +91,15 @@ export interface AgentOptions {
  * Re-exported from gather.ts for convenience.
  */
 export type { ContextSource } from './gather.js';
+
+/**
+ * Document citation from Anthropic Citations API.
+ * Re-exported from canonical location for convenience.
+ *
+ * @see Story 8.1 - Citations & Sources Unification
+ * @see ../slack/citations/types.ts for the canonical definition
+ */
+export type { DocumentCitation } from '../slack/citations/index.js';
 
 /**
  * Result metadata from agent execution.
@@ -91,6 +122,12 @@ export interface AgentResult {
    * @see Story 6.6 - Files API Slack Integration (AC#7)
    */
   generatedFileIds?: string[];
+  /**
+   * Document citations from Anthropic Citations API.
+   * Empty array if no documents sent or no citations in response.
+   * @see Story 8.1 - Citations & Sources Unification (AC#4)
+   */
+  documentCitations?: DocumentCitation[];
 }
 
 /**
@@ -126,6 +163,8 @@ export async function* runOrionAgent(
     systemPrompt: options.systemPrompt,
     trace: options.trace,
     setStatus: options.setStatus,
+    // Story 8.3: Pass document blocks to agent loop
+    documentBlocks: options.documentBlocks,
     executeTool: async ({ name, toolUseId, input }) => {
       const args =
         input && typeof input === 'object' && !Array.isArray(input)
