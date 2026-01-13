@@ -76,28 +76,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Get MIME type for a file based on extension.
- */
-function getMimeType(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase();
-  switch (ext) {
-    case 'md':
-      return 'text/markdown';
-    case 'py':
-      return 'text/x-python';
-    case 'txt':
-      return 'text/plain';
-    case 'json':
-      return 'application/json';
-    case 'yaml':
-    case 'yml':
-      return 'application/yaml';
-    default:
-      return 'application/octet-stream';
-  }
-}
-
-/**
  * Create a ZIP file containing all skill files.
  *
  * The Anthropic Skills API requires files to be in a directory structure:

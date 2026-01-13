@@ -1,0 +1,14 @@
+{
+  "name": "Professional Blue",
+  "colors": {
+    "primaryFill": "#e3f2fd",
+    "accent": "#1976d2",
+    "decision": "#fff3e0",
+    "text": "#1e1e1e",
+    "success": "#388e3c",
+    "error": "#d32f2f",
+    "warning": "#f57c00"
+  },
+  "created": "2026-01-13",
+  "source": "bmad-workflow"
+}

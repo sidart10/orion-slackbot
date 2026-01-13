@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="8-4-mcp-auth-fix-ptc" epic="8">
+  <metadata>
+    <created>2026-01-12T00:00:00Z</created>
+    <status>done</status>
+    <retroactive-documentation>true</retroactive-documentation>
+  </metadata>
+
+  <story>
+    <overview>
+      As a developer building skills that call MCP tools,
+      I want MCP authentication to work correctly via Programmatic Tool Calling (PTC),
+      so that skills can successfully invoke MCP tools regardless of their authentication type.
+
+      Root Cause: MCP tools invoked via PTC (allowed_callers) were failing due to improper auth context propagation.
+      The issue manifested in two ways:
+      1. No-Auth Bug: Tools with headers: {} weren't receiving explicit empty auth context
+      2. GCP Identity Bug: Tools requiring GCP Identity tokens weren't receiving the token in PTC auth context format
+    </overview>
+
+    <acceptance-criteria>
+      <criterion id="1">
+        MCP servers configured with headers: {} (no auth) successfully execute via PTC.
+        Tools like exa_search work when called from within code execution container.
+        Empty auth context is properly passed through allowed_callers.
+      </criterion>
+      <criterion id="2">
+        MCP servers with authType: gcp_identity successfully execute via PTC.
+        GCP Identity token is retrieved and forwarded through allowed_callers.
+        audience-manager and msci-reports tools work from code execution.
+      </criterion>
+      <criterion id="3">
+        Existing Bearer token auth (like Rube) continues to work via PTC.
+        No regression in tools that were already working.
+      </criterion>
+      <criterion id="4">
+        Error messages for auth failures are clear and actionable.
+        Failed auth attempts logged with specific error context.
+        Langfuse traces include auth-related events.
+      </criterion>
+    </acceptance-criteria>
+
+    <dependencies>
+      <dependency>Epic 6 Skills API integration (container with allowed_callers)</dependency>
+      <dependency>MCP server configurations in src/tools/mcp/servers.ts</dependency>
+      <dependency>google-auth-library for GCP Identity token retrieval</dependency>
+    </dependencies>
+
+    <technical-notes>
+      <fix-pattern>
+        <no-auth-fix>
+          <!-- Before (broken for no-auth) -->
+          allowed_callers: [{ tool_name: 'exa_search' }]
+
+          <!-- After (fixed - explicit empty auth) -->
+          allowed_callers: [{
+            tool_name: 'exa_search',
+            auth_context: {},  // Explicit empty auth
+          }]
+        </no-auth-fix>
+
+        <gcp-identity-fix>
+          <!-- For GCP Identity auth -->
+          allowed_callers: [{
+            tool_name: 'audience_manager_search',
+            auth_context: {
+              type: 'bearer',
+              token: await getGcpIdentityToken(),
+            },
+          }]
+        </gcp-identity-fix>
+      </fix-pattern>
+
+      <affected-mcp-servers>
+        <server name="audience-manager" auth-type="gcp_identity" status="fixed"/>
+        <server name="msci-reports" auth-type="gcp_identity" status="fixed"/>
+        <server name="exa" auth-type="no-auth" status="fixed"/>
+        <server name="rube" auth-type="bearer" status="no-change-needed"/>
+      </affected-mcp-servers>
+
+      <project-structure-notes>
+        Auth context building: src/skills/container-builder.ts
+        MCP config: src/tools/mcp/servers.ts
+        GCP token retrieval: Uses google-auth-library for identity tokens
+      </project-structure-notes>
+    </technical-notes>
+
+    <implementation-notes>
+      Story implemented as part of Epic 8 sprint (2026-01-09 to 2026-01-11).
+      No separate story file was created during implementation.
+      Story file created retroactively 2026-01-12 for documentation completeness.
+      All acceptance criteria verified working in production.
+    </implementation-notes>
+  </story>
+
+  <tests>
+    <atdd-checklist-ref>atdd-checklist-8-4-mcp-auth-fix-ptc.md</atdd-checklist-ref>
+    <test-summary>
+      <total-tests>26</total-tests>
+      <by-type>
+        <happy-path>16</happy-path>
+        <edge-cases>9</edge-cases>
+        <error-handling>1</error-handling>
+      </by-type>
+    </test-summary>
+    <test-categories>
+      <category name="AC1-NoAuth">4 tests (2 happy path, 2 edge cases)</category>
+      <category name="AC2-GCPIdentity">8 tests (4 happy path, 3 edge cases, 1 error handling)</category>
+      <category name="AC3-BearerRegression">3 tests (3 happy path)</category>
+      <category name="AC4-ErrorMessages">4 tests (4 happy path)</category>
+      <category name="BoundaryConditions">4 tests (4 edge cases)</category>
+      <category name="Integration">3 tests (3 happy path)</category>
+    </test-categories>
+    <files-under-test>
+      <file path="src/skills/container-builder.ts">Build allowed_callers with auth context</file>
+      <file path="src/tools/mcp/gcp-auth.ts">GCP identity token retrieval</file>
+      <file path="src/tools/mcp/servers.ts">MCP server configurations</file>
+      <file path="src/tools/mcp/auth.ts">Auth context helpers</file>
+    </files-under-test>
+  </tests>
+
+  <architecture>
+    <relevant-sections>
+      <section name="Anthropic Skills + Files API Adoption (ADR-2026-01-07)">
+        Primary skill execution via Anthropic container with allowed_callers for MCP tools.
+        Container parameter structure includes skills array and allowed_callers with auth_context.
+      </section>
+
+      <section name="Epic 8 Repurposed: Anthropic API Enhancements (ADR-2026-01-09)">
+        Story 8.4 specifically addresses MCP auth bugs for PTC integration.
+        Bug 1: No-auth MCP servers need explicit empty auth_context.
+        Bug 2: GCP Identity auth must pass identity token in bearer format through allowed_callers.
+      </section>
+
+      <section name="PTC Tool Definition">
+        code_execution_20250825 tool type with container parameter.
+        allowed_callers enables MCP tools callable from code execution.
+      </section>
+    </relevant-sections>
+
+    <patterns-to-follow>
+      <pattern name="Auth Context in allowed_callers">
+        Every MCP tool in allowed_callers must have an auth_context:
+        - No auth: { auth_context: {} }
+        - Bearer: { auth_context: { type: 'bearer', token: 'xxx' } }
+        - GCP Identity: { auth_context: { type: 'bearer', token: await getGcpIdentityToken() } }
+      </pattern>
+
+      <pattern name="Beta Headers">
+        All required betas consolidated in config.anthropic.allBetas:
+        - context-management-2025-06-27
+        - advanced-tool-use-2025-11-20
+        - code-execution-2025-08-25
+        - skills-2025-10-02
+        - files-api-2025-04-14
+      </pattern>
+
+      <pattern name="Observability">
+        Langfuse events for auth operations:
+        - tool.mcp.auth (with authType and toolName metadata)
+        - gcp.auth.failed (with audience and error context)
+        - gcp.auth.fallback (when falling back to gcloud CLI)
+      </pattern>
+
+      <pattern name="Error Handling">
+        Layered error architecture:
+        - InternalError (logged with traceId)
+        - ToolError (returned to Claude)
+        - UserError (shown in Slack - human-friendly)
+      </pattern>
+    </patterns-to-follow>
+  </architecture>
+
+  <dev-record>
+    <agent-model>claude-opus-4-20250514</agent-model>
+    <completion-date>2026-01-11</completion-date>
+    <files-modified>
+      <file>src/skills/container-builder.ts</file>
+      <file>src/tools/mcp/servers.ts</file>
+      <file>src/tools/mcp/auth.ts</file>
+    </files-modified>
+    <notes>
+      Story was implemented prior to story file creation.
+      All acceptance criteria verified working in production.
+      Langfuse traces confirm auth events are being recorded.
+    </notes>
+  </dev-record>
+</story-context>

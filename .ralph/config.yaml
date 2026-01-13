@@ -1,0 +1,13 @@
+# Ralph Generate Configuration
+# Generated: 2026-01-11
+
+planning_dir: "./_bmad-output"
+impl_dir: "./_bmad-output/implementation-artifacts"
+use_tea_agent: true
+
+step_timeouts:
+  1: 10   # create-story (minutes)
+  2: 5    # story-ready
+  3: 15   # atdd
+  4: 5    # test-review
+  5: 10   # story-context

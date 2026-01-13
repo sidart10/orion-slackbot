@@ -69,7 +69,7 @@ mcp_servers:
     requestTimeoutMs: 60000
     # Preferred defaults (pass to tool calls when not specified by user)
     defaults:
-      model: "imagen-4.0-generate-001"  # Imagen 4 - best quality
+      model: "imagen-4.0-ultra-generate-001"  # Imagen 4 Ultra - highest quality (max 1 image)
       gcs_bucket_uri: "gs://orion-genmedia/imagen_outputs/"
 
   genmedia-veo:

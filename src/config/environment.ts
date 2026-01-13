@@ -96,6 +96,15 @@ export const config = {
     coreTools: parseCoreTools(process.env.CORE_TOOLS),
   },
 
+  // Prompt Caching (Plan: Anthropic API Prompt Caching)
+  // Enables Anthropic's prompt caching feature for cost/latency reduction
+  // See: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+  promptCaching: {
+    // Enable/disable prompt caching (default: true)
+    // Caches system prompt and tools for ~90% cost savings on cached tokens
+    enabled: process.env.PROMPT_CACHING_ENABLED !== 'false',
+  },
+
   // Context compaction (Story 2.6) - all optional; handler applies safe defaults
   compactionThreshold: parseOptionalFloat('COMPACTION_THRESHOLD'),
   compactionKeepLastN: parseOptionalInt('COMPACTION_KEEP_LAST_N'),

@@ -261,7 +261,7 @@ export function sanitizeCodeOutput(
   options?: SanitizeOptions
 ): string {
   // Handle null/undefined gracefully
-  if (raw == null) {
+  if (raw === null || raw === undefined) {
     return '';
   }
 
@@ -271,8 +271,6 @@ export function sanitizeCodeOutput(
 
   let inMultilineImport = false;
   let inTraceback = false;
-  let tracebackErrorLine: string | null = null;
-  let tracebackIndentedCode = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
@@ -280,8 +278,6 @@ export function sanitizeCodeOutput(
     // Handle traceback detection and filtering
     if (isTracebackStart(line)) {
       inTraceback = true;
-      tracebackErrorLine = null;
-      tracebackIndentedCode = false;
       continue;
     }
 
@@ -292,7 +288,6 @@ export function sanitizeCodeOutput(
       if (trimmed.length > 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
         // This is likely the error line (e.g., "ValueError: Invalid data")
         if (!trimmed.startsWith('File ')) {
-          tracebackErrorLine = trimmed;
           inTraceback = false;
 
           // Add placeholder for the filtered stack trace
@@ -309,9 +304,8 @@ export function sanitizeCodeOutput(
         continue;
       }
 
-      // Check for indented code lines in traceback
+      // Check for indented code lines in traceback - skip them
       if (line.startsWith('    ') && !line.trim().startsWith('File ')) {
-        tracebackIndentedCode = true;
         continue;
       }
 

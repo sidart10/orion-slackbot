@@ -147,11 +147,11 @@ development_status:
   # Bug Fix (2026-01-12): Story 8.6 added - Tool Search missing tool_search_tool_bm25
   # See: sprint-change-proposal-2026-01-12-tool-search-bugfix.md
   # Completed (2026-01-12): Manual verification confirmed tool_search works
-  epic-8: done
-  8-1-anthropic-citations-api: done
-  8-2-tool-search-tool: done  # Bug found: missing tool_search_tool_bm25 → Story 8.6
-  8-3-slack-file-ingestion: done
-  8-4-mcp-auth-fix-ptc: done
-  8-5-tool-call-summary-cleanup: done
-  8-6-tool-search-bugfix: done  # Manual verification by Sid (2026-01-12)
-  epic-8-retrospective: done
+  epic-8: in-progress
+  8-1-anthropic-citations-api: ready-for-dev
+  8-2-tool-search-tool: done
+  8-3-slack-file-ingestion: backlog
+  8-4-mcp-auth-fix-ptc: done  # Implemented 2026-01-11, retroactive story 2026-01-12
+  8-5-tool-call-summary-cleanup: done  # Implemented 2026-01-09 to 2026-01-11, retroactive story 2026-01-12
+  8-6-tool-search-bugfix: ready-for-dev  # Story context compiled 2026-01-12
+  epic-8-retrospective: optional

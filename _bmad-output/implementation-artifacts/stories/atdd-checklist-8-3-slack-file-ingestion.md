@@ -1,610 +1,405 @@
-# ATDD Checklist: 8-3-slack-file-ingestion
+# ATDD Checklist: Story 8.3 - Slack File Ingestion for Claude Context
 
-Status: pending
-Story: [Story 8.3: Slack File Ingestion for Claude Context](/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/_bmad-output/implementation-artifacts/stories/story-8-3-slack-file-ingestion.md)
+**Story:** 8-3-slack-file-ingestion
+**Epic:** 8
+**Status:** Test scenarios defined
 
 ---
 
-## AC1: Detect `files` array in Slack `message` events (both DM and channel)
+## Test Scenario Overview
+
+| Category | Count |
+|----------|-------|
+| Happy Path Tests | 22 |
+| Edge Case Tests | 14 |
+| Error Handling Tests | 12 |
+| Boundary Condition Tests | 8 |
+| Integration Tests | 5 |
+| **Total** | **61** |
+
+---
+
+## AC #1: File Detection in Handler
+
+**Given** a message with attached files, **When** the handler processes the message, **Then** the `files` array in the event is detected
 
 ### Happy Path
-- [ ] Test: Detect files in DM message event
-  - Given: A Slack `message` event with `files` array containing one file
-  - When: `user-message.ts` handler processes the event
-  - Then: Files are detected and extraction logic is invoked
 
-- [ ] Test: Detect files in channel mention event
-  - Given: A Slack `app_mention` event with `files` array containing one file
-  - When: `app-mention.ts` handler processes the event
-  - Then: Files are detected and extraction logic is invoked
+- [ ] **T1.1** Message with single file attachment has `event.files` array detected
+- [ ] **T1.2** Handler logs detection with file count
 
 ### Edge Cases
-- [ ] Test: Empty files array
-  - Given: A message event with `files: []`
-  - When: Handler processes the event
-  - Then: No file processing is attempted, message proceeds normally
 
-- [ ] Test: Missing files property
-  - Given: A message event without `files` property
-  - When: Handler processes the event
-  - Then: No file processing is attempted, message proceeds normally
+- [ ] **T1.3** Message without files has `event.files` as undefined or empty array
+- [ ] **T1.4** Message with `files: []` (empty array) is handled gracefully
 
 ### Error Handling
-- [ ] Test: Malformed files array (non-array value)
-  - Given: A message event with `files` as non-array (e.g., `null`, string)
-  - When: Handler processes the event
-  - Then: Files property is safely ignored, message proceeds normally
+
+- [ ] **T1.5** Malformed files array (non-array type) does not crash handler
 
 ---
 
-## AC2: Support multiple files in a single message (process all)
+## AC #2: Batch Processing Multiple Files
+
+**Given** multiple files in a single message, **When** files are ingested, **Then** all files are processed (batch operation)
 
 ### Happy Path
-- [ ] Test: Process all files in multi-file message
-  - Given: A message event with 3 files attached
-  - When: Handler processes the event
-  - Then: All 3 files are processed sequentially
 
-- [ ] Test: Create document blocks for all files
-  - Given: 3 valid files successfully uploaded to Anthropic
-  - When: Document blocks are built
-  - Then: 3 document blocks are created with correct file_ids
+- [ ] **T2.1** Two files attached are both processed
+- [ ] **T2.2** Five files attached are all processed in parallel
+- [ ] **T2.3** BatchIngestionResult contains results for each file
 
 ### Edge Cases
-- [ ] Test: Mixed valid and invalid files
-  - Given: 3 files where file[0] is valid, file[1] is unsupported type, file[2] is valid
-  - When: Handler processes the event
-  - Then: Files 0 and 2 produce document blocks, file 1 produces user-friendly error message
 
-- [ ] Test: Maximum files in single message (10 files)
-  - Given: A message with 10 attached files
-  - When: Handler processes the event
-  - Then: All 10 files are processed without timeout or memory issues
+- [ ] **T2.4** Mixed success/failure batch (some files succeed, some fail)
+- [ ] **T2.5** Single file in batch still uses batch processing path
+
+### Boundary Conditions
+
+- [ ] **T2.6** Ten files processed (reasonable upper bound)
+
+---
+
+## AC #3: Logging File Metadata
+
+**Given** a message with files, **When** files are detected, **Then** a log entry is created with file count, names, and sizes
+
+### Happy Path
+
+- [ ] **T3.1** Log includes `file.ingestion.start` event with traceId
+- [ ] **T3.2** Log includes filename, mimetype, and size in metadata
+- [ ] **T3.3** Batch completion log includes totalFiles, successCount, failureCount
+
+### Edge Cases
+
+- [ ] **T3.4** Very long filename (255 characters) is logged without truncation issues
+
+---
+
+## AC #4: Download from url_private_download
+
+**Given** a Slack file URL, **When** download is requested, **Then** the content is fetched from `url_private_download`
+
+### Happy Path
+
+- [ ] **T4.1** Download uses `url_private_download` field, not `url_private`
+- [ ] **T4.2** Downloaded content matches original file bytes
+
+### Edge Cases
+
+- [ ] **T4.3** File with special characters in name downloads correctly
+
+---
+
+## AC #5: Authentication Header
+
+**Given** a download request, **When** authentication is needed, **Then** the Slack bot token is used in Authorization header
+
+### Happy Path
+
+- [ ] **T5.1** Request includes `Authorization: Bearer {botToken}` header
+- [ ] **T5.2** Bot token from config.slack.botToken is used
 
 ### Error Handling
-- [ ] Test: Partial failure scenario
-  - Given: 3 files where file[1] fails download
-  - When: Handler processes the event
-  - Then: Files 0 and 2 succeed, error logged for file 1, user informed about file 1 failure
+
+- [ ] **T5.3** Missing bot token returns clear error (not crash)
+- [ ] **T5.4** Expired token returns 401 with user-friendly message
 
 ---
 
-## AC3: Log file metadata to Langfuse for observability
+## AC #6: Download Failure Handling
+
+**Given** a download failure, **When** the error is caught, **Then** a user-friendly message is returned (not a crash)
 
 ### Happy Path
-- [ ] Test: Log file metadata on detection
-  - Given: A file with name="report.pdf", type="application/pdf", size=1048576
-  - When: File is detected in handler
-  - Then: Langfuse event logged with file metadata including name, type, size
 
-- [ ] Test: Include traceId in log entry
-  - Given: A request with traceId="abc123"
-  - When: File metadata is logged
-  - Then: Log entry includes traceId="abc123"
-
-### Edge Cases
-- [ ] Test: Log metadata for files with special characters in name
-  - Given: File with name="quarterly report (Q4).pdf"
-  - When: Metadata is logged
-  - Then: Filename logged correctly without escaping issues
-
----
-
-## AC4: Download file content via Slack API using `url_private_download`
-
-### Happy Path
-- [ ] Test: Successful file download
-  - Given: SlackFile with valid `url_private_download`
-  - When: `downloadSlackFile()` is called
-  - Then: Returns `DownloadedFile` with Buffer content, filename, mimetype, size, slackFileId
-
-- [ ] Test: Download returns correct buffer content
-  - Given: A 10KB test file at url_private_download
-  - When: Download completes
-  - Then: Buffer contains exact bytes from source, size matches expected
-
-### Edge Cases
-- [ ] Test: Large file download (50MB)
-  - Given: A 50MB PDF file
-  - When: Download is initiated
-  - Then: Download completes successfully without memory issues
-
-- [ ] Test: Download with slow connection (simulate latency)
-  - Given: URL responds with 2-second delay
-  - When: Download is initiated
-  - Then: Download completes successfully, no premature timeout
-
----
-
-## AC5: Use bot token for authentication (`Authorization: Bearer ${SLACK_BOT_TOKEN}`)
-
-### Happy Path
-- [ ] Test: Request includes correct Authorization header
-  - Given: config.slackBotToken = "xoxb-test-token"
-  - When: `downloadSlackFile()` calls fetch
-  - Then: Request headers include `Authorization: Bearer xoxb-test-token`
+- [ ] **T6.1** Failed download returns FileIngestionResult with error, not exception
+- [ ] **T6.2** Error includes DOWNLOAD_FAILED code
 
 ### Error Handling
-- [ ] Test: Invalid bot token returns 401
-  - Given: Invalid or expired bot token
-  - When: Download is attempted
-  - Then: FileDownloadError thrown with status 401, logged, user informed
 
-- [ ] Test: Token lacks file access scope
-  - Given: Bot token without `files:read` scope
-  - When: Download is attempted
-  - Then: FileDownloadError thrown with status 403, logged, user informed
+- [ ] **T6.3** Network timeout (30s) returns timeout error
+- [ ] **T6.4** HTTP 404 returns file not found error
+- [ ] **T6.5** HTTP 500 from Slack returns service error
 
 ---
 
-## AC6: Handle download failures gracefully (log error, inform user, continue without file)
+## AC #7: File Size Validation Before Download
+
+**Given** a file size validation, **When** the file exceeds limits, **Then** download is rejected with size limit error
 
 ### Happy Path
-- [ ] Test: Single file download failure does not block message
-  - Given: Message with 1 file that fails to download
-  - When: Handler processes message
-  - Then: Error logged, user informed via Slack, text message still processed
+
+- [ ] **T7.1** File under limit proceeds to download
+- [ ] **T7.2** File at exact limit (100MB for PDF) proceeds to download
+
+### Boundary Conditions
+
+- [ ] **T7.3** PDF at 100MB (exact limit) passes validation
+- [ ] **T7.4** PDF at 100MB + 1 byte fails validation
+- [ ] **T7.5** Image at 20MB passes validation
+- [ ] **T7.6** Image at 20MB + 1 byte fails validation
 
 ### Error Handling
-- [ ] Test: Network timeout during download
-  - Given: url_private_download times out after 30s
-  - When: Download is attempted
-  - Then: FileDownloadError logged, user informed "File no longer available or download timed out"
 
-- [ ] Test: HTTP 404 from Slack (file deleted)
-  - Given: url_private_download returns 404
-  - When: Download is attempted
-  - Then: Error logged, user informed "File no longer available"
-
-- [ ] Test: HTTP 500 from Slack (server error)
-  - Given: url_private_download returns 500
-  - When: Download is attempted
-  - Then: Error logged, user informed "Failed to download file, please try again"
+- [ ] **T7.7** FILE_TOO_LARGE error code returned
+- [ ] **T7.8** Error message includes actual size and limit
 
 ---
 
-## AC7: Respect file size limits (max 100MB per file)
+## AC #8: Upload to Anthropic Files API
+
+**Given** a downloaded file buffer, **When** upload is requested, **Then** the buffer is uploaded to Anthropic Files API
 
 ### Happy Path
-- [ ] Test: Accept file at exactly 100MB
-  - Given: SlackFile with size = 104857600 (100MB exact)
-  - When: Size validation runs
-  - Then: File passes validation, download proceeds
 
-### Edge Cases
-- [ ] Test: Reject file at 100MB + 1 byte
-  - Given: SlackFile with size = 104857601
-  - When: Size validation runs
-  - Then: FileTooLargeError thrown, download not attempted
+- [ ] **T8.1** Buffer is passed to FilesApiClient.uploadBuffer()
+- [ ] **T8.2** Upload returns valid file_id starting with "file-"
+- [ ] **T8.3** Original filename is preserved in upload
 
 ### Error Handling
-- [ ] Test: Size validation before download (don't download then reject)
-  - Given: SlackFile with size = 200MB in metadata
-  - When: `downloadSlackFile()` is called
-  - Then: FileTooLargeError thrown immediately without initiating download
+
+- [ ] **T8.4** API failure returns UPLOAD_FAILED error code
 
 ---
 
-## AC8: Upload downloaded file to Anthropic Files API
+## AC #9: Reuse Existing FilesApiClient
+
+**Given** upload implementation, **When** code is written, **Then** existing `FilesApiClient` is reused (not duplicated)
 
 ### Happy Path
-- [ ] Test: Successful upload to Anthropic
-  - Given: DownloadedFile with valid content, filename, mimetype
-  - When: `FilesApiClient.uploadBuffer()` is called
-  - Then: Returns file object with `id` field
 
-- [ ] Test: Upload preserves filename
-  - Given: DownloadedFile with filename="report.pdf"
-  - When: Upload completes
-  - Then: Anthropic file metadata includes original filename
+- [ ] **T9.1** Import is from `src/files/api-client.ts`
+- [ ] **T9.2** No duplicate Files API implementation in slack/files/
+
+---
+
+## AC #10: Langfuse Tracking
+
+**Given** upload success/failure, **When** the operation completes, **Then** outcome is tracked in Langfuse
+
+### Happy Path
+
+- [ ] **T10.1** `file.ingestion.start` event fired at beginning
+- [ ] **T10.2** `file.ingestion.success` event includes anthropicFileId and durationMs
+- [ ] **T10.3** `file.ingestion.failure` event includes errorCode and error message
+- [ ] **T10.4** `file.ingestion.batch_complete` event fired for batch operations
+
+---
+
+## AC #11: Document Block Creation
+
+**Given** a successful upload, **When** the file ID is returned, **Then** a document block is created with `source.type: file` and `file_id`
+
+### Happy Path
+
+- [ ] **T11.1** Document block has `type: 'document'`
+- [ ] **T11.2** Document block has `source.type: 'file'`
+- [ ] **T11.3** Document block has correct `file_id` from upload
+
+---
+
+## AC #12: Citations Integration
+
+**Given** a document block with file, **When** Citations (Story 8.1) is enabled, **Then** `citations: { enabled: true }` is included
+
+### Happy Path
+
+- [ ] **T12.1** Document block includes `citations: { enabled: true }`
+- [ ] **T12.2** Title field is populated with original filename
+
+---
+
+## AC #13: Document Blocks in Agent Loop
+
+**Given** file ingestion results, **When** passed to agent loop, **Then** `buildDocumentBlocks()` adds them to messages array
+
+### Happy Path
+
+- [ ] **T13.1** buildDocumentBlocks() returns array of content blocks
+- [ ] **T13.2** Blocks are added to user message content array
+- [ ] **T13.3** Empty results array returns empty blocks array
+
+---
+
+## AC #14: Unsupported File Type Error
+
+**Given** an unsupported file type, **When** validation runs, **Then** clear error message lists supported formats
+
+### Happy Path
+
+- [ ] **T14.1** `.exe` file returns UNSUPPORTED_TYPE error
+- [ ] **T14.2** Error message includes list of supported formats
 
 ### Edge Cases
-- [ ] Test: Upload file with unicode filename
-  - Given: filename = "rapport_annuel_2025.pdf"
-  - When: Upload completes
-  - Then: Filename preserved correctly in Anthropic response
+
+- [ ] **T14.3** Unknown MIME type `application/octet-stream` is rejected
+- [ ] **T14.4** File with no extension but valid MIME type is accepted
 
 ---
 
-## AC9: Reuse existing `FilesApiClient` from `src/files/api-client.ts` (Story 6.5)
+## AC #15-18: Size Limits by File Type
 
-### Happy Path
-- [ ] Test: Use existing uploadBuffer method signature
-  - Given: Existing `FilesApiClient.uploadBuffer(buffer, filename, mimeType, traceId)`
-  - When: File ingestion calls upload
-  - Then: Calls match existing method signature without modification
+**AC #15:** PDF max 100MB
+**AC #16:** Image max 20MB
+**AC #17:** CSV max 100MB
+**AC #18:** Text files max 100MB
 
-### Integration
-- [ ] Test: FilesApiClient instantiation uses config.anthropic.apiKey
-  - Given: Valid API key in config
-  - When: FilesApiClient is used
-  - Then: API calls authenticate successfully
+### Happy Path - PDF
 
----
+- [ ] **T15.1** PDF at 50MB passes validation
+- [ ] **T15.2** PDF at 100MB passes validation
+- [ ] **T15.3** PDF at 101MB fails with FILE_TOO_LARGE
 
-## AC10: Track upload success/failure in Langfuse
+### Happy Path - Images
 
-### Happy Path
-- [ ] Test: Log successful upload event
-  - Given: Successful upload returning file_id="file_abc123"
-  - When: Upload completes
-  - Then: Langfuse event logged with event="file.ingestion.success", fileId="file_abc123"
+- [ ] **T16.1** PNG at 10MB passes validation
+- [ ] **T16.2** JPG at 20MB passes validation
+- [ ] **T16.3** GIF at 21MB fails with FILE_TOO_LARGE
+- [ ] **T16.4** WebP at 20MB passes validation
 
-### Error Handling
-- [ ] Test: Log failed upload event
-  - Given: Upload fails with error "RATE_LIMIT"
-  - When: Upload throws error
-  - Then: Langfuse event logged with event="file.ingestion.failed", error="RATE_LIMIT"
+### Happy Path - CSV
 
----
+- [ ] **T17.1** CSV at 50MB passes validation
+- [ ] **T17.2** CSV with `text/csv` MIME type passes
+- [ ] **T17.3** CSV with `application/csv` MIME type passes
 
-## AC11: Create document block with `file_id` reference for each uploaded file
+### Happy Path - Text Files
 
-### Happy Path
-- [ ] Test: Build document block with correct structure
-  - Given: file_id="file_abc123", filename="report.pdf"
-  - When: `buildDocumentBlock()` is called
-  - Then: Returns `{ type: 'document', source: { type: 'file', file_id: 'file_abc123' }, title: 'report.pdf', citations: { enabled: true } }`
-
-- [ ] Test: Multiple files produce multiple document blocks
-  - Given: 3 uploaded files with file_ids
-  - When: `buildDocumentBlocks()` processes all
-  - Then: Returns array of 3 document blocks with matching file_ids
+- [ ] **T18.1** `.txt` file at 100MB passes
+- [ ] **T18.2** `.md` file at 50MB passes
+- [ ] **T18.3** `.json` file at 100MB passes
+- [ ] **T18.4** `.xml` file at 100MB passes
+- [ ] **T18.5** `.yaml` and `.yml` files pass
 
 ---
 
-## AC12: Enable `citations: { enabled: true }` on document blocks (pairs with Story 8.1)
+## AC #19: Supported Formats List
+
+**Given** unsupported file type, **When** error is shown, **Then** supported formats are listed: PDF, PNG, JPG, GIF, CSV, TXT, MD, JSON, XML, YAML
 
 ### Happy Path
-- [ ] Test: Citations enabled by default
-  - Given: Any valid file upload
-  - When: Document block is built
-  - Then: Block includes `citations: { enabled: true }`
+
+- [ ] **T19.1** Error message includes "PDF, PNG, JPG, GIF, CSV, TXT, MD, JSON, XML, YAML"
+- [ ] **T19.2** formatSupportedTypes() returns correct list
+
+---
+
+## AC #20: Size Error Details
+
+**Given** a file too large, **When** error is shown, **Then** message includes actual size and limit
+
+### Happy Path
+
+- [ ] **T20.1** Error message includes actual file size (e.g., "150 MB")
+- [ ] **T20.2** Error message includes limit (e.g., "Maximum for PDF is 100 MB")
+- [ ] **T20.3** formatFileSize() correctly formats bytes to human-readable
 
 ### Edge Cases
-- [ ] Test: Forward compatibility with Story 8.1
-  - Given: Story 8.1 Citations API not yet active
-  - When: Document block with citations is sent to Anthropic
-  - Then: API accepts request without error (citations field is ignored if feature not enabled)
+
+- [ ] **T20.4** Size formatting handles KB (< 1MB)
+- [ ] **T20.5** Size formatting handles GB (> 1024MB)
 
 ---
 
-## AC13: Include document blocks in messages array before calling agent loop
+## AC #21: Download Failure Suggestions
+
+**Given** download failure, **When** error is shown, **Then** message suggests retry or smaller file
 
 ### Happy Path
-- [ ] Test: Document blocks prepended to first user message
-  - Given: User message "Analyze this file" with 1 document block
-  - When: Agent loop messages are constructed
-  - Then: First user message content array starts with document block, followed by text
 
-- [ ] Test: Agent can reference document content
-  - Given: PDF document block included in messages
-  - When: Claude processes the message
-  - Then: Claude can summarize/quote content from the document
-
-### Edge Cases
-- [ ] Test: Message with only document blocks (no text)
-  - Given: User uploads file with no accompanying text
-  - When: Messages are constructed
-  - Then: User message contains only document blocks, request proceeds
+- [ ] **T21.1** Error message includes "Try again" suggestion
+- [ ] **T21.2** Error message includes "smaller file" suggestion for large files
 
 ---
 
-## AC14: Handle unsupported file types gracefully (inform user, skip file)
+## AC #22: End-to-End Pipeline
 
-### Happy Path
-- [ ] Test: Skip unsupported type, continue with supported
-  - Given: Message with [file.pdf, file.zip, file.txt]
-  - When: Processing runs
-  - Then: PDF and TXT processed, ZIP skipped with user message
+**Given** the file ingestion flow, **When** complete, **Then** full pipeline works: Slack -> download -> upload -> document block -> Claude
 
-### Error Handling
-- [ ] Test: Inform user of unsupported type
-  - Given: User uploads file.zip
-  - When: Type validation fails
-  - Then: User sees Slack message: "Unable to process file.zip: Unsupported file type. Supported types: PDF, images (PNG, JPG, GIF, WebP), CSV, text files (TXT, MD, JSON, XML, YAML)"
+### Integration Tests
+
+- [ ] **T22.1** E2E: PDF file flows through entire pipeline
+- [ ] **T22.2** E2E: Image file flows through entire pipeline
+- [ ] **T22.3** E2E: Document blocks appear in Claude request
+- [ ] **T22.4** E2E: user-message.ts handler processes file attachment
+- [ ] **T22.5** E2E: app-mention.ts handler processes file attachment
 
 ---
 
-## AC15: PDF files (`.pdf`) - max 100MB
+## Additional Edge Cases
 
-### Happy Path
-- [ ] Test: Accept valid PDF file
-  - Given: File with name="report.pdf", mimetype="application/pdf", size=5MB
-  - When: Format validation runs
-  - Then: File accepted, processing continues
+### Zero-Byte Files
 
-### Edge Cases
-- [ ] Test: Accept PDF with uppercase extension
-  - Given: File with name="REPORT.PDF"
-  - When: Format validation runs
-  - Then: File accepted (case-insensitive extension check)
+- [ ] **T-E1** Zero-byte file returns ZERO_BYTE_FILE error
+- [ ] **T-E2** Error message indicates "File has no content"
 
-- [ ] Test: Reject oversized PDF (>100MB)
-  - Given: PDF file with size=150MB
-  - When: Size validation runs
-  - Then: FileTooLargeError with message indicating 100MB limit for PDFs
+### Expired URLs
 
----
+- [ ] **T-E3** Expired Slack file URL returns FILE_EXPIRED error
+- [ ] **T-E4** Error message suggests re-uploading the file
 
-## AC16: Images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`) - max 20MB
+### Concurrent Processing
 
-### Happy Path
-- [ ] Test: Accept valid PNG image
-  - Given: File with name="chart.png", mimetype="image/png", size=2MB
-  - When: Validation runs
-  - Then: File accepted
+- [ ] **T-E5** Multiple files process in parallel (Promise.allSettled behavior)
+- [ ] **T-E6** One file failure does not block other files
 
-- [ ] Test: Accept valid JPEG image
-  - Given: File with name="photo.jpg", mimetype="image/jpeg", size=5MB
-  - When: Validation runs
-  - Then: File accepted
+### Type Detection
 
-### Edge Cases
-- [ ] Test: Accept WebP image
-  - Given: File with name="animation.webp", mimetype="image/webp", size=1MB
-  - When: Validation runs
-  - Then: File accepted
-
-- [ ] Test: Reject oversized image (>20MB)
-  - Given: PNG file with size=25MB
-  - When: Size validation runs
-  - Then: FileTooLargeError with message indicating 20MB limit for images
-
----
-
-## AC17: CSV files (`.csv`) - max 100MB
-
-### Happy Path
-- [ ] Test: Accept valid CSV file
-  - Given: File with name="data.csv", mimetype="text/csv", size=10MB
-  - When: Validation runs
-  - Then: File accepted
-
-### Edge Cases
-- [ ] Test: Accept CSV with alternate mimetype
-  - Given: File with name="export.csv", mimetype="application/csv", size=5MB
-  - When: Validation runs
-  - Then: File accepted (check extension as fallback)
-
----
-
-## AC18: Text files (`.txt`, `.md`, `.json`, `.xml`, `.yaml`, `.yml`) - max 100MB
-
-### Happy Path
-- [ ] Test: Accept TXT file
-  - Given: File with name="notes.txt", mimetype="text/plain", size=100KB
-  - When: Validation runs
-  - Then: File accepted
-
-- [ ] Test: Accept Markdown file
-  - Given: File with name="README.md", mimetype="text/markdown", size=50KB
-  - When: Validation runs
-  - Then: File accepted
-
-- [ ] Test: Accept JSON file
-  - Given: File with name="config.json", mimetype="application/json", size=1MB
-  - When: Validation runs
-  - Then: File accepted
-
-- [ ] Test: Accept YAML file
-  - Given: File with name="config.yaml", mimetype="application/x-yaml", size=500KB
-  - When: Validation runs
-  - Then: File accepted
-
-### Edge Cases
-- [ ] Test: Accept .yml extension (alias for YAML)
-  - Given: File with name="docker-compose.yml"
-  - When: Validation runs
-  - Then: File accepted
-
----
-
-## AC19: Reject unsupported formats with helpful message listing supported types
-
-### Happy Path
-- [ ] Test: Reject .zip file with helpful message
-  - Given: File with name="archive.zip", mimetype="application/zip"
-  - When: Validation runs
-  - Then: UnsupportedFileTypeError with message listing all supported types
-
-- [ ] Test: Reject .exe file with helpful message
-  - Given: File with name="program.exe", mimetype="application/octet-stream"
-  - When: Validation runs
-  - Then: UnsupportedFileTypeError with clear guidance
-
-### Edge Cases
-- [ ] Test: Reject .docx file (Word not supported yet)
-  - Given: File with name="document.docx"
-  - When: Validation runs
-  - Then: UnsupportedFileTypeError, message suggests converting to PDF
-
----
-
-## AC20: File too large - Inform user of size limit
-
-### Happy Path
-- [ ] Test: User message specifies correct limit for file type
-  - Given: 150MB PDF file rejected
-  - When: Error message sent to user
-  - Then: Message includes "File is too large (150MB). Maximum size for PDFs: 100MB"
-
-- [ ] Test: Image size limit communicated correctly
-  - Given: 30MB PNG image rejected
-  - When: Error message sent to user
-  - Then: Message includes "File is too large (30MB). Maximum size for images: 20MB"
-
----
-
-## AC21: Download failed - Log error, inform user, continue processing text message
-
-### Happy Path
-- [ ] Test: Text message processed despite download failure
-  - Given: Message "Analyze this report" with 1 file that fails download
-  - When: Handler processes message
-  - Then: Claude receives text message, user informed about file failure, agent responds
-
-### Error Handling
-- [ ] Test: Error logged with full context
-  - Given: Download fails with HTTP 503
-  - When: Error is caught
-  - Then: Log includes traceId, filename, HTTP status, "file.ingestion.failed" event
-
----
-
-## AC22: Upload failed - Log error, inform user, continue processing text message
-
-### Happy Path
-- [ ] Test: Text message processed despite upload failure
-  - Given: Message with file that downloads but fails Anthropic upload
-  - When: Handler processes message
-  - Then: Claude receives text message, user informed about file failure
-
-### Error Handling
-- [ ] Test: Anthropic rate limit handled gracefully
-  - Given: Anthropic Files API returns 429
-  - When: Upload fails
-  - Then: User informed "File upload temporarily unavailable, please try again", text processed
-
----
-
-## AC23: Unsupported type - Inform user of supported types
-
-### Happy Path
-- [ ] Test: Clear error message for unsupported type
-  - Given: User uploads file.pptx
-  - When: Type validation fails
-  - Then: User sees "Unsupported file type '.pptx'. Supported: PDF, images (PNG, JPG, JPEG, GIF, WebP), CSV, text (TXT, MD, JSON, XML, YAML, YML)"
-
----
-
-## AC24: Track file ingestion metrics in Langfuse (count, types, sizes, success rate)
-
-### Happy Path
-- [ ] Test: Track file count per request
-  - Given: Message with 3 files
-  - When: Processing completes
-  - Then: Langfuse trace includes metadata: fileCount=3
-
-- [ ] Test: Track file types distribution
-  - Given: 2 PDFs, 1 PNG
-  - When: Processing completes
-  - Then: Langfuse metadata includes: fileTypes=["pdf", "pdf", "png"]
-
-- [ ] Test: Track total size uploaded
-  - Given: Files totaling 15MB
-  - When: Processing completes
-  - Then: Langfuse metadata includes: totalSize=15728640
-
-### Error Handling
-- [ ] Test: Track success rate
-  - Given: 3 files, 2 succeed, 1 fails
-  - When: Processing completes
-  - Then: Langfuse includes: successCount=2, failureCount=1
-
----
-
-## AC25: Include file metadata in trace for debugging
-
-### Happy Path
-- [ ] Test: Trace includes per-file metadata
-  - Given: File "report.pdf" uploaded as file_abc123
-  - When: Trace is recorded
-  - Then: Trace includes: { slackFileId, filename, mimetype, size, anthropicFileId, status }
-
-- [ ] Test: Failed files include error details in trace
-  - Given: File "large.zip" rejected as unsupported
-  - When: Trace is recorded
-  - Then: Trace includes: { filename: "large.zip", status: "failed", error: "unsupported_type" }
-
----
-
-## Integration Tests
-
-### End-to-End Flow
-- [ ] Test: Complete flow - Slack file to document block
-  - Given: User uploads PDF in Slack DM
-  - When: Full pipeline executes
-  - Then: Document block with file_id reaches agent loop, Claude can reference content
-
-- [ ] Test: Multi-file message end-to-end
-  - Given: User uploads PDF + PNG + CSV in single message
-  - When: Full pipeline executes
-  - Then: 3 document blocks created, all accessible to Claude
-
-### Error Recovery
-- [ ] Test: Graceful degradation on Anthropic API outage
-  - Given: Anthropic Files API is unavailable
-  - When: User uploads file
-  - Then: Text message still processed, user informed files couldn't be processed
-
-- [ ] Test: Continue on Slack API rate limit
-  - Given: Slack rate limits file downloads mid-batch
-  - When: 5 file batch is processing
-  - Then: Successfully downloaded files processed, rate-limited ones logged with retry guidance
-
----
-
-## Summary
-
-| Category | Test Count |
-|----------|------------|
-| File Detection (AC1-3) | 11 |
-| File Download (AC4-7) | 15 |
-| File Upload (AC8-10) | 7 |
-| Document Blocks (AC11-14) | 10 |
-| Supported Formats (AC15-19) | 17 |
-| Error Handling (AC20-23) | 8 |
-| Observability (AC24-25) | 7 |
-| Integration | 4 |
-| **Total** | **79** |
+- [ ] **T-E7** MIME type detection uses Slack-provided mimetype
+- [ ] **T-E8** File extension used as fallback when MIME type missing
 
 ---
 
 ## Test Implementation Notes
 
-Per `project-context.md`:
+### Mocking Requirements
 
-1. **Test Framework:** Vitest 1.6.0 with co-located test files (`*.test.ts`)
-2. **Mocking:** Use Vitest mocks for fetch, FilesApiClient, Langfuse
-3. **ESM Imports:** All test imports must use `.js` extension
-4. **traceId:** Include in all test scenarios for observability verification
-5. **Error Messages:** Use Slack mrkdwn format (`*bold*` not `**bold**`)
+| Component | Mock Strategy |
+|-----------|---------------|
+| Slack file download | Mock fetch with test buffers |
+| Anthropic Files API | Mock FilesApiClient.uploadBuffer() |
+| Langfuse | Spy on event() calls |
+| Config | Inject test bot token |
 
-### Mock Patterns
+### Test Data Requirements
 
-```typescript
-// Mock Slack file download
-vi.spyOn(global, 'fetch').mockResolvedValue(
-  new Response(Buffer.from('test content'), { status: 200 })
-);
+| File Type | Test Files Needed |
+|-----------|-------------------|
+| PDF | sample.pdf (small), large.pdf (> 100MB) |
+| Images | sample.png, sample.jpg, sample.gif, sample.webp |
+| CSV | sample.csv, large.csv |
+| Text | sample.txt, sample.md, sample.json |
 
-// Mock Files API client
-vi.mock('../files/api-client.js', () => ({
-  FilesApiClient: vi.fn().mockImplementation(() => ({
-    uploadBuffer: vi.fn().mockResolvedValue({ id: 'file_test123' }),
-  })),
-}));
+### Coverage Requirements
 
-// Mock Langfuse
-vi.mock('../observability/langfuse.js', () => ({
-  langfuse: {
-    event: vi.fn(),
-    trace: vi.fn(),
-  },
-}));
-```
+- Unit tests: All validation functions in `types.ts`
+- Unit tests: Download flow in `download.ts`
+- Unit tests: Ingestion orchestration in `ingestion.ts`
+- Unit tests: Block builder in `document-blocks.ts`
+- Integration tests: Handler file detection
 
-### Test Data Fixtures
+---
 
-```typescript
-// src/slack/files/__fixtures__/slack-file.ts
-export const mockSlackFile: SlackFile = {
-  id: 'F1234567890',
-  name: 'test-report.pdf',
-  mimetype: 'application/pdf',
-  filetype: 'pdf',
-  size: 1048576, // 1MB
-  url_private_download: 'https://files.slack.com/files-pri/T123-F123/download/test-report.pdf',
-};
-```
+## Verification Checklist
+
+Before marking story complete:
+
+- [ ] All happy path tests passing
+- [ ] All edge case tests passing
+- [ ] All error handling tests passing
+- [ ] All boundary condition tests passing
+- [ ] Integration tests demonstrate full pipeline
+- [ ] Langfuse events verified in test output
+- [ ] No console.log statements (use logger)
+- [ ] All imports use .js extension
+- [ ] Code review completed
+
+---
+
+## References
+
+- [Story 8.3](/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/_bmad-output/implementation-artifacts/stories/story-8-3-slack-file-ingestion.md)
+- [Project Context](/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/_bmad-output/project-context.md)
+- [Anthropic Files API](https://docs.anthropic.com/en/docs/build-with-claude/files)
+- [Slack File Object](https://api.slack.com/types/file)

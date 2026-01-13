@@ -68,64 +68,6 @@ const HTTP_MEDIA_URL_PATTERN = new RegExp(
   'gi'
 );
 
-/** Supported MIME types for Slack upload */
-const MEDIA_MIME_TYPES: Record<string, string> = {
-  // Images
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  svg: 'image/svg+xml',
-  ico: 'image/x-icon',
-  tiff: 'image/tiff',
-  tif: 'image/tiff',
-  // Videos
-  mp4: 'video/mp4',
-  mov: 'video/quicktime',
-  avi: 'video/x-msvideo',
-  mkv: 'video/x-matroska',
-  webm: 'video/webm',
-  m4v: 'video/x-m4v',
-  flv: 'video/x-flv',
-  wmv: 'video/x-ms-wmv',
-  // Audio
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  ogg: 'audio/ogg',
-  m4a: 'audio/mp4',
-  flac: 'audio/flac',
-  aac: 'audio/aac',
-  // Documents
-  pdf: 'application/pdf',
-  doc: 'application/msword',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xls: 'application/vnd.ms-excel',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ppt: 'application/vnd.ms-powerpoint',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  txt: 'text/plain',
-  rtf: 'application/rtf',
-  csv: 'text/csv',
-  // Web/Code
-  html: 'text/html',
-  htm: 'text/html',
-  css: 'text/css',
-  js: 'application/javascript',
-  json: 'application/json',
-  xml: 'application/xml',
-  yaml: 'text/yaml',
-  yml: 'text/yaml',
-  md: 'text/markdown',
-  // Archives
-  zip: 'application/zip',
-  tar: 'application/x-tar',
-  gz: 'application/gzip',
-  rar: 'application/vnd.rar',
-  '7z': 'application/x-7z-compressed',
-};
-
 interface ImageUploadResult {
   url: string;
   success: boolean;
@@ -236,14 +178,6 @@ function getFilenameFromUrl(url: string): string {
   } catch {
     return `image-${Date.now()}.png`;
   }
-}
-
-/**
- * Get MIME type from filename.
- */
-function getMimeType(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() || 'png';
-  return MEDIA_MIME_TYPES[ext] || 'application/octet-stream';
 }
 
 /**

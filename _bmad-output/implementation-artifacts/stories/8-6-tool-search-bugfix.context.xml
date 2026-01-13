@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="8-6-tool-search-bugfix" epic="8">
+  <metadata>
+    <created>2026-01-12T00:00:00Z</created>
+    <status>ready-for-dev</status>
+    <priority>P0 - Critical Bug Fix</priority>
+  </metadata>
+
+  <story>
+    <overview>
+      P0 bug fix for Story 8.2 implementation gap. The `tool_search_tool_bm25` built-in tool must be explicitly added to the tools array when deferred tools exist. Without it, Claude cannot discover MCP tools that have `defer_loading: true`, causing all deferred MCP tools to be invisible.
+
+      **Root Cause:** The SDK documentation shows `tool_search_tool_bm25_20251119` is a required built-in tool that must be explicitly added - it is NOT automatically provided by the API when deferred tools exist.
+
+      **Impact:** Blocks all MCP tool usage when Tool Search is enabled (default: `TOOL_SEARCH_ENABLED=true`).
+    </overview>
+
+    <user-story>
+      As a **platform operator**,
+      I want the `tool_search_tool_bm25` built-in tool to be explicitly added to the tools array when deferred tools exist,
+      So that Claude can discover and use MCP tools that have `defer_loading: true` enabled.
+    </user-story>
+
+    <acceptance-criteria>
+      <criterion id="1">
+        **Given** tool search is enabled AND deferred tools exist, **When** the agent loop builds the tools array, **Then** `tool_search_tool_bm25` is included with correct type and name
+      </criterion>
+      <criterion id="2">
+        **Given** tool search is disabled OR no deferred tools exist, **When** the agent loop builds the tools array, **Then** `tool_search_tool_bm25` is NOT included (no unnecessary tool)
+      </criterion>
+      <criterion id="3">
+        **Given** a model that does not support tool search, **When** the agent loop builds the tools array, **Then** `tool_search_tool_bm25` is NOT included (graceful fallback)
+      </criterion>
+      <criterion id="4">
+        **Given** tool_search_tool_bm25 is included, **When** Claude receives `tool_search_tool_result` blocks, **Then** the agent loop handles them correctly (no execution needed - API handles)
+      </criterion>
+    </acceptance-criteria>
+
+    <tasks>
+      <task id="1" status="complete" ac="1,2,3">
+        <title>Add tool_search_tool_bm25 to tools array</title>
+        <subtasks>
+          <subtask status="complete">Add conditional check for `willIncludeToolSearchTool`</subtask>
+          <subtask status="complete">Create `toolSearchTool` object with correct type/name</subtask>
+          <subtask status="complete">Add to tools array when condition is true</subtask>
+          <subtask status="complete">Verify type assertion matches SDK expectations</subtask>
+        </subtasks>
+      </task>
+      <task id="2" status="complete" ac="4">
+        <title>Handle tool_search_tool_result blocks</title>
+        <subtasks>
+          <subtask status="complete">Update server block handling in agent loop</subtask>
+          <subtask status="complete">Skip execution for `tool_search_tool_bm25` and `tool_search_tool_regex`</subtask>
+          <subtask status="complete">Log tool search discovery events</subtask>
+        </subtasks>
+      </task>
+      <task id="3" status="complete" ac="1,2,3">
+        <title>Unit Tests</title>
+        <subtasks>
+          <subtask status="complete">Test: tool_search_tool_bm25 included when deferred tools exist and tool search enabled</subtask>
+          <subtask status="complete">Test: tool_search_tool_bm25 excluded when tool search disabled</subtask>
+          <subtask status="complete">Test: tool_search_tool_bm25 excluded when no deferred tools exist</subtask>
+          <subtask status="complete">Test: tool_search_tool_bm25 excluded when model does not support tool search</subtask>
+        </subtasks>
+      </task>
+      <task id="4" status="complete" ac="all">
+        <title>Documentation</title>
+        <subtasks>
+          <subtask status="complete">Update project-context.md with explicit note about tool_search_tool_bm25</subtask>
+          <subtask status="complete">Update story 8.2 with known issue reference</subtask>
+          <subtask status="complete">Create sprint change proposal for audit trail</subtask>
+        </subtasks>
+      </task>
+    </tasks>
+
+    <dependencies>
+      <dependency type="prerequisite">Story 8.2 - Original tool search implementation (this fixes a gap)</dependency>
+      <dependency type="code">src/tools/registry.ts - defer_loading annotation support</dependency>
+      <dependency type="code">src/agent/model-capabilities.ts - supportsToolSearch() detection</dependency>
+      <dependency type="code">src/config/environment.ts - TOOL_SEARCH_ENABLED, CORE_TOOLS config</dependency>
+    </dependencies>
+
+    <technical-notes>
+      <note title="The Fix">
+        The fix adds `tool_search_tool_bm25` to the tools array when:
+        1. Tool search is enabled (`config.toolSearch.enabled`)
+        2. Model supports tool search (`supportsToolSearch(model)`)
+        3. Deferred tools exist (`deferredToolCount > 0`)
+
+        **Code Location:** `src/agent/loop.ts` (lines 709-731)
+      </note>
+
+      <note title="Implementation Pattern">
+        ```typescript
+        // Story 8.6: Add tool_search_tool_bm25 when deferred tools exist
+        const toolSearchTool = willIncludeToolSearchTool
+          ? {
+              type: 'tool_search_tool_bm25_20251119' as const,
+              name: 'tool_search_tool_bm25',
+            }
+          : null;
+
+        const tools = [
+          ...registryTools,
+          codeExecutionTool as unknown as Anthropic.Tool,
+          ...(memoryTool ? [memoryTool as unknown as Anthropic.Tool] : []),
+          ...(toolSearchTool ? [toolSearchTool as unknown as Anthropic.Tool] : []),
+        ];
+        ```
+      </note>
+
+      <note title="SDK Type Definition">
+        From `@anthropic-ai/sdk/resources/beta/messages/messages.d.ts`:
+        ```typescript
+        export interface BetaToolSearchToolBm2520251119 {
+            name: 'tool_search_tool_bm25';
+            type: 'tool_search_tool_bm25_20251119' | 'tool_search_tool_bm25';
+        }
+        ```
+      </note>
+
+      <note title="Tool Result Handling">
+        ```typescript
+        // src/agent/loop.ts (line 1138)
+        if (serverBlock.name === 'tool_search_tool_bm25' || serverBlock.name === 'tool_search_tool_regex') {
+          // Tool search results are handled by the API, we just log and continue
+          logger.debug({
+            event: 'agent.loop.tool_search_result',
+            traceId,
+            toolName: serverBlock.name,
+          });
+          continue;
+        }
+        ```
+      </note>
+
+      <note title="Verification">
+        Run the diagnostic script to verify tool search configuration:
+        ```bash
+        pnpm exec tsx scripts/diagnose-tool-search.ts
+        ```
+        Expected output when properly configured: `tool_search_tool_bm25 WILL be included`
+      </note>
+    </technical-notes>
+
+    <file-structure>
+      <file path="src/agent/loop.ts" purpose="tool_search_tool_bm25 addition (lines 709-731)" />
+      <file path="src/agent/loop.test.ts" purpose="Unit tests (lines 2726-2860)" />
+      <file path="src/agent/model-capabilities.ts" purpose="supportsToolSearch() detection" />
+      <file path="src/config/environment.ts" purpose="TOOL_SEARCH_ENABLED, CORE_TOOLS config" />
+      <file path="scripts/diagnose-tool-search.ts" purpose="Diagnostic script" />
+    </file-structure>
+  </story>
+
+  <tests>
+    <atdd-checklist-ref>atdd-checklist-8-6-tool-search-bugfix.md</atdd-checklist-ref>
+    <test-summary>
+      <total-tests>21</total-tests>
+      <covered>10</covered>
+      <new-needed>11</new-needed>
+      <by-type>
+        <happy-path count="3">AC#1 inclusion tests - all covered</happy-path>
+        <exclusion-scenarios count="3">AC#2 exclusion tests - 2 covered, 1 new needed</exclusion-scenarios>
+        <model-fallback count="4">AC#3 model capability tests - 3 covered, 1 new needed</model-fallback>
+        <result-handling count="3">AC#4 tool result handling - all 3 new needed</result-handling>
+        <observability count="2">Observability tests - all covered</observability>
+        <edge-cases count="4">Edge case tests - all 4 new needed</edge-cases>
+        <integration count="2">Integration tests - both manual</integration>
+      </by-type>
+    </test-summary>
+    <test-commands>
+      <command purpose="Run all Story 8.6 unit tests">pnpm test src/agent/loop.test.ts -t "Story 8.6"</command>
+      <command purpose="Run model capability tests">pnpm test src/agent/model-capabilities.test.ts</command>
+      <command purpose="Run diagnostic script">pnpm exec tsx scripts/diagnose-tool-search.ts</command>
+      <command purpose="Run full agent test suite">pnpm test src/agent/</command>
+    </test-commands>
+  </tests>
+
+  <architecture>
+    <relevant-sections>
+      <section title="Tool Search Tool (Story 8.2 in ADR)">
+        Tool Search reduces token usage when 100s of MCP tools available by lazy-loading tools on demand.
+
+        - Beta header required: `advanced-tool-use-2025-11-20` (already in allBetas)
+        - Configure MCP tools with `defer_loading: true` for Claude to discover on demand
+        - Model requirements: Sonnet 4.5+ or Opus 4.5+ (older models do not support tool search)
+        - Observability: Track token savings in Langfuse: `tool_search.tokens_saved`
+      </section>
+
+      <section title="Beta Headers Configuration">
+        All beta headers consolidated in `config.anthropic.allBetas`:
+        - context-management-2025-06-27 (Memory tool)
+        - advanced-tool-use-2025-11-20 (PTC + Tool Search)
+        - code-execution-2025-08-25 (Skills execution)
+        - skills-2025-10-02 (Skills API CRUD)
+        - files-api-2025-04-14 (File downloads)
+
+        **Rule:** Always use `config.anthropic.allBetas` in `messages.create()`. Never construct beta arrays inline.
+      </section>
+
+      <section title="Tool Registry Pattern">
+        Single source of truth for tool names:
+        ```typescript
+        export const TOOL_NAMES = [
+          'memory',
+          'search_slack_messages',
+          'execute_code',
+          'web_search',
+          'mcp_call',
+        ] as const;
+
+        export type ToolName = typeof TOOL_NAMES[number];
+        ```
+
+        Tool handlers registered via `toolHandlers: Record&lt;ToolName, ToolHandler&gt;`
+      </section>
+
+      <section title="Logging Pattern">
+        Every log entry should include:
+        - traceId (Langfuse trace)
+        - spanName (current operation)
+        - slackThreadTs (if in Slack context)
+
+        Levels: ERROR (user-impacting), WARN (degraded), INFO (key events), DEBUG (dev only)
+      </section>
+    </relevant-sections>
+
+    <patterns-to-follow>
+      <pattern name="ESM Imports">All imports use `.js` extension</pattern>
+      <pattern name="Logging">Uses `logger.*` with traceId for all log entries</pattern>
+      <pattern name="Config Access">Use `config.toolSearch.enabled` not direct env vars</pattern>
+      <pattern name="Type Safety">SDK type definitions respected, use type assertions when needed</pattern>
+      <pattern name="Conditional Tool Inclusion">Check config + model capability + tool state before including</pattern>
+    </patterns-to-follow>
+  </architecture>
+
+  <dev-record>
+    <agent-model>claude-opus-4-5-20250514 (Story creation)</agent-model>
+    <completion-status>Fix implemented - This story documents the completed bugfix</completion-status>
+    <debug-logs>
+      <log type="sprint-change-proposal">_bmad-output/sprint-change-proposal-2026-01-12-tool-search-bugfix.md</log>
+      <log type="validation-report">_bmad-output/implementation-artifacts/stories/validation-report-8-6-2026-01-12.md</log>
+    </debug-logs>
+    <files-modified>
+      <file>src/agent/loop.ts - tool_search_tool_bm25 addition and result handling</file>
+      <file>src/agent/loop.test.ts - unit tests for AC verification</file>
+      <file>_bmad-output/project-context.md - documentation update</file>
+      <file>_bmad-output/implementation-artifacts/stories/story-8-2-tool-search-tool.md - known issue note</file>
+      <file>scripts/diagnose-tool-search.ts - diagnostic script</file>
+    </files-modified>
+  </dev-record>
+
+  <references>
+    <reference type="sprint-change-proposal">_bmad-output/sprint-change-proposal-2026-01-12-tool-search-bugfix.md</reference>
+    <reference type="epic">_bmad-output/epics.md#Story 8.6</reference>
+    <reference type="project-context">_bmad-output/project-context.md#Tool Search</reference>
+    <reference type="implementation">src/agent/loop.ts#L709-731</reference>
+    <reference type="tests">src/agent/loop.test.ts#L2726-2860</reference>
+  </references>
+</story-context>

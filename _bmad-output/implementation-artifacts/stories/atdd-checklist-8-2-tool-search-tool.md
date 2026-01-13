@@ -1,378 +1,326 @@
 # ATDD Checklist: 8-2-tool-search-tool
 
-Story: Tool Search Tool Integration
-Status: ready-for-dev
+**Story:** Tool Search Tool Integration
+**Epic:** 8 - Platform Hardening
+**Status:** Test Design Complete
 
 ---
 
-## AC1: Tool Definition Enhancement
+## AC1: MCP Tools Annotated with defer_loading When Enabled
 
-MCP tools from `toolRegistry.getToolsForClaude()` include `defer_loading: true` property. Core tools (memory, code_execution) remain always-loaded. Static tools registered via `registerStaticTool` remain always-loaded.
+> **Given** `TOOL_SEARCH_ENABLED=true` (default), **When** MCP tools are registered, **Then** non-core tools are annotated with `defer_loading: true`
 
 ### Happy Path
-- [ ] Test: MCP tools receive defer_loading property
-  - Given: Tool registry has registered MCP tools (e.g., `RUBE_SEARCH_TOOLS`, `confluence__search_pages`)
-  - When: Calling `toolRegistry.getToolsForClaude()`
-  - Then: MCP tools have `defer_loading: true` in their definition
+- [x] Test: MCP tools receive defer_loading: true when tool search enabled
+  - Given: Tool search enabled in config (`TOOL_SEARCH_ENABLED=true`)
+  - When: MCP tools are registered via `registerMcpTools()`
+  - Then: Tools returned by `getToolsForClaude()` have `defer_loading: true`
+  - File: `src/tools/registry.test.ts` - "MCP tools receive defer_loading: true when tool search enabled"
 
-- [ ] Test: Core tools do NOT have defer_loading property
-  - Given: Tool registry with core tools (`memory`, `code_execution`, `summarize`)
-  - When: Calling `toolRegistry.getToolsForClaude()`
-  - Then: Core tools do NOT have `defer_loading` property (or it is explicitly `undefined`/absent)
-
-- [ ] Test: Static tools do NOT have defer_loading property
-  - Given: Static tools registered via `registerStaticTool()`
-  - When: Calling `toolRegistry.getToolsForClaude()`
-  - Then: Static tools do NOT have `defer_loading` property
+- [x] Test: Skill tools receive defer_loading: true
+  - Given: Tool search enabled
+  - When: Skill tools registered via `registerDynamicTool()`
+  - Then: Skill tools have `defer_loading: true` in output
+  - File: `src/tools/registry.test.ts` - "skill tools receive defer_loading: true"
 
 ### Edge Cases
-- [ ] Test: Empty MCP tool list
-  - Given: No MCP tools connected
-  - When: Calling `toolRegistry.getToolsForClaude()`
-  - Then: Returns only core tools, no error thrown
+- [x] Test: Empty MCP tool list returns only core tools without error
+  - Given: No MCP tools registered, only static core tools
+  - When: `getToolsForClaude()` called
+  - Then: Returns core tools without defer_loading, no errors
+  - File: `src/tools/registry.test.ts` - "empty MCP tool list returns only core tools without error"
 
-- [ ] Test: Tool with same name as core tool
-  - Given: MCP provides a tool named `memory` (name collision)
-  - When: Processing tools for Claude
-  - Then: Core `memory` tool takes precedence (no `defer_loading`), MCP version is excluded or renamed
+- [x] Test: Large number of MCP tools (100+) all get defer_loading
+  - Given: 150 MCP tools registered
+  - When: `getToolsForClaude()` called
+  - Then: All 150 have `defer_loading: true`
+  - File: `src/tools/registry.test.ts` - "handles large number of MCP tools"
 
 ### Error Handling
-- [ ] Test: Malformed tool definition from MCP
-  - Given: MCP returns tool with missing required fields
-  - When: Processing tools for Claude
-  - Then: Tool is skipped with warning log, other tools processed normally
+- [ ] Test: Invalid MCP tool registration does not break defer_loading
+  - Given: Some MCP tools fail registration (name conflicts)
+  - When: `getToolsForClaude()` called
+  - Then: Valid tools still have defer_loading applied correctly
 
 ---
 
-## AC2: Tool Search Configuration
+## AC2: defer_loading Applied for Supported Models
 
-New config option `TOOL_SEARCH_ENABLED` (default: `true`) controls feature. When disabled, behavior reverts to all-tools-in-context mode. Config allows specifying which tools are "core" (always loaded).
+> **Given** a model that supports tool search (Sonnet 4.5+, Opus 4.5+), **When** tools are passed to Claude, **Then** defer_loading is applied to non-core tools
 
 ### Happy Path
-- [ ] Test: TOOL_SEARCH_ENABLED defaults to true
-  - Given: Environment without `TOOL_SEARCH_ENABLED` set
-  - When: Config loads
-  - Then: `config.toolSearch.enabled` is `true`
+- [x] Test: Sonnet 4 models enable defer_loading
+  - Given: Model is `claude-sonnet-4-20250514`
+  - When: `supportsToolSearch()` called
+  - Then: Returns true
+  - File: `src/agent/model-capabilities.test.ts` - "returns true for claude-sonnet-4-20250514"
 
-- [ ] Test: TOOL_SEARCH_ENABLED=false disables feature
-  - Given: `TOOL_SEARCH_ENABLED=false` in environment
-  - When: Config loads
-  - Then: `config.toolSearch.enabled` is `false`
+- [x] Test: Opus 4 models enable defer_loading
+  - Given: Model is `claude-opus-4-20250801`
+  - When: `supportsToolSearch()` called
+  - Then: Returns true
+  - File: `src/agent/model-capabilities.test.ts` - "returns true for claude-opus-4-20250801"
 
-- [ ] Test: CORE_TOOLS configures always-loaded tools
-  - Given: `CORE_TOOLS=memory,code_execution,summarize,custom_tool`
-  - When: Config loads
-  - Then: `config.toolSearch.coreTools` contains all four tool names
+- [x] Test: Future Sonnet 4.5 variants supported
+  - Given: Model is `claude-sonnet-4.5-20251201`
+  - When: `supportsToolSearch()` called
+  - Then: Returns true
+  - File: `src/agent/model-capabilities.test.ts` - "returns true for claude-sonnet-4.5-* variants"
 
-- [ ] Test: Default CORE_TOOLS value
-  - Given: Environment without `CORE_TOOLS` set
-  - When: Config loads
-  - Then: `config.toolSearch.coreTools` defaults to `['memory', 'code_execution', 'summarize']`
+- [x] Test: Future Opus 4.5 variants supported
+  - Given: Model is `claude-opus-4.5-20260101`
+  - When: `supportsToolSearch()` called
+  - Then: Returns true
+  - File: `src/agent/model-capabilities.test.ts` - "returns true for claude-opus-4.5-* variants"
 
 ### Edge Cases
-- [ ] Test: CORE_TOOLS with extra whitespace
-  - Given: `CORE_TOOLS= memory , code_execution , summarize `
-  - When: Config loads
-  - Then: Tools are trimmed, array contains `['memory', 'code_execution', 'summarize']`
-
-- [ ] Test: CORE_TOOLS empty string
-  - Given: `CORE_TOOLS=`
-  - When: Config loads
-  - Then: Falls back to default core tools, not empty array
-
-- [ ] Test: TOOL_SEARCH_ENABLED with non-boolean value
-  - Given: `TOOL_SEARCH_ENABLED=yes` or `TOOL_SEARCH_ENABLED=1`
-  - When: Config loads
-  - Then: Handles gracefully (treats as truthy or logs warning)
-
-### Error Handling
-- [ ] Test: Invalid CORE_TOOLS reference
-  - Given: `CORE_TOOLS=memory,nonexistent_tool`
-  - When: Getting tools for Claude
-  - Then: Valid tools processed, nonexistent tool ignored with warning
+- [x] Test: Model name with extra characters does not match
+  - Given: Model is `my-claude-sonnet-4-custom` (prefixed)
+  - When: `supportsToolSearch()` called
+  - Then: Returns false (pattern requires start of string)
+  - File: `src/agent/model-capabilities.test.ts` - "handles model name with extra characters safely"
 
 ---
 
-## AC3: Tool Registry Enhancement
+## AC3: defer_loading NOT Applied for Unsupported Models
 
-`ToolRegistry.getToolsForClaude()` returns two categories. New method `getCoreTool(name)` for quick lookup of always-loaded tools.
+> **Given** a model that does NOT support tool search (Claude 3.x), **When** tools are passed to Claude, **Then** defer_loading is NOT applied and all tools are in context
 
 ### Happy Path
-- [ ] Test: getToolsForClaude returns core tools without defer_loading
-  - Given: Registry with memory, code_execution, summarize, and MCP tools
-  - When: Calling `getToolsForClaude()`
-  - Then: Core tools in result have NO `defer_loading` property
+- [x] Test: Claude 3.5 Sonnet returns false
+  - Given: Model is `claude-3-5-sonnet-20241022`
+  - When: `supportsToolSearch()` called
+  - Then: Returns false
+  - File: `src/agent/model-capabilities.test.ts` - "returns false for claude-3-5-sonnet-20241022"
 
-- [ ] Test: getToolsForClaude returns MCP tools with defer_loading
-  - Given: Registry with MCP tools
-  - When: Calling `getToolsForClaude()`
-  - Then: MCP tools have `defer_loading: true`
+- [x] Test: Claude 3 Opus returns false
+  - Given: Model is `claude-3-opus-20240229`
+  - When: `supportsToolSearch()` called
+  - Then: Returns false
+  - File: `src/agent/model-capabilities.test.ts` - "returns false for claude-3-opus-20240229"
 
-- [ ] Test: getCoreTool returns correct tool by name
-  - Given: Core tool `memory` registered
-  - When: Calling `getCoreTool('memory')`
+- [x] Test: Claude 3.5 Haiku returns false
+  - Given: Model is `claude-3-5-haiku-20241022`
+  - When: `supportsToolSearch()` called
+  - Then: Returns false
+  - File: `src/agent/model-capabilities.test.ts` - "returns false for claude-3-5-haiku-20241022"
+
+- [x] Test: defer_loading disabled when override is false
+  - Given: `enableDeferLoading: false` passed to registry
+  - When: `getToolsForClaude({ enableDeferLoading: false })` called
+  - Then: No tools have `defer_loading` property
+  - File: `src/tools/registry.test.ts` - "disables defer_loading when override is false"
+
+### Edge Cases
+- [x] Test: Unknown model format returns false
+  - Given: Model is `gpt-4` or `some-custom-model`
+  - When: `supportsToolSearch()` called
+  - Then: Returns false (safe default)
+  - File: `src/agent/model-capabilities.test.ts` - "returns false for unknown model format"
+
+---
+
+## AC4: Core Tools Never Deferred
+
+> **Given** tools configured in `CORE_TOOLS` env var, **Then** those tools are never deferred (always in context)
+
+### Happy Path
+- [x] Test: Static tools do NOT have defer_loading property
+  - Given: Static tool registered (e.g., `memory`)
+  - When: `getToolsForClaude()` called
+  - Then: Static tool has `defer_loading: undefined`
+  - File: `src/tools/registry.test.ts` - "static tools do NOT have defer_loading property"
+
+- [x] Test: Core tools never get defer_loading even when enabled
+  - Given: `memory` and `code_execution` registered as static tools
+  - When: `getToolsForClaude({ enableDeferLoading: true })` called
+  - Then: Core tools have `defer_loading: undefined`
+  - File: `src/tools/registry.test.ts` - "core tools never get defer_loading even when enabled"
+
+- [x] Test: getCoreTool returns core tool by name
+  - Given: `memory` tool registered as static
+  - When: `getCoreTool('memory')` called
   - Then: Returns the memory tool definition
-
-- [ ] Test: getCoreTool returns undefined for non-core tool
-  - Given: MCP tool `RUBE_SEARCH_TOOLS` registered (not core)
-  - When: Calling `getCoreTool('RUBE_SEARCH_TOOLS')`
-  - Then: Returns `undefined`
+  - File: `src/tools/registry.test.ts` - "returns core tool by name"
 
 ### Edge Cases
-- [ ] Test: getCoreTool with case sensitivity
-  - Given: Core tool `memory` registered
-  - When: Calling `getCoreTool('MEMORY')` (uppercase)
-  - Then: Returns `undefined` (case-sensitive matching)
+- [x] Test: getCoreTool returns undefined for non-core tool
+  - Given: MCP tool `rube__RUBE_SEARCH_TOOLS` registered
+  - When: `getCoreTool('rube__RUBE_SEARCH_TOOLS')` called
+  - Then: Returns undefined
+  - File: `src/tools/registry.test.ts` - "returns undefined for non-core tool"
 
-- [ ] Test: Skills tools classification
-  - Given: Skill tools registered in registry
-  - When: Calling `getToolsForClaude()`
-  - Then: Skill tools have `defer_loading: true` (not core)
+- [x] Test: getCoreTool is case-sensitive
+  - Given: `memory` tool registered (lowercase)
+  - When: `getCoreTool('MEMORY')` or `getCoreTool('Memory')` called
+  - Then: Returns undefined (exact match required)
+  - File: `src/tools/registry.test.ts` - "is case-sensitive for tool name matching"
+
+- [x] Test: getCoreTool handles null/undefined gracefully
+  - Given: No tool name provided
+  - When: `getCoreTool(null)` or `getCoreTool(undefined)` called
+  - Then: Returns undefined, no error
+  - File: `src/tools/registry.test.ts` - "returns undefined for null/undefined name"
 
 ### Error Handling
-- [ ] Test: getCoreTool with null/undefined name
-  - Given: Registry with core tools
-  - When: Calling `getCoreTool(undefined)` or `getCoreTool(null)`
-  - Then: Returns `undefined`, no exception thrown
+- [x] Test: Mixed core and non-core tools categorized correctly
+  - Given: Core tool `memory`, non-core static `custom_static`, MCP tool `rube__search`
+  - When: `getToolsForClaude()` called
+  - Then: Static tools have no defer_loading, MCP tool has `defer_loading: true`
+  - File: `src/tools/registry.test.ts` - "mixed core and non-core tools are categorized correctly"
 
 ---
 
-## AC4: Agent Loop Integration
+## AC5: tool_search_tool_bm25 Added When Deferred Tools Exist
 
-When `TOOL_SEARCH_ENABLED=true`, pass only core tools + deferred tool definitions. Claude's `tool_search` tool is automatically available. Tool execution continues to work for discovered tools.
+> **Given** tool search is enabled, **When** deferred tools exist, **Then** `tool_search_tool_bm25` is added to the tools array
 
 ### Happy Path
-- [ ] Test: Agent loop includes deferred tools when enabled
-  - Given: `TOOL_SEARCH_ENABLED=true` and 50 MCP tools
-  - When: Agent loop calls `messages.create()`
-  - Then: All 50 MCP tools have `defer_loading: true` in tools array
-
-- [ ] Test: Tool execution works for discovered tools
-  - Given: Claude discovers `RUBE_SEARCH_TOOLS` via tool_search
-  - When: Claude returns `tool_use` block for `RUBE_SEARCH_TOOLS`
-  - Then: `executeTool` handler processes it normally, returns tool result
-
-- [ ] Test: Agent loop respects disabled tool search
-  - Given: `TOOL_SEARCH_ENABLED=false`
-  - When: Agent loop calls `messages.create()`
-  - Then: No tools have `defer_loading` property (all in context)
-
-- [ ] Test: Core tools always in context regardless of config
-  - Given: `TOOL_SEARCH_ENABLED=true`
-  - When: Agent loop calls `messages.create()`
-  - Then: `memory`, `code_execution`, `summarize` have NO `defer_loading`
+- [x] Test: tool_search_tool_bm25 included when deferred tools exist
+  - Given: Tool search enabled, model supports it, MCP tools with defer_loading exist
+  - When: Agent loop executes and calls Claude API
+  - Then: Tools array includes `{ type: 'tool_search_tool_bm25_20251119', name: 'tool_search_tool_bm25' }`
+  - File: `src/agent/loop.test.ts` - "includes tool_search_tool_bm25 when deferred tools exist and tool search enabled (AC#1)"
 
 ### Edge Cases
-- [ ] Test: Empty deferred tools list
-  - Given: Only core tools registered, no MCP tools
-  - When: Agent loop calls `messages.create()`
-  - Then: Only core tools passed, no errors
+- [x] Test: tool_search_tool_bm25 excluded when tool search disabled
+  - Given: `TOOL_SEARCH_ENABLED=false` in config
+  - When: Agent loop executes
+  - Then: Tools array does NOT include tool_search_tool_bm25
+  - File: `src/agent/loop.test.ts` - "excludes tool_search_tool_bm25 when tool search disabled (AC#2)"
 
-- [ ] Test: Large number of deferred tools
-  - Given: 500+ MCP tools from Rube
-  - When: Agent loop calls `messages.create()`
-  - Then: All tools annotated with `defer_loading: true`, request succeeds
+- [x] Test: tool_search_tool_bm25 excluded when no deferred tools
+  - Given: Tool search enabled but only core tools (no defer_loading)
+  - When: Agent loop executes
+  - Then: Tools array does NOT include tool_search_tool_bm25
+  - File: `src/agent/loop.test.ts` - "excludes tool_search_tool_bm25 when no deferred tools exist (AC#2)"
 
 ### Error Handling
-- [ ] Test: Tool execution for unknown discovered tool
-  - Given: Claude calls a tool that was discovered but not in registry
-  - When: `executeTool` handler processes it
-  - Then: Returns error result, does not throw exception
+- [ ] Test: Graceful handling if tool_search_tool_bm25 initialization fails
+  - Given: Tool search should be included but API rejects the format
+  - When: Claude API returns error about tool_search
+  - Then: System logs warning and retries without tool search
 
 ---
 
-## AC5: Observability & Token Tracking
+## AC6: Graceful Fallback for Unsupported Models
 
-Langfuse event `tool_search.discovery` logged when Claude uses tool search. Langfuse metric `tool_search.tokens_saved` estimates token savings. Log which tools were discovered vs. always loaded per request.
+> **Given** model doesn't support tool search, **Then** graceful fallback to all-tools-in-context with warning logged
 
 ### Happy Path
-- [ ] Test: Langfuse event logged on tool search discovery
-  - Given: Claude uses tool_search to discover tools
-  - When: Agent loop processes the tool_search result
-  - Then: Langfuse event `tool_search.discovery` is logged with discovered tool names
+- [x] Test: tool_search_tool_bm25 excluded when model unsupported
+  - Given: Tool search enabled but model is Claude 3.x
+  - When: Agent loop executes with unsupported model
+  - Then: Tools array does NOT include tool_search_tool_bm25, all tools in context
+  - File: `src/agent/loop.test.ts` - "excludes tool_search_tool_bm25 when model does not support tool search (AC#2)"
 
-- [ ] Test: Token savings metric calculated correctly
-  - Given: 100 MCP tools with `defer_loading: true`
-  - When: Request completes
-  - Then: `tool_search.tokens_saved` metric logged with value ~20000 (100 * 200)
-
-- [ ] Test: Discovered vs always-loaded tools logged
-  - Given: Request with 3 core tools and 50 deferred tools
-  - When: Request completes
-  - Then: Log entry shows `coreToolCount: 3`, `deferredToolCount: 50`, and any discovered tools
+- [x] Test: getModelCapabilities returns toolSearch: false for 3.x
+  - Given: Model is `claude-3-5-sonnet-20241022`
+  - When: `getModelCapabilities()` called
+  - Then: Returns `{ toolSearch: false, ptc: false }`
+  - File: `src/agent/model-capabilities.test.ts` - "returns toolSearch: false for Claude 3.x models"
 
 ### Edge Cases
-- [ ] Test: No tools discovered in request
-  - Given: Claude answers without using tool_search
-  - When: Request completes
-  - Then: No `tool_search.discovery` event, but token savings still logged
+- [x] Test: Null/undefined model handled gracefully
+  - Given: Model is null or undefined
+  - When: `supportsToolSearch(null)` or `getModelCapabilities(null)` called
+  - Then: Returns false / `{ toolSearch: false }` without error
+  - File: `src/agent/model-capabilities.test.ts` - "returns false for null model", "handles null/undefined model gracefully"
 
-- [ ] Test: Multiple tool_search calls in one request
-  - Given: Claude calls tool_search multiple times
-  - When: Agent loop processes each
-  - Then: Each discovery logged separately, deduped in final summary
+- [x] Test: Empty string model handled gracefully
+  - Given: Model is empty string `""`
+  - When: `supportsToolSearch('')` called
+  - Then: Returns false without error
+  - File: `src/agent/model-capabilities.test.ts` - "returns false for empty string"
 
 ### Error Handling
-- [ ] Test: Langfuse unavailable during logging
-  - Given: Langfuse client fails to flush
-  - When: Attempting to log tool_search event
-  - Then: Error is logged, request continues without blocking
+- [ ] Test: Warning logged when fallback occurs
+  - Given: Tool search enabled but model doesn't support it
+  - When: Agent loop prepares tools
+  - Then: Logger emits warning with event `tool_search.fallback`
 
 ---
 
-## AC6: Graceful Degradation
+## AC7: Token Savings Tracked in Langfuse
 
-If model doesn't support tool search, fall back to all-tools-in-context. Log warning when fallback occurs. No user-facing errors from tool search configuration.
+> **Given** tool search triggers discovery, **Then** token savings are tracked in Langfuse
 
 ### Happy Path
-- [ ] Test: Supported model uses tool search
-  - Given: Model `claude-sonnet-4-20250514`
-  - When: Checking `supportsToolSearch(model)`
-  - Then: Returns `true`
-
-- [ ] Test: Unsupported model falls back
-  - Given: Model `claude-3-5-sonnet-20241022`
-  - When: Getting tools for Claude
-  - Then: No `defer_loading` on any tools (all in context)
-
-- [ ] Test: Warning logged on fallback
-  - Given: Model `claude-3-opus-20240229`
-  - When: Agent loop starts
-  - Then: Warning logged: "Tool search not supported by model, using all-tools-in-context"
+- [ ] Test: Langfuse event emitted for token savings
+  - Given: Tool search enabled, deferred tools exist
+  - When: Tools prepared for Claude API call
+  - Then: Langfuse event `tool_search.tokens_saved` emitted with metadata
 
 ### Edge Cases
-- [ ] Test: Future Sonnet 4 model variants
-  - Given: Model `claude-sonnet-4-20250801` (future version)
-  - When: Checking `supportsToolSearch(model)`
-  - Then: Returns `true` (matches pattern `/^claude-sonnet-4-/`)
+- [ ] Test: Token savings calculated correctly
+  - Given: 100 MCP tools at ~200 tokens each
+  - When: Token savings event emitted
+  - Then: `estimatedTokenSavings` approximately 20,000 tokens
 
-- [ ] Test: Future Opus 4 model variants
-  - Given: Model `claude-opus-4-20251201`
-  - When: Checking `supportsToolSearch(model)`
-  - Then: Returns `true` (matches pattern `/^claude-opus-4-/`)
-
-- [ ] Test: Unknown model format
-  - Given: Model `some-custom-model`
-  - When: Checking `supportsToolSearch(model)`
-  - Then: Returns `false`, falls back safely
+- [ ] Test: No event emitted when tool search disabled
+  - Given: Tool search disabled
+  - When: Agent loop executes
+  - Then: No `tool_search.tokens_saved` event
 
 ### Error Handling
-- [ ] Test: Null or undefined model
-  - Given: Model is `undefined`
-  - When: Checking `supportsToolSearch(model)`
-  - Then: Returns `false`, no exception thrown
-
-- [ ] Test: API error during tool search
-  - Given: Anthropic API returns error during tool_search
-  - When: Agent loop processes response
-  - Then: Error handled gracefully, user informed, no crash
+- [ ] Test: Langfuse failure does not break agent loop
+  - Given: Langfuse client throws error
+  - When: Token savings event attempted
+  - Then: Error logged but agent loop continues
 
 ---
 
-## AC7: Documentation & Testing
+## Integration Tests
 
-Unit tests for tool registry changes. Integration test verifying tool search discovery flow. Update `project-context.md` with tool search configuration.
+### Configuration Integration
+- [ ] Test: TOOL_SEARCH_ENABLED env var parsed correctly
+  - Given: `TOOL_SEARCH_ENABLED=false` in environment
+  - When: Config loaded
+  - Then: `config.toolSearch.enabled` is false
 
-### Happy Path
-- [ ] Test: Unit tests exist for getToolsForClaude with defer_loading
-  - Given: Test file `src/tools/registry.test.ts`
-  - When: Running tests
-  - Then: Tests verify core vs deferred tool categorization
+- [ ] Test: CORE_TOOLS env var parsed as array
+  - Given: `CORE_TOOLS=memory,summarize,custom_tool` in environment
+  - When: Config loaded
+  - Then: `config.toolSearch.coreTools` is `['memory', 'summarize', 'custom_tool']`
 
-- [ ] Test: Unit tests exist for config parsing
-  - Given: Test file `src/config/environment.test.ts`
-  - When: Running tests
-  - Then: Tests verify TOOL_SEARCH_ENABLED and CORE_TOOLS parsing
-
-- [ ] Test: Integration test for tool search flow
-  - Given: Integration test with mocked Anthropic API
-  - When: Running integration tests
-  - Then: Test verifies full discovery flow: request with deferred tools -> Claude uses tool_search -> tool executed
-
-- [ ] Test: project-context.md updated
-  - Given: Documentation update task
-  - When: Story complete
-  - Then: project-context.md contains Tool Search section with config options
-
-### Edge Cases
-- [ ] Test: Test isolation with different configs
-  - Given: Multiple tests with different TOOL_SEARCH_ENABLED values
-  - When: Running tests in parallel
-  - Then: Tests do not interfere with each other (proper mocking/reset)
-
----
-
-## Integration Test Scenarios
-
-### E2E: Full Tool Search Discovery Flow
-- [ ] Test: User asks question requiring MCP tool
-  - Given: User sends Slack message "Search GitHub for recent issues"
-  - And: TOOL_SEARCH_ENABLED=true
-  - And: GitHub MCP tool available as deferred
-  - When: Agent processes message
-  - Then:
-    1. Request includes GitHub tool with `defer_loading: true`
-    2. Claude uses built-in tool_search to discover GitHub tool
-    3. Claude calls discovered GitHub tool
-    4. Tool executes successfully
-    5. Response returned to user
-    6. Langfuse events logged for discovery and token savings
-
-### E2E: Fallback for Unsupported Model
-- [ ] Test: Request with claude-3 model
-  - Given: Model set to `claude-3-5-sonnet-20241022`
-  - And: TOOL_SEARCH_ENABLED=true
-  - When: Agent processes request
-  - Then:
-    1. Warning logged about unsupported model
-    2. All tools passed without `defer_loading`
-    3. Request processes successfully
-    4. User receives response (no errors)
-
-### E2E: Config Toggle
-- [ ] Test: Disable then enable tool search
-  - Given: Initially TOOL_SEARCH_ENABLED=false
-  - When: Request made, then config changed to true, then another request
-  - Then:
-    1. First request: no defer_loading on tools
-    2. Second request: defer_loading on MCP tools
-    3. Both requests succeed
+### End-to-End Flow
+- [ ] Test: Full tool search flow with mock Claude API
+  - Given: Tool search enabled, supported model, MCP tools registered
+  - When: User sends message triggering tool use
+  - Then: Claude discovers deferred tool via tool_search_tool_bm25 and executes it
 
 ---
 
 ## Coverage Summary
 
-| AC | Happy Path | Edge Cases | Error Handling | Total |
-|----|------------|------------|----------------|-------|
-| AC1 | 3 | 2 | 1 | 6 |
-| AC2 | 4 | 3 | 1 | 8 |
-| AC3 | 4 | 2 | 1 | 7 |
-| AC4 | 4 | 2 | 1 | 7 |
-| AC5 | 3 | 2 | 1 | 6 |
-| AC6 | 3 | 3 | 2 | 8 |
-| AC7 | 4 | 1 | 0 | 5 |
-| E2E | 3 | 0 | 0 | 3 |
-| **Total** | **28** | **15** | **7** | **50** |
+| AC | Happy Path | Edge Cases | Error Handling | Status |
+|----|------------|------------|----------------|--------|
+| AC1 | 2/2 | 2/2 | 0/1 | Mostly Complete |
+| AC2 | 4/4 | 1/1 | - | Complete |
+| AC3 | 4/4 | 1/1 | - | Complete |
+| AC4 | 3/3 | 3/3 | 1/1 | Complete |
+| AC5 | 1/1 | 2/2 | 0/1 | Mostly Complete |
+| AC6 | 2/2 | 2/2 | 0/1 | Mostly Complete |
+| AC7 | 0/1 | 0/2 | 0/1 | Not Implemented |
+
+**Overall:** 22/24 unit tests implemented, 0/2 integration tests implemented
 
 ---
 
-## Test File Locations (Recommended)
+## Test Files
 
-| Component | Test File |
-|-----------|-----------|
-| Tool Registry | `src/tools/registry.test.ts` |
-| Schema Converter | `src/tools/mcp/schema-converter.test.ts` |
-| Config | `src/config/environment.test.ts` |
-| Agent Loop | `src/agent/loop.test.ts` |
-| Model Detection | `src/agent/model-capabilities.test.ts` |
-| Integration | `tests/integration/tool-search.test.ts` |
+| File | Purpose |
+|------|---------|
+| `src/agent/model-capabilities.test.ts` | Model capability detection (AC2, AC3, AC6) |
+| `src/tools/registry.test.ts` | defer_loading and core tool logic (AC1, AC4) |
+| `src/agent/loop.test.ts` | tool_search_tool_bm25 inclusion (AC5, AC6) |
+| `src/config/environment.test.ts` | Configuration parsing (integration) |
 
 ---
 
-## Notes
+## References
 
-- All tests should follow project patterns from `project-context.md`
-- Use Vitest as test framework
-- Mock Anthropic API responses for unit tests
-- Integration tests should use test fixtures for consistent behavior
-- Token savings calculation: `deferredToolCount * 200` (estimated average)
+- Story: `_bmad-output/implementation-artifacts/stories/story-8-2-tool-search-tool.md`
+- Architecture: `_bmad-output/architecture.md#8.2 Tool Search Tool`
+- Anthropic Docs: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/tool-search
+- Bug Fix: Story 8.6 addresses tool_search_tool_bm25 explicit addition requirement

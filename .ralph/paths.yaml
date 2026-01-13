@@ -1,0 +1,7 @@
+# Ralph Generate Path Patterns
+# Generated: 2026-01-11
+
+paths:
+  story_file: "{impl_dir}/stories/story-{story_id}.md"
+  atdd_checklist: "{impl_dir}/stories/atdd-checklist-{story_id}.md"
+  context_xml: "{impl_dir}/stories/{story_id}.context.xml"

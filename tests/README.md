@@ -8,22 +8,53 @@ This directory contains the test suite for the Orion Slack Agent project, follow
 
 ```
 tests/
+├── unit/                # Unit tests (mirrors src/ structure)
+│   ├── agent/           # Agent module tests
+│   ├── config/          # Configuration tests
+│   ├── files/           # File handling tests
+│   ├── memory/          # Memory system tests
+│   ├── observability/   # Observability tests
+│   ├── skills/          # Skills tests
+│   ├── slack/           # Slack integration tests
+│   │   ├── citations/
+│   │   ├── files/
+│   │   ├── handlers/
+│   │   ├── prompts/
+│   │   ├── status/
+│   │   └── utils/
+│   ├── tools/           # Tools tests
+│   │   ├── mcp/
+│   │   ├── memory/
+│   │   ├── orion-sandbox/
+│   │   └── summarize/
+│   └── utils/           # Utility tests
 ├── factories/           # Test data factories using @faker-js/faker
 ├── helpers/             # Test utilities and mock builders
 ├── integration/         # Integration tests (require real services)
 └── README.md           # This file
 ```
 
-Source tests are co-located with source files:
-```
-src/**/*.test.ts         # Unit tests (mocked dependencies)
+## Path Aliases
+
+Tests use TypeScript path aliases for clean imports:
+
+| Alias | Maps To | Usage |
+|-------|---------|-------|
+| `@/*` | `src/*` | Import source code: `import { foo } from '@/module/file.js'` |
+| `@test/*` | `tests/*` | Import test utilities: `import { factory } from '@test/factories/factory.js'` |
+
+**Example:**
+```typescript
+// In tests/unit/tools/executor.test.ts
+import { executeTool } from '@/tools/executor.js';        // src/tools/executor.ts
+import { createAgentContext } from '@test/factories/agent-factory.js';  // tests/factories/agent-factory.ts
 ```
 
 ## Test Types
 
 ### Unit Tests
 
-**Location:** `src/**/*.test.ts` (co-located with source)
+**Location:** `tests/unit/**/*.test.ts` (centralized, mirrors `src/`)
 
 **Characteristics:**
 - Fast (<1s per file)
@@ -40,9 +71,9 @@ pnpm test:coverage           # With coverage report
 
 **Example:**
 ```typescript
-// src/tools/code-execution/sandbox-client.test.ts
-import { executeSandbox } from './sandbox-client.js';
-import { createMockSandboxDeps } from '../../../tests/helpers/k8s-mocks.js';
+// tests/unit/tools/orion-sandbox/sandbox-client.test.ts
+import { executeSandbox } from '@/tools/orion-sandbox/sandbox-client.js';
+import { createMockSandboxDeps } from '@test/helpers/k8s-mocks.js';
 
 it('creates SandboxClaim with correct spec', async () => {
   const mockFetch = vi.fn();
@@ -113,7 +144,7 @@ it.skip('should execute code via full K8s lifecycle', async () => {
 
 **Pattern:**
 ```typescript
-import { createAgentContext } from '../../tests/factories/agent-factory.js';
+import { createAgentContext } from '@test/factories/agent-factory.js';
 
 // Default random data
 const context = createAgentContext();
@@ -140,7 +171,7 @@ const context = createAgentContext({
 import {
   createMockSandboxDeps,
   createMockFetchSequenceSuccess,
-} from '../../tests/helpers/k8s-mocks.js';
+} from '@test/helpers/k8s-mocks.js';
 
 // Mock entire K8s lifecycle
 const mockFetch = vi.fn();
@@ -157,12 +188,12 @@ await executeSandbox({ code: 'print(2+2)' }, deps);
 
 1. Write failing integration test (proves requirement)
 2. Write failing unit tests (document behavior)
-3. Run tests → verify RED (failure messages clear)
+3. Run tests -> verify RED (failure messages clear)
 
 ### GREEN Phase (Implement)
 
 1. Implement minimal code to pass one test
-2. Run test → verify GREEN
+2. Run test -> verify GREEN
 3. Repeat for next test
 
 ### REFACTOR Phase (Improve)
@@ -170,7 +201,7 @@ await executeSandbox({ code: 'print(2+2)' }, deps);
 1. All tests GREEN
 2. Improve code quality
 3. Extract duplications
-4. Re-run tests → verify still GREEN
+4. Re-run tests -> verify still GREEN
 
 ## Best Practices
 
@@ -193,7 +224,7 @@ test('should display error for invalid credentials', async () => {
 ### One Assertion Per Test
 
 ```typescript
-// ✅ GOOD: Single assertion
+// Good: Single assertion
 test('returns stdout', async () => {
   const result = await executeSandbox({ code: 'print(1)' });
   expect(result.stdout).toBe('1\n');
@@ -204,7 +235,7 @@ test('returns zero exit code', async () => {
   expect(result.return_code).toBe(0);
 });
 
-// ❌ BAD: Multiple assertions (not atomic)
+// Avoid: Multiple assertions (not atomic)
 test('returns correct result', async () => {
   const result = await executeSandbox({ code: 'print(1)' });
   expect(result.stdout).toBe('1\n');  // If this fails, we don't know about next one
@@ -215,18 +246,18 @@ test('returns correct result', async () => {
 ### Use Factories for Data
 
 ```typescript
-// ✅ GOOD: Random data via factory
+// Good: Random data via factory
 const user = createUser();
 expect(user.email).toMatch(/@/);
 
-// ❌ BAD: Hardcoded data
+// Avoid: Hardcoded data
 const user = { email: 'test@example.com' }; // Collision risk
 ```
 
 ### Dependency Injection for Mocking
 
 ```typescript
-// ✅ GOOD: Injectable dependencies
+// Good: Injectable dependencies
 async function myFunction(
   input: string,
   deps?: { fetch?: typeof fetch }
@@ -240,7 +271,7 @@ async function myFunction(
 const mockFetch = vi.fn().mockResolvedValue({ text: async () => 'mock' });
 await myFunction('test', { fetch: mockFetch });
 
-// ❌ BAD: Global mocks
+// Avoid: Global mocks
 vi.stubGlobal('fetch', mockFetch); // Harder to reason about
 ```
 

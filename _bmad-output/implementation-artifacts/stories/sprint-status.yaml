@@ -142,8 +142,17 @@ development_status:
   7-6-conversation-summarization: done
   epic-7-retrospective: optional
 
-  # ════════════════════���══════════════════════════════════════════════════════
-  # Epic 8: Code Generation & Execution (Phase 2 - Deferred)
   # ═══════════════════════════════════════════════════════════════════════════
-  # epic-8: phase-2
-  # Stories TBD - deferred to Phase 2
+  # Epic 8: Anthropic API Enhancements 🔄 IN PROGRESS
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Sprint Change (2026-01-09): Repurposed from "Code Generation (Phase 2)"
+  # to "Anthropic API Enhancements" - Citations, Tool Search, File Ingestion
+  # See: sprint-change-proposal-2025-01-09.md
+  epic-8: in-progress
+  8-1-anthropic-citations-api: done
+  8-2-tool-search-tool: done  # Story file created 2026-01-12
+  8-3-slack-file-ingestion: done
+  8-4-mcp-auth-fix-ptc: done
+  8-5-tool-call-summary-cleanup: done
+  8-6-tool-search-bug-fix: ready-for-dev  # Bug: tool_search_tool_bm25 not added to tools array
+  epic-8-retrospective: optional

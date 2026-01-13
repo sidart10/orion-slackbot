@@ -501,12 +501,6 @@ export function getAvailableSkillsForPrompts(): SkillInfo[] {
 }
 
 /**
- * Skills that generate files when executed.
- * Used to detect skill usage from AgentResult.generatedFileIds.
- */
-const FILE_GENERATING_SKILLS = new Set(['xlsx', 'pdf', 'docx', 'd3js-visualization', 'algorithmic-art', 'frontend-design']);
-
-/**
  * Keywords in response content that suggest skill usage.
  * Maps keyword patterns to likely skill names.
  */

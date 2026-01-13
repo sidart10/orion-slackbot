@@ -365,7 +365,7 @@ export async function handleAppMention({
         let agentResult: AgentResult | undefined;
         let lastYieldToEventLoop = Date.now();
 
-        while (true) {
+        for (;;) {
           const next = await agentResponse.next();
           if (next.done) {
             agentResult = next.value;

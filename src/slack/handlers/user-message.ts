@@ -110,7 +110,7 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
     setTitle,
     setStatus,
     setSuggestedPrompts,
-    getThreadContext,
+    getThreadContext: _getThreadContext,
     client,
     context,
   }) => {
@@ -573,7 +573,7 @@ export const handleAssistantUserMessage: AssistantUserMessageMiddleware =
           // NOTE: for-await-of does NOT expose the generator's return value.
           // We must manually consume the generator to capture the final AgentResult
           // used for Langfuse usage/token logging.
-          while (true) {
+          for (;;) {
             const next = await agentResponse.next();
             if (next.done) {
               agentResult = next.value;

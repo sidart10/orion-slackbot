@@ -11,8 +11,6 @@ import { formatToolDisplayName, summarizeToolInput } from '../agent/loop.js';
 import {
   formatToolSummary,
   inferActionFromToolName,
-  formatToolName,
-  type ToolAction,
 } from '../tools/tool-summary.js';
 
 /**
@@ -75,7 +73,7 @@ function buildMultiToolMessage(
   const actions = tools.map((t) => {
     const displayName = formatToolDisplayName(t.name);
     const query = summarizeToolInput(t.input);
-    const action = inferActionFromToolName(t.name);
+    void inferActionFromToolName(t.name); // Action inferred but display uses tool name
 
     // Extract just the action/tool part for multi-tool display
     const actionPart = displayName.includes(':')

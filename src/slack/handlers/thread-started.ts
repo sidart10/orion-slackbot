@@ -19,10 +19,7 @@ import {
   generateSuggestedPrompts,
   getAvailableSkillsForPrompts,
 } from '../prompts/prompt-factory.js';
-import {
-  loadRelevantMemories,
-  formatMemoriesForContext,
-} from '../../tools/memory/loader.js';
+import { loadRelevantMemories } from '../../tools/memory/loader.js';
 import { config } from '../../config/environment.js';
 
 /**
@@ -69,7 +66,6 @@ export const handleThreadStarted: AssistantThreadStartedMiddleware = async ({
 
       // Story 5.3: Load memories from GCS (AC#1, #2, #3, #4)
       let memories = null;
-      let memoryContext = '';
 
       if (config.gcsMemoriesBucket) {
         // Show loading status while fetching memories
@@ -82,8 +78,7 @@ export const handleThreadStarted: AssistantThreadStartedMiddleware = async ({
           bucket: config.gcsMemoriesBucket,
         });
 
-        memoryContext = formatMemoriesForContext(memories);
-
+        // Note: formatMemoriesForContext(memories) available if needed for context injection
         logger.info({
           event: 'thread_started.memories_loaded',
           userId,

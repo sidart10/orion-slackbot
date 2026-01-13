@@ -937,9 +937,6 @@ export async function* executeAgentLoop(
 
   // Story 6.3: Extract threadTs for container lifecycle tracking
   const threadTs = context.threadTs;
-  // Track if we're reusing a container from a previous request
-  let containerWasReused = false;
-
   // Story 6.3: Check lifecycle manager for existing container ID (cross-request reuse)
   // Only check if we have a threadTs (skip for non-threaded DMs)
   const existingContainerId = threadTs
@@ -956,7 +953,6 @@ export async function* executeAgentLoop(
       if (existingContainerId && activeContainer) {
         activeContainer.id = existingContainerId;
         activeContainerId = existingContainerId;
-        containerWasReused = true;
         logger.debug({
           event: 'agent.loop.container_reused_from_lifecycle',
           traceId: context.traceId,
@@ -991,7 +987,6 @@ export async function* executeAgentLoop(
     // Story 6.3: Even without skills, reuse existing container for PTC
     activeContainer = { id: existingContainerId, skills: [] };
     activeContainerId = existingContainerId;
-    containerWasReused = true;
     logger.debug({
       event: 'agent.loop.container_reused_no_skills',
       traceId: context.traceId,

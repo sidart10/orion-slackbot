@@ -216,7 +216,7 @@ function extractJSErrorType(error: Error | string): string {
  */
 export function humanizeError(error: string | Error | unknown): HumanizedError {
   // Handle null/undefined
-  if (error == null) {
+  if (error === null || error === undefined) {
     return {
       userMessage: DEFAULT_ERROR_MESSAGE,
       technicalDetails: 'null or undefined error',
