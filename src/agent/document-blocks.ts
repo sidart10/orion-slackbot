@@ -1,24 +1,28 @@
 /**
  * Document Block Builder
  *
- * Builds Anthropic document blocks from ingested files for Claude context.
+ * Builds Anthropic document and image blocks from ingested files for Claude context.
  *
  * @see Story 8.3 - Slack File Ingestion for Claude Context
  * @see AC#11 - Create document block with file_id reference
  * @see AC#12 - Enable citations on document blocks
  * @see AC#13 - Include document blocks in messages array
  * @see AC#14 - Handle unsupported file types gracefully
+ * @see File Upload Plan Task 1 - Add image block support
  */
 
 import type { SlackFile, FileIngestionResult } from '../slack/files/types.js';
 import {
   isSupportedMimeType,
   formatSupportedTypes,
+  FILE_LIMITS,
 } from '../slack/files/types.js';
 import { logger } from '../utils/logger.js';
 
 /**
  * Anthropic document block for Claude context.
+ *
+ * Documents support titles and citations.
  *
  * @see https://docs.anthropic.com/en/docs/build-with-claude/document-understanding
  */
@@ -35,7 +39,57 @@ export interface DocumentBlock {
 }
 
 /**
+ * Anthropic image block for Claude context.
+ *
+ * NOTE: Images do NOT support the `title` or `citations` fields that documents do.
+ * Including these fields may cause API errors.
+ *
+ * @see https://docs.anthropic.com/en/docs/build-with-claude/vision
+ * @see File Upload Plan Task 1 - Image block support
+ */
+export interface ImageBlock {
+  type: 'image';
+  source: {
+    type: 'file';
+    file_id: string;
+  };
+}
+
+/**
+ * Union type for content blocks that can be built from files.
+ */
+export type ContentBlock = DocumentBlock | ImageBlock;
+
+/**
+ * Result of building content blocks (documents and images).
+ */
+export interface BuildContentBlocksResult {
+  /**
+   * All content blocks (documents + images).
+   * Use this for building Claude messages.
+   */
+  contentBlocks: ContentBlock[];
+  /**
+   * Only document blocks (backward compatibility).
+   * Use when callers specifically need DocumentBlock[] type.
+   * @deprecated Use contentBlocks for new code
+   */
+  documentBlocks: DocumentBlock[];
+  /**
+   * Only image blocks.
+   */
+  imageBlocks: ImageBlock[];
+  /** User-friendly error messages for failed files */
+  errors: string[];
+  /** Files that were successfully processed */
+  processedFiles: string[];
+  /** Files that failed processing */
+  failedFiles: string[];
+}
+
+/**
  * Result of building document blocks.
+ * @deprecated Use BuildContentBlocksResult instead
  */
 export interface BuildDocumentBlocksResult {
   /** Successfully built document blocks */
@@ -86,6 +140,45 @@ export function buildDocumentBlock(
 }
 
 /**
+ * Build a single image block from a file ID.
+ *
+ * NOTE: Image blocks do NOT support title or citations fields.
+ * Unlike document blocks, we only include type and source.
+ *
+ * @param fileId - Anthropic file ID
+ * @returns Image block
+ *
+ * @see File Upload Plan Task 1 - Image block support
+ */
+export function buildImageBlock(fileId: string): ImageBlock {
+  return {
+    type: 'image',
+    source: {
+      type: 'file',
+      file_id: fileId,
+    },
+  };
+}
+
+/**
+ * Check if a MIME type is an image type.
+ *
+ * Uses FILE_LIMITS.IMAGE.mimeTypes to determine if the MIME type
+ * should be handled as an image block rather than a document block.
+ *
+ * @param mimeType - MIME type to check (e.g., 'image/png')
+ * @returns true if the MIME type is an image type
+ *
+ * @see File Upload Plan Task 1 - Image block support
+ */
+export function isImageMimeType(mimeType: string): boolean {
+  const normalizedMime = mimeType.toLowerCase();
+  return FILE_LIMITS.IMAGE.mimeTypes.some((imageMime) =>
+    normalizedMime.startsWith(imageMime)
+  );
+}
+
+/**
  * Format user-friendly error message for file ingestion failure.
  *
  * @param result - Failed ingestion result
@@ -119,53 +212,84 @@ function formatIngestionError(result: FileIngestionResult): string {
 }
 
 /**
- * Build document blocks from file ingestion results.
+ * Build content blocks from file ingestion results.
  *
- * Converts successful ingestion results to document blocks for Claude.
+ * Routes files to appropriate block types based on MIME type:
+ * - Images (image/*) -> ImageBlock
+ * - PDFs, CSV, Text -> DocumentBlock
+ *
  * Collects user-friendly error messages for failures.
  *
  * @param results - Array of ingestion results
  * @param options - Build options
- * @returns Document blocks and error messages
+ * @returns Content blocks (both types), document blocks (backward compat), and error messages
  *
  * @see AC#11 - Document blocks from ingested files
  * @see AC#14 - Handle unsupported types gracefully
  * @see AC#19-23 - Error handling with user-friendly messages
+ * @see File Upload Plan Task 1 - Image block routing
  */
 export function buildDocumentBlocks(
   results: FileIngestionResult[],
   options?: BuildDocumentBlocksOptions
-): BuildDocumentBlocksResult {
+): BuildContentBlocksResult {
   const traceId = options?.traceId ?? 'unknown';
   const enableCitations = options?.enableCitations ?? true;
 
+  const contentBlocks: ContentBlock[] = [];
   const documentBlocks: DocumentBlock[] = [];
+  const imageBlocks: ImageBlock[] = [];
   const errors: string[] = [];
   const processedFiles: string[] = [];
   const failedFiles: string[] = [];
 
   for (const result of results) {
     if (result.success && result.fileId) {
-      // Build document block for successful ingestion
-      documentBlocks.push(
-        buildDocumentBlock(result.fileId, result.slackFile.name, enableCitations)
-      );
-      processedFiles.push(result.slackFile.name);
+      const mimeType = result.slackFile.mimetype;
 
-      logger.debug({
-        event: 'document_block.created',
-        traceId,
-        filename: result.slackFile.name,
-        fileId: result.fileId,
-        citationsEnabled: enableCitations,
-      });
+      if (isImageMimeType(mimeType)) {
+        // Route images to ImageBlock
+        // NOTE: Images do NOT support citations - omit the field entirely
+        const imageBlock = buildImageBlock(result.fileId);
+        imageBlocks.push(imageBlock);
+        contentBlocks.push(imageBlock);
+
+        logger.debug({
+          event: 'image_block.created',
+          traceId,
+          filename: result.slackFile.name,
+          fileId: result.fileId,
+          mimeType,
+        });
+      } else {
+        // Route PDFs, CSV, text to DocumentBlock
+        // Documents support citations
+        const docBlock = buildDocumentBlock(
+          result.fileId,
+          result.slackFile.name,
+          enableCitations
+        );
+        documentBlocks.push(docBlock);
+        contentBlocks.push(docBlock);
+
+        logger.debug({
+          event: 'document_block.created',
+          traceId,
+          filename: result.slackFile.name,
+          fileId: result.fileId,
+          mimeType,
+          citationsEnabled: enableCitations,
+        });
+      }
+
+      processedFiles.push(result.slackFile.name);
     } else {
       // Collect error message for failed ingestion
       errors.push(formatIngestionError(result));
       failedFiles.push(result.slackFile.name);
 
       logger.debug({
-        event: 'document_block.skipped',
+        event: 'content_block.skipped',
         traceId,
         filename: result.slackFile.name,
         errorCode: result.errorCode,
@@ -174,16 +298,20 @@ export function buildDocumentBlocks(
   }
 
   logger.info({
-    event: 'document_blocks.built',
+    event: 'content_blocks.built',
     traceId,
+    contentBlockCount: contentBlocks.length,
     documentBlockCount: documentBlocks.length,
+    imageBlockCount: imageBlocks.length,
     errorCount: errors.length,
     processedFiles,
     failedFiles,
   });
 
   return {
+    contentBlocks,
     documentBlocks,
+    imageBlocks,
     errors,
     processedFiles,
     failedFiles,

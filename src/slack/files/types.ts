@@ -49,6 +49,12 @@ export interface DownloadedFile {
 }
 
 /**
+ * File category for content block routing.
+ * @see Story - File Upload & Multimodal Support
+ */
+export type FileCategory = 'image' | 'document' | 'text';
+
+/**
  * File ingestion result for a single file.
  */
 export interface FileIngestionResult {
@@ -62,6 +68,14 @@ export interface FileIngestionResult {
   error?: string;
   /** Error code for categorization */
   errorCode?: FileIngestionErrorCode;
+  /**
+   * File category for content block routing.
+   * - 'image' → ImageBlock (no citations)
+   * - 'document' → DocumentBlock (with citations)
+   * - 'text' → DocumentBlock or text extraction
+   * Only present on successful ingestion.
+   */
+  category?: FileCategory;
 }
 
 /**
@@ -175,6 +189,34 @@ export function getMaxSizeForMimeType(mimetype: string): number | null {
  */
 export function isSupportedMimeType(mimetype: string): boolean {
   return getFileCategory(mimetype) !== null;
+}
+
+/**
+ * Get file category for content block routing.
+ *
+ * Maps FILE_LIMITS categories to FileCategory:
+ * - IMAGE → 'image' (uses ImageBlock)
+ * - PDF → 'document' (uses DocumentBlock with citations)
+ * - CSV, TEXT → 'text' (uses DocumentBlock or text extraction)
+ *
+ * @param mimetype - File MIME type
+ * @returns FileCategory or null if unsupported
+ */
+export function getFileCategoryForRouting(mimetype: string): FileCategory | null {
+  const category = getFileCategory(mimetype);
+  if (!category) return null;
+
+  switch (category) {
+    case 'IMAGE':
+      return 'image';
+    case 'PDF':
+      return 'document';
+    case 'CSV':
+    case 'TEXT':
+      return 'text';
+    default:
+      return null;
+  }
 }
 
 /**

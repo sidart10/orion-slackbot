@@ -32,6 +32,10 @@ vi.mock('../config/environment.js', () => ({
       enabled: true,
       coreTools: ['memory', 'code_execution', 'summarize'],
     },
+    // Prompt Caching config (default enabled)
+    promptCaching: {
+      enabled: true,
+    },
   },
 }));
 
@@ -2905,6 +2909,478 @@ describe('Story 8.6: tool_search_tool_bm25 inclusion', () => {
     );
     expect(toolSearchConfigCall).toBeDefined();
     expect((toolSearchConfigCall![0] as Record<string, unknown>).toolSearchToolIncluded).toBe(false);
+  });
+});
+
+describe('Prompt Caching (Anthropic API)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should format system prompt as content blocks with cache_control when enabled', async () => {
+    // GIVEN: Prompt caching enabled (default)
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).promptCaching = { enabled: true };
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test message', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: messages.create should be called with system as content blocks array
+    expect(messagesCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+            cache_control: { type: 'ephemeral' },
+          }),
+        ]),
+      })
+    );
+  });
+
+  it('should NOT add cache_control to system prompt when disabled', async () => {
+    // GIVEN: Prompt caching disabled
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).promptCaching = { enabled: false };
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test message', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: messages.create should be called with system blocks WITHOUT cache_control
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    expect(callArgs.system).toBeDefined();
+    expect(Array.isArray(callArgs.system)).toBe(true);
+
+    // First block should NOT have cache_control
+    const firstBlock = callArgs.system[0];
+    expect(firstBlock.type).toBe('text');
+    expect(firstBlock.cache_control).toBeUndefined();
+  });
+
+  it('should add cache_control to last tool when enabled', async () => {
+    // GIVEN: Prompt caching enabled with tools
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).promptCaching = { enabled: true };
+
+    const { getToolDefinitions } = await import('./tools.js');
+    vi.mocked(getToolDefinitions).mockReturnValue([
+      { name: 'tool_1', description: 'First tool', input_schema: { type: 'object' } },
+      { name: 'tool_2', description: 'Second tool', input_schema: { type: 'object' } },
+    ]);
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test message', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: messages.create should be called with tools having cache_control on last element
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    expect(callArgs.tools).toBeDefined();
+    expect(Array.isArray(callArgs.tools)).toBe(true);
+
+    // Last tool should have cache_control
+    const lastTool = callArgs.tools[callArgs.tools.length - 1];
+    expect(lastTool.cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('should NOT add cache_control to tools when disabled', async () => {
+    // GIVEN: Prompt caching disabled
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).promptCaching = { enabled: false };
+
+    const { getToolDefinitions } = await import('./tools.js');
+    vi.mocked(getToolDefinitions).mockReturnValue([
+      { name: 'tool_1', description: 'First tool', input_schema: { type: 'object' } },
+      { name: 'tool_2', description: 'Second tool', input_schema: { type: 'object' } },
+    ]);
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test message', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: Tools should NOT have cache_control
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    expect(callArgs.tools).toBeDefined();
+
+    // Check that no tool has cache_control (built-in tools are excluded from this check)
+    const customTools = callArgs.tools.filter((t: { name?: string }) =>
+      t.name && !['code_execution', 'memory', 'tool_search_tool_bm25'].includes(t.name)
+    );
+    for (const tool of customTools) {
+      expect(tool.cache_control).toBeUndefined();
+    }
+  });
+
+  it('should log cache metrics when cache_read_input_tokens present in response', async () => {
+    // GIVEN: Response with cache metrics
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).promptCaching = { enabled: true };
+
+    const loggerModule = await import('../utils/logger.js');
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockMessageStream({
+        events: [
+          {
+            type: 'message_start',
+            message: {
+              model: 'claude-sonnet-4-20250514',
+              usage: {
+                input_tokens: 1000,
+                cache_creation_input_tokens: 500,
+                cache_read_input_tokens: 300,
+              },
+            },
+          },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Response' } },
+          {
+            type: 'message_delta',
+            delta: { stop_reason: 'end_turn' },
+            usage: { input_tokens: 1000, output_tokens: 10 },
+          },
+          { type: 'message_stop' },
+        ],
+      })
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test message', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: logger.info should be called with prompt_cache.metrics event
+    const cacheMetricsCall = vi.mocked(loggerModule.logger.info).mock.calls.find(
+      (call) => call[0] && typeof call[0] === 'object' && (call[0] as Record<string, unknown>).event === 'prompt_cache.metrics'
+    );
+    expect(cacheMetricsCall).toBeDefined();
+    const metrics = cacheMetricsCall![0] as Record<string, unknown>;
+    expect(metrics.cacheReadTokens).toBe(300);
+    expect(metrics.cacheWriteTokens).toBe(500);
+    expect(metrics.inputTokens).toBe(1000);
+  });
+
+  it('should NOT log cache metrics when no cache tokens in response', async () => {
+    // GIVEN: Response without cache metrics
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).promptCaching = { enabled: true };
+
+    const loggerModule = await import('../utils/logger.js');
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test message', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: logger.info should NOT be called with prompt_cache.metrics event
+    const cacheMetricsCall = vi.mocked(loggerModule.logger.info).mock.calls.find(
+      (call) => call[0] && typeof call[0] === 'object' && (call[0] as Record<string, unknown>).event === 'prompt_cache.metrics'
+    );
+    expect(cacheMetricsCall).toBeUndefined();
+  });
+
+  it('should separate base system prompt from dynamic context in content blocks', async () => {
+    // GIVEN: Prompt caching enabled with gather context that returns context text
+    const { config } = await import('../config/environment.js');
+    vi.mocked(config).promptCaching = { enabled: true };
+
+    // Mock gatherContext to return some context text
+    const gatherModule = await import('./gather.js');
+    vi.spyOn(gatherModule, 'gatherContext').mockResolvedValue({
+      contextText: 'Some dynamic context from thread',
+      sources: [],
+    });
+
+    const options = createAgentLoopOptions();
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test message', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: System should have 2 blocks - base prompt with cache_control, context without
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    expect(callArgs.system).toBeDefined();
+    expect(callArgs.system.length).toBe(2);
+
+    // First block: base system prompt with cache_control
+    expect(callArgs.system[0].type).toBe('text');
+    expect(callArgs.system[0].cache_control).toEqual({ type: 'ephemeral' });
+
+    // Second block: dynamic context WITHOUT cache_control
+    expect(callArgs.system[1].type).toBe('text');
+    expect(callArgs.system[1].text).toContain('Context:');
+    expect(callArgs.system[1].cache_control).toBeUndefined();
+  });
+});
+
+/**
+ * Task 4: Backward Compatibility Tests for contentBlocks/documentBlocks
+ *
+ * @see File Upload Plan Task 4 - Update Agent Loop for Mixed Content
+ * @see REQUIRED: Backward compatibility for documentBlocks
+ */
+describe('contentBlocks backward compatibility (File Upload Task 4)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should accept legacy documentBlocks and process them correctly', async () => {
+    // GIVEN: Options with legacy documentBlocks (not contentBlocks)
+    const options = createAgentLoopOptions();
+    options.documentBlocks = [
+      {
+        type: 'document',
+        source: { type: 'file', file_id: 'file_legacy_1' },
+        title: 'legacy-doc.pdf',
+        citations: { enabled: true },
+      },
+    ];
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('I analyzed the document.')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Please analyze this document', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: Document block should be included in the message content
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    const userMessage = callArgs.messages[callArgs.messages.length - 1];
+    expect(Array.isArray(userMessage.content)).toBe(true);
+
+    const contentArray = userMessage.content as Array<{ type: string; source?: { file_id: string } }>;
+    const docBlock = contentArray.find(b => b.type === 'document');
+    expect(docBlock).toBeDefined();
+    expect(docBlock?.source?.file_id).toBe('file_legacy_1');
+  });
+
+  it('should log deprecation warning when using legacy documentBlocks', async () => {
+    // GIVEN: Options with legacy documentBlocks only
+    const options = createAgentLoopOptions();
+    options.documentBlocks = [
+      {
+        type: 'document',
+        source: { type: 'file', file_id: 'file_deprecated' },
+        title: 'deprecated.pdf',
+      },
+    ];
+
+    const loggerModule = await import('../utils/logger.js');
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: Deprecation warning should be logged
+    const warnCalls = vi.mocked(loggerModule.logger.warn).mock.calls;
+    const deprecationWarning = warnCalls.find(
+      call => call[0] && typeof call[0] === 'object' &&
+        (call[0] as Record<string, unknown>).event === 'agent.loop.deprecated_document_blocks'
+    );
+    expect(deprecationWarning).toBeDefined();
+    expect((deprecationWarning?.[0] as Record<string, unknown>)?.message).toContain('deprecated');
+  });
+
+  it('should accept new contentBlocks with mixed images and documents', async () => {
+    // GIVEN: Options with new contentBlocks (images + documents)
+    const options = createAgentLoopOptions();
+    options.contentBlocks = [
+      {
+        type: 'image',
+        source: { type: 'file', file_id: 'file_image_1' },
+      },
+      {
+        type: 'document',
+        source: { type: 'file', file_id: 'file_doc_1' },
+        title: 'report.pdf',
+        citations: { enabled: true },
+      },
+    ];
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('I see an image and a document.')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('What do you see?', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: Both blocks should be in message content, images first
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    const userMessage = callArgs.messages[callArgs.messages.length - 1];
+    const contentArray = userMessage.content as Array<{ type: string }>;
+
+    // Should have: image, document, text (in that order per Anthropic docs)
+    expect(contentArray.length).toBe(3);
+    expect(contentArray[0].type).toBe('image');
+    expect(contentArray[1].type).toBe('document');
+    expect(contentArray[2].type).toBe('text');
+  });
+
+  it('should merge contentBlocks and documentBlocks when both provided', async () => {
+    // GIVEN: Options with BOTH contentBlocks AND legacy documentBlocks
+    const options = createAgentLoopOptions();
+    options.contentBlocks = [
+      {
+        type: 'image',
+        source: { type: 'file', file_id: 'file_new_image' },
+      },
+    ];
+    options.documentBlocks = [
+      {
+        type: 'document',
+        source: { type: 'file', file_id: 'file_legacy_doc' },
+        title: 'legacy.pdf',
+      },
+    ];
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test both', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: Both should be included (merged)
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    const userMessage = callArgs.messages[callArgs.messages.length - 1];
+    const contentArray = userMessage.content as Array<{ type: string; source?: { file_id: string } }>;
+
+    const imageBlock = contentArray.find(b => b.type === 'image');
+    const docBlock = contentArray.find(b => b.type === 'document');
+
+    expect(imageBlock?.source?.file_id).toBe('file_new_image');
+    expect(docBlock?.source?.file_id).toBe('file_legacy_doc');
+  });
+
+  it('should deduplicate when same file_id in both contentBlocks and documentBlocks', async () => {
+    // GIVEN: Same file_id in both (contentBlocks takes precedence)
+    const options = createAgentLoopOptions();
+    options.contentBlocks = [
+      {
+        type: 'document',
+        source: { type: 'file', file_id: 'file_same' },
+        title: 'new-title.pdf',
+        citations: { enabled: true },
+      },
+    ];
+    options.documentBlocks = [
+      {
+        type: 'document',
+        source: { type: 'file', file_id: 'file_same' }, // Same file_id
+        title: 'old-title.pdf',
+        citations: { enabled: false },
+      },
+    ];
+
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test dedup', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: Only one document block (contentBlocks wins)
+    const callArgs = messagesCreateMock.mock.calls[0][0];
+    const userMessage = callArgs.messages[callArgs.messages.length - 1];
+    const contentArray = userMessage.content as Array<{ type: string; source?: { file_id: string }; title?: string }>;
+
+    const docBlocks = contentArray.filter(b => b.type === 'document');
+    expect(docBlocks.length).toBe(1);
+    expect(docBlocks[0].title).toBe('new-title.pdf'); // contentBlocks version wins
+  });
+
+  it('should NOT log deprecation when using new contentBlocks only', async () => {
+    // GIVEN: Options with ONLY new contentBlocks
+    const options = createAgentLoopOptions();
+    options.contentBlocks = [
+      {
+        type: 'image',
+        source: { type: 'file', file_id: 'file_new' },
+      },
+    ];
+
+    const loggerModule = await import('../utils/logger.js');
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: No deprecation warning
+    const warnCalls = vi.mocked(loggerModule.logger.warn).mock.calls;
+    const deprecationWarning = warnCalls.find(
+      call => call[0] && typeof call[0] === 'object' &&
+        (call[0] as Record<string, unknown>).event === 'agent.loop.deprecated_document_blocks'
+    );
+    expect(deprecationWarning).toBeUndefined();
+  });
+
+  it('should log content block counts distinguishing images from documents', async () => {
+    // GIVEN: Mixed content blocks
+    const options = createAgentLoopOptions();
+    options.contentBlocks = [
+      { type: 'image', source: { type: 'file', file_id: 'img1' } },
+      { type: 'image', source: { type: 'file', file_id: 'img2' } },
+      { type: 'document', source: { type: 'file', file_id: 'doc1' }, title: 'doc.pdf' },
+    ];
+
+    const loggerModule = await import('../utils/logger.js');
+    messagesCreateMock.mockImplementation(async () =>
+      createMockStreamWithText('Response')
+    );
+
+    // WHEN: Executing agent loop
+    const gen = executeAgentLoop('Test', options);
+    while (!(await gen.next()).done) { /* consume */ }
+
+    // THEN: Log should show correct counts
+    const infoCalls = vi.mocked(loggerModule.logger.info).mock.calls;
+    const contentBlockLog = infoCalls.find(
+      call => call[0] && typeof call[0] === 'object' &&
+        (call[0] as Record<string, unknown>).event === 'agent.loop.content_blocks_added'
+    );
+    expect(contentBlockLog).toBeDefined();
+
+    const logData = contentBlockLog?.[0] as Record<string, unknown>;
+    expect(logData?.contentBlockCount).toBe(3);
+    expect(logData?.imageBlockCount).toBe(2);
+    expect(logData?.documentBlockCount).toBe(1);
   });
 });
 

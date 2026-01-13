@@ -8,9 +8,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   buildDocumentBlock,
+  buildImageBlock,
   buildDocumentBlocks,
   validateSlackFiles,
   formatFileErrors,
+  isImageMimeType,
 } from './document-blocks.js';
 import type { SlackFile, FileIngestionResult } from '../slack/files/types.js';
 
@@ -57,6 +59,62 @@ describe('buildDocumentBlock', () => {
     const block = buildDocumentBlock('file_789', 'notes.md');
 
     expect(block.citations).toEqual({ enabled: true });
+  });
+});
+
+describe('buildImageBlock', () => {
+  it('should create image block without title or citations', () => {
+    const block = buildImageBlock('file_123');
+
+    expect(block).toEqual({
+      type: 'image',
+      source: {
+        type: 'file',
+        file_id: 'file_123',
+      },
+    });
+  });
+
+  it('should not include citations field (unlike document blocks)', () => {
+    const block = buildImageBlock('file_456');
+
+    expect(block).not.toHaveProperty('citations');
+    expect(block).not.toHaveProperty('title');
+  });
+});
+
+describe('isImageMimeType', () => {
+  it('should return true for image/png', () => {
+    expect(isImageMimeType('image/png')).toBe(true);
+  });
+
+  it('should return true for image/jpeg', () => {
+    expect(isImageMimeType('image/jpeg')).toBe(true);
+  });
+
+  it('should return true for image/gif', () => {
+    expect(isImageMimeType('image/gif')).toBe(true);
+  });
+
+  it('should return true for image/webp', () => {
+    expect(isImageMimeType('image/webp')).toBe(true);
+  });
+
+  it('should be case insensitive', () => {
+    expect(isImageMimeType('IMAGE/PNG')).toBe(true);
+    expect(isImageMimeType('Image/Jpeg')).toBe(true);
+  });
+
+  it('should return false for application/pdf', () => {
+    expect(isImageMimeType('application/pdf')).toBe(false);
+  });
+
+  it('should return false for text/csv', () => {
+    expect(isImageMimeType('text/csv')).toBe(false);
+  });
+
+  it('should return false for text/plain', () => {
+    expect(isImageMimeType('text/plain')).toBe(false);
   });
 });
 
@@ -221,6 +279,126 @@ describe('buildDocumentBlocks', () => {
 
       expect(errors[0]).toContain('*doc.pdf*');
       expect(errors[0]).toContain('Could not process');
+    });
+  });
+
+  describe('image block routing', () => {
+    it('should route images to imageBlocks', () => {
+      const results: FileIngestionResult[] = [
+        createSuccessResult('file_1', 'photo.png', 'image/png'),
+        createSuccessResult('file_2', 'chart.jpeg', 'image/jpeg'),
+      ];
+
+      const { contentBlocks, documentBlocks, imageBlocks, processedFiles } =
+        buildDocumentBlocks(results);
+
+      expect(imageBlocks).toHaveLength(2);
+      expect(documentBlocks).toHaveLength(0);
+      expect(contentBlocks).toHaveLength(2);
+      expect(processedFiles).toEqual(['photo.png', 'chart.jpeg']);
+
+      // Verify image block structure (no title or citations)
+      expect(imageBlocks[0]).toEqual({
+        type: 'image',
+        source: { type: 'file', file_id: 'file_1' },
+      });
+    });
+
+    it('should route PDFs to documentBlocks', () => {
+      const results: FileIngestionResult[] = [
+        createSuccessResult('file_1', 'report.pdf', 'application/pdf'),
+      ];
+
+      const { contentBlocks, documentBlocks, imageBlocks } =
+        buildDocumentBlocks(results);
+
+      expect(documentBlocks).toHaveLength(1);
+      expect(imageBlocks).toHaveLength(0);
+      expect(contentBlocks).toHaveLength(1);
+      expect(documentBlocks[0]?.type).toBe('document');
+    });
+
+    it('should route CSV to documentBlocks', () => {
+      const results: FileIngestionResult[] = [
+        createSuccessResult('file_1', 'data.csv', 'text/csv'),
+      ];
+
+      const { documentBlocks, imageBlocks } = buildDocumentBlocks(results);
+
+      expect(documentBlocks).toHaveLength(1);
+      expect(imageBlocks).toHaveLength(0);
+    });
+
+    it('should route text files to documentBlocks', () => {
+      const results: FileIngestionResult[] = [
+        createSuccessResult('file_1', 'notes.txt', 'text/plain'),
+        createSuccessResult('file_2', 'readme.md', 'text/markdown'),
+      ];
+
+      const { documentBlocks, imageBlocks } = buildDocumentBlocks(results);
+
+      expect(documentBlocks).toHaveLength(2);
+      expect(imageBlocks).toHaveLength(0);
+    });
+
+    it('should mix images and documents in contentBlocks', () => {
+      const results: FileIngestionResult[] = [
+        createSuccessResult('file_1', 'report.pdf', 'application/pdf'),
+        createSuccessResult('file_2', 'screenshot.png', 'image/png'),
+        createSuccessResult('file_3', 'data.csv', 'text/csv'),
+        createSuccessResult('file_4', 'diagram.gif', 'image/gif'),
+      ];
+
+      const { contentBlocks, documentBlocks, imageBlocks, processedFiles } =
+        buildDocumentBlocks(results);
+
+      expect(contentBlocks).toHaveLength(4);
+      expect(documentBlocks).toHaveLength(2); // PDF + CSV
+      expect(imageBlocks).toHaveLength(2); // PNG + GIF
+      expect(processedFiles).toEqual([
+        'report.pdf',
+        'screenshot.png',
+        'data.csv',
+        'diagram.gif',
+      ]);
+
+      // Verify contentBlocks contains both types
+      const types = contentBlocks.map((b) => b.type);
+      expect(types).toContain('document');
+      expect(types).toContain('image');
+    });
+
+    it('should not apply enableCitations option to images', () => {
+      const results: FileIngestionResult[] = [
+        createSuccessResult('file_1', 'photo.png', 'image/png'),
+        createSuccessResult('file_2', 'report.pdf', 'application/pdf'),
+      ];
+
+      const { imageBlocks, documentBlocks } = buildDocumentBlocks(results, {
+        enableCitations: true,
+      });
+
+      // Image should not have citations
+      expect(imageBlocks[0]).not.toHaveProperty('citations');
+
+      // Document should have citations
+      expect(documentBlocks[0]?.citations).toEqual({ enabled: true });
+    });
+
+    it('should handle all supported image formats', () => {
+      const results: FileIngestionResult[] = [
+        createSuccessResult('file_1', 'a.png', 'image/png'),
+        createSuccessResult('file_2', 'b.jpg', 'image/jpeg'),
+        createSuccessResult('file_3', 'c.gif', 'image/gif'),
+        createSuccessResult('file_4', 'd.webp', 'image/webp'),
+      ];
+
+      const { imageBlocks } = buildDocumentBlocks(results);
+
+      expect(imageBlocks).toHaveLength(4);
+      imageBlocks.forEach((block) => {
+        expect(block.type).toBe('image');
+      });
     });
   });
 });

@@ -12,6 +12,7 @@
 import { downloadSlackFile, SlackFileDownloadError } from '../slack/files/index.js';
 import { FilesApiClient, FilesApiError } from './api-client.js';
 import type { SlackFile, DownloadedFile, FileIngestionResult } from '../slack/files/types.js';
+import { getFileCategoryForRouting } from '../slack/files/types.js';
 import { getLangfuse } from '../observability/langfuse.js';
 import { logger } from '../utils/logger.js';
 
@@ -203,10 +204,14 @@ export async function ingestSlackFile(
       });
     }
 
+    // Determine file category for content block routing
+    const category = getFileCategoryForRouting(downloadedFile.mimetype);
+
     return {
       success: true,
       fileId: fileMetadata.id,
       slackFile,
+      category: category ?? undefined,
     };
   } catch (error) {
     const durationMs = Date.now() - startTime;

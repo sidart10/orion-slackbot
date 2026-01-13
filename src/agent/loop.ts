@@ -132,6 +132,26 @@ export interface DocumentBlockParam {
   citations?: { enabled: boolean };
 }
 
+/**
+ * Image block for user-uploaded images.
+ * @see Story - File Upload & Multimodal Support
+ *
+ * NOTE: Unlike DocumentBlockParam, images do NOT support `title` or `citations` fields.
+ * Including them may cause API errors.
+ */
+export interface ImageBlockParam {
+  type: 'image';
+  source: {
+    type: 'file';
+    file_id: string;
+  };
+}
+
+/**
+ * Union type for all content blocks that can be included in user messages.
+ */
+export type ContentBlockParam = DocumentBlockParam | ImageBlockParam;
+
 export interface AgentLoopOptions {
   context: AgentContext;
   systemPrompt: string;
@@ -164,6 +184,13 @@ export interface AgentLoopOptions {
   /** Override the max tool loop count (default 10) */
   maxToolLoops?: number;
   /**
+   * Content blocks from user-uploaded files (Story 8.3, File Upload & Multimodal).
+   * Supports both document blocks (PDFs, text) and image blocks.
+   * These are prepended to the first user message per Anthropic's API requirements.
+   */
+  contentBlocks?: ContentBlockParam[];
+  /**
+   * @deprecated Use `contentBlocks` instead. Kept for backward compatibility.
    * Document blocks from user-uploaded files (Story 8.3).
    * These are prepended to the first user message per Anthropic's document understanding API.
    * @see AC#13 - Include document blocks in messages array before calling agent loop
@@ -730,6 +757,16 @@ export async function* executeAgentLoop(
     ...(memoryTool ? [memoryTool as unknown as Anthropic.Tool] : []),
     ...(toolSearchTool ? [toolSearchTool as unknown as Anthropic.Tool] : []),
   ];
+
+  // Prompt Caching: Add cache_control to last tool (caches all tools as prefix)
+  // See: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+  if (config.promptCaching.enabled && tools.length > 0) {
+    const lastTool = tools[tools.length - 1];
+    tools[tools.length - 1] = {
+      ...lastTool,
+      cache_control: { type: 'ephemeral' },
+    } as typeof lastTool;
+  }
   void options.setStatus?.({ phase: 'gather' });
   const gatherSpan = createAgentSpan(trace, 'agent.gather', {
     messageLength: userMessage.length,
@@ -750,32 +787,82 @@ export async function* executeAgentLoop(
     },
   });
 
-  const effectiveSystemPrompt =
-    contextText.length > 0
-      ? `${systemPrompt}\n\nContext:\n${contextText}`
-      : systemPrompt;
+  // Prompt Caching: Build system prompt as content blocks
+  // Base system prompt gets cache_control, dynamic context does not
+  // See: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+  type SystemContentBlock = {
+    type: 'text';
+    text: string;
+    cache_control?: { type: 'ephemeral' };
+  };
+
+  const systemBlocks: SystemContentBlock[] = config.promptCaching.enabled
+    ? [
+        {
+          type: 'text',
+          text: systemPrompt,
+          cache_control: { type: 'ephemeral' },
+        },
+      ]
+    : [{ type: 'text', text: systemPrompt }];
+
+  // Add dynamic context WITHOUT cache_control (changes per request)
+  if (contextText.length > 0) {
+    systemBlocks.push({
+      type: 'text',
+      text: `\n\nContext:\n${contextText}`,
+    });
+  }
 
   // Build messages array from thread history + current message.
   // gatherContext does NOT mutate messages; it only affects the system prompt for now.
   //
-  // Story 8.3: Document blocks from user-uploaded files are prepended to the first
-  // user message's content array. Per Anthropic's API, document blocks must be in a
-  // user role message, and we want them in context before the user's question.
-  const documentBlocks = options.documentBlocks ?? [];
-  const hasDocumentBlocks = documentBlocks.length > 0;
+  // Story 8.3 + File Upload & Multimodal: Content blocks from user-uploaded files
+  // are prepended to the first user message's content array. Per Anthropic's API,
+  // content blocks (images, documents) must be in a user role message.
+  //
+  // Backward compatibility: Accept both contentBlocks (new) and documentBlocks (deprecated).
+  // If both provided, merge them (contentBlocks takes precedence).
+  const legacyDocumentBlocks = options.documentBlocks ?? [];
+  const newContentBlocks = options.contentBlocks ?? [];
+
+  // Merge: new contentBlocks first, then legacy documentBlocks (deduplicated by file_id)
+  const seenFileIds = new Set(newContentBlocks.map(b => b.source.file_id));
+  const mergedContentBlocks: ContentBlockParam[] = [
+    ...newContentBlocks,
+    ...legacyDocumentBlocks.filter(b => !seenFileIds.has(b.source.file_id)),
+  ];
+  const hasContentBlocks = mergedContentBlocks.length > 0;
+
+  // Log deprecation warning if using legacy documentBlocks
+  if (legacyDocumentBlocks.length > 0 && newContentBlocks.length === 0) {
+    logger.warn({
+      event: 'agent.loop.deprecated_document_blocks',
+      traceId: context.traceId,
+      message: 'documentBlocks is deprecated, use contentBlocks instead',
+      documentBlockCount: legacyDocumentBlocks.length,
+    });
+  }
 
   // Build the final user message content
-  // If we have document blocks, we need to use an array content format
+  // If we have content blocks, we need to use an array content format
   let userMessageContent: string | Anthropic.ContentBlockParam[];
-  if (hasDocumentBlocks) {
-    // Document blocks must come FIRST per Anthropic requirements
+  if (hasContentBlocks) {
+    // Content blocks must come FIRST per Anthropic requirements
+    // Image blocks first, then document blocks (optimal ordering per Anthropic docs)
+    const imageBlocks = mergedContentBlocks.filter((b): b is ImageBlockParam => b.type === 'image');
+    const documentBlocks = mergedContentBlocks.filter((b): b is DocumentBlockParam => b.type === 'document');
+
     userMessageContent = [
+      ...imageBlocks.map((img) => img as unknown as Anthropic.ContentBlockParam),
       ...documentBlocks.map((doc) => doc as unknown as Anthropic.ContentBlockParam),
       { type: 'text' as const, text: userMessage },
     ];
     logger.info({
-      event: 'agent.loop.document_blocks_added',
+      event: 'agent.loop.content_blocks_added',
       traceId: context.traceId,
+      contentBlockCount: mergedContentBlocks.length,
+      imageBlockCount: imageBlocks.length,
       documentBlockCount: documentBlocks.length,
       documentTitles: documentBlocks.map((d) => d.title).filter(Boolean),
     });
@@ -815,7 +902,9 @@ export async function* executeAgentLoop(
 
   // Story 8.1: Build document metadata from document blocks for citation enrichment
   // This maps document_index to human-readable names for display
-  const documentMetadata: DocumentMetadata[] = documentBlocks.map((doc, index) => ({
+  // Note: Only document blocks support citations; images don't have titles
+  const documentBlocksForMetadata = mergedContentBlocks.filter((b): b is DocumentBlockParam => b.type === 'document');
+  const documentMetadata: DocumentMetadata[] = documentBlocksForMetadata.map((doc, index) => ({
     index,
     name: doc.title ?? `Document ${index + 1}`,
     source_type: 'file' as const,
@@ -953,7 +1042,7 @@ export async function* executeAgentLoop(
 
     void options.setStatus?.({ phase: 'act' });
     const actSpan = createAgentSpan(trace, 'agent.act', {
-      promptLength: effectiveSystemPrompt.length,
+      promptLength: systemBlocks.reduce((acc, block) => acc + block.text.length, 0),
       toolsCount: tools.length,
       maxToolLoops: MAX_TOOL_LOOPS,
       verificationAttempt: verificationAttempts,
@@ -990,10 +1079,11 @@ export async function* executeAgentLoop(
       });
 
       // Story 6.3: Include container for PTC session reuse
+      // Prompt Caching: Use systemBlocks array for cacheable system prompt
       const stream = (await anthropic.messages.create({
         model: config.anthropicModel,
         max_tokens: 8192,
-        system: effectiveSystemPrompt,
+        system: systemBlocks,
         messages: attemptMessages,
         stream: true,
         ...(tools.length > 0 ? { tools } : {}),
@@ -1056,6 +1146,39 @@ export async function* executeAgentLoop(
               traceId: context.traceId,
               persistedToLifecycle: threadTs ? true : false,
             });
+          }
+
+          // Prompt Caching: Log cache metrics from message_start usage
+          // Extract cache_creation_input_tokens and cache_read_input_tokens
+          const usage = event.message?.usage as {
+            input_tokens?: number;
+            cache_creation_input_tokens?: number;
+            cache_read_input_tokens?: number;
+          } | undefined;
+
+          if (usage?.cache_read_input_tokens || usage?.cache_creation_input_tokens) {
+            logger.info({
+              event: 'prompt_cache.metrics',
+              traceId: context.traceId,
+              cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+              cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+              inputTokens: usage.input_tokens ?? 0,
+            });
+
+            // Emit Langfuse event for cache observability
+            const cacheLangfuse = getLangfuse();
+            if (cacheLangfuse?.event) {
+              cacheLangfuse.event({
+                name: 'prompt_cache.metrics',
+                metadata: {
+                  traceId: context.traceId,
+                  cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+                  cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+                  inputTokens: usage.input_tokens ?? 0,
+                  model: config.anthropicModel,
+                },
+              });
+            }
           }
           continue;
         }
@@ -1936,11 +2059,12 @@ export async function* executeAgentLoop(
   );
 
   // Story 8.1 AC#5: Log citation metrics for observability
-  if (documentCitations.length > 0 || hasDocumentBlocks) {
+  if (documentCitations.length > 0 || hasContentBlocks) {
     logger.info({
       event: 'agent.loop.citations_extracted',
       traceId: context.traceId,
-      documentBlockCount: documentBlocks.length,
+      contentBlockCount: mergedContentBlocks.length,
+      documentBlockCount: documentBlocksForMetadata.length,
       citationCount: documentCitations.length,
       documentMetadataCount: documentMetadata.length,
     });
