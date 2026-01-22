@@ -62,6 +62,9 @@ export const config = {
   slackBotToken: process.env.SLACK_BOT_TOKEN ?? '',
   slackAppToken: process.env.SLACK_APP_TOKEN ?? '',
   slackSigningSecret: process.env.SLACK_SIGNING_SECRET ?? '',
+  // DM Support (PLAN-dm-group-dm-support.md)
+  // Enable/disable DM and Group DM handlers (default: true)
+  enableDmSupport: process.env.ENABLE_DM_SUPPORT !== 'false',
 
   // Anthropic
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',

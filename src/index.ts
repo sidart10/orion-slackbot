@@ -18,6 +18,9 @@ import { pathToFileURL } from 'node:url';
 import { createSlackApp, isSocketMode } from './slack/app.js';
 import { assistant } from './slack/assistant.js';
 import { handleAppMention } from './slack/handlers/app-mention.js';
+// DM and Group DM support (PLAN-dm-group-dm-support.md)
+import { handleDirectMessage } from './slack/handlers/direct-message.js';
+import { handleGroupDm } from './slack/handlers/group-dm.js';
 import { config } from './config/environment.js';
 import { logger } from './utils/logger.js';
 import { registerSummarizeTool } from './tools/summarize/index.js';
@@ -64,6 +67,21 @@ export async function startApp(): Promise<void> {
   // Register app_mention handler for channel @orion mentions (Story 2.8)
   // This runs parallel to Assistant - uses same agent infrastructure
   app.event('app_mention', handleAppMention);
+
+  // Register DM and Group DM handlers (PLAN-dm-group-dm-support.md)
+  // These run parallel to Assistant API - both paths can coexist
+  // Feature flag allows disabling if issues arise
+  if (config.enableDmSupport) {
+    // DM handler - responds to direct messages to the bot
+    app.message(handleDirectMessage);
+    // Group DM handler - responds to messages in group DMs with the bot
+    app.message(handleGroupDm);
+    logger.info({
+      event: 'dm_handlers_registered',
+      directMessage: true,
+      groupDm: true,
+    });
+  }
 
   // Start the app
   await app.start(config.port);
