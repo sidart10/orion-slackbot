@@ -51,6 +51,16 @@ export async function handleDirectMessage({
   // Use message or event - Bolt provides both
   const msg = (message ?? event) as MessageEvent;
 
+  // DEBUG: Log all incoming messages to this handler
+  logger.info({
+    event: 'dm_handler_called',
+    channel_type: msg.channel_type,
+    channel: msg.channel,
+    text: msg.text?.slice(0, 50),
+    bot_id: msg.bot_id,
+    subtype: msg.subtype,
+  });
+
   // Filter for DM channel type only
   if (msg.channel_type !== 'im') {
     return;

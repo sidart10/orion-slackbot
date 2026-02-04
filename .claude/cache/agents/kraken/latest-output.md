@@ -1,120 +1,127 @@
-# Implementation Report: Test Suite Reorganization
-Generated: 2026-01-13T13:10:00Z
+# Implementation Report: DM and Group DM Support
+Generated: 2026-01-21T21:30:00Z
 
 ## Task
-Reorganize test suite from co-located tests (`src/**/*.test.ts`) to centralized structure (`tests/unit/**/*.test.ts`) with TypeScript path aliases.
-
-## Summary
-
-Successfully moved 105 test files from `src/` to `tests/unit/` while:
-- Preserving git history via `git mv`
-- Converting 773+ relative imports to `@/` path aliases
-- Configuring Vitest with resolve aliases
-- Creating test-specific tsconfig for TypeScript compatibility
+Implement DM and Group DM support for Orion Slack bot per PLAN-dm-group-dm-support.md
 
 ## TDD Summary
 
-This was a refactoring task - existing tests validated the changes.
+### Tests Written
+- `tests/unit/slack/handlers/direct-message.test.ts` - 13 tests for DM handler
+  - Event filtering (im channel type, bot messages, subtypes)
+  - Event deduplication with handler ID 'dm'
+  - Message processing without @mention stripping
+  - Conversation history handling
+  - Error handling and completion indicators
 
-### Tests Run
-- **Total:** 1867 tests across 108 files
-- **Passed:** 1861
-- **Skipped:** 6
-- **File Status:** 107 passed, 1 skipped
+- `tests/unit/slack/handlers/group-dm.test.ts` - 13 tests for Group DM handler
+  - Event filtering (mpim channel type, bot messages, subtypes)
+  - Event deduplication with handler ID 'group_dm'
+  - Message processing without @mention stripping
+  - Conversation history handling
+  - Error handling and completion indicators
 
-## Changes Made
+### Implementation
+- `/Users/sid/Desktop/orion-slackbot/src/slack/handlers/message-core.ts` - Shared message handler core (500+ lines)
+  - `MessageContext` interface for normalized message handling
+  - `handleMessage()` function with streaming, status, agent execution, reactions
 
-### Files Moved (105 test files)
-From `src/**/*.test.ts` to `tests/unit/**/*.test.ts`:
-- `tests/unit/agent/` - 11 files
-- `tests/unit/config/` - 2 files
-- `tests/unit/files/` - 2 files
-- `tests/unit/memory/` - 6 files
-- `tests/unit/observability/` - 4 files
-- `tests/unit/skills/` - 12 files
-- `tests/unit/slack/` - 22 files (including handlers/, citations/, status/, prompts/, utils/, files/)
-- `tests/unit/tools/` - 36 files (including memory/, mcp/, orion-sandbox/, summarize/)
-- `tests/unit/utils/` - 5 files
-- `tests/unit/` root - 3 files (index.test.ts, instrumentation.test.ts)
+- `/Users/sid/Desktop/orion-slackbot/src/slack/handlers/direct-message.ts` - DM handler
+  - Filters for `channel_type === 'im'`
+  - Skips bot messages and subtypes
+  - Delegates to shared message-core
 
-### Configuration Changes
+- `/Users/sid/Desktop/orion-slackbot/src/slack/handlers/group-dm.ts` - Group DM handler
+  - Filters for `channel_type === 'mpim'`
+  - Skips bot messages and subtypes
+  - Delegates to shared message-core
 
-1. **`/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/tsconfig.json`**
-   - Added `baseUrl: "."`
-   - Added `paths` with `@/*` -> `src/*` and `@test/*` -> `tests/*`
-
-2. **`/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/tsconfig.test.json`** (NEW)
-   - Extends base tsconfig
-   - Overrides `rootDir: "."` (allows tests/ in compilation)
-   - Includes both `src/**/*` and `tests/**/*`
-
-3. **`/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/tsconfig.build.json`**
-   - Added `tests` to exclude array (explicit exclusion)
-
-4. **`/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/vitest.config.ts`**
-   - Added `resolve.alias` for `@` and `@test`
-   - Updated `include` to `['tests/unit/**/*.test.ts', 'tests/integration/**/*.test.ts', 'scripts/**/*.test.ts']`
-
-### Import Updates
-
-Updated 773+ imports across 105 files:
-- Static imports: `import { foo } from './file.js'` -> `import { foo } from '@/path/file.js'`
-- Dynamic imports: `await import('./file.js')` -> `await import('@/path/file.js')`
-- vi.mock calls: `vi.mock('./file.js')` -> `vi.mock('@/path/file.js')`
-- Inline type imports: `import('./file.js').Type` -> `import('@/path/file.js').Type`
-
-### Test Fixes
-
-Two tests required mock additions during migration:
-1. **`tests/unit/observability/langfuse.test.ts`** - Fixed missed dynamic import path
-2. **`tests/unit/skills/sync-service.test.ts`** - Added glob mock (uses `glob` library, not mocked `fs`)
-
-### Documentation
-
-Updated `/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/tests/README.md`:
-- New directory structure showing `tests/unit/` hierarchy
-- Path alias documentation table
-- Updated example imports using `@/` and `@test/` aliases
+- `/Users/sid/Desktop/orion-slackbot/src/config/environment.ts` - Added `enableDmSupport` config
+- `/Users/sid/Desktop/orion-slackbot/src/index.ts` - Registered DM handlers with feature flag
+- `/Users/sid/Desktop/orion-slackbot/docs/orion-slack-manifest.md` - Updated manifest with scopes and docs
 
 ## Test Results
+- Total: 1892 tests
+- Passed: 1892
+- Failed: 0
+- Skipped: 6
 
+## Changes Made
+1. **Manifest Updates (Task 0)**
+   - Added `im:write` and `mpim:write` bot scopes
+   - Added `app_home` section with `messages_tab_enabled: true`
+
+2. **Shared Message Handler Core (Task 1)**
+   - Created `src/slack/handlers/message-core.ts`
+   - Extracted common logic from app-mention.ts into reusable `handleMessage()` function
+   - Handles: streaming, status updates, agent execution, file ingestion, reactions, feedback
+
+3. **DM Handler (Task 2)**
+   - Created `src/slack/handlers/direct-message.ts`
+   - Filters for `channel_type === 'im'`
+   - Skips bot messages (`bot_id`) and subtypes
+   - Uses `isDuplicateEvent()` with handler ID `'dm'`
+
+4. **Group DM Handler (Task 3)**
+   - Created `src/slack/handlers/group-dm.ts`
+   - Filters for `channel_type === 'mpim'`
+   - Skips bot messages and subtypes
+   - Uses `isDuplicateEvent()` with handler ID `'group_dm'`
+
+5. **Handler Registration (Task 5)**
+   - Added `ENABLE_DM_SUPPORT` env var (default: `true`)
+   - Registered handlers in `src/index.ts` with feature flag check
+
+6. **Unit Tests (Task 7)**
+   - 13 tests for DM handler
+   - 13 tests for Group DM handler
+
+7. **Documentation (Task 8)**
+   - Updated manifest with DM support documentation
+   - Documented parallel paths (Assistant API vs Message handlers)
+
+## Verification Commands
+```bash
+npm run build     # Passes
+npm run lint      # Passes (only pre-existing warnings)
+npm run test      # 1892 tests pass
+npm run typecheck # Passes
 ```
-Test Files  107 passed | 1 skipped (108)
-Tests       1861 passed | 6 skipped (1867)
-Duration    25.18s
-```
 
-## Pre-existing Issues Identified (NOT caused by reorganization)
-
-During verification, found pre-existing TypeScript errors in source code:
-
-1. **`src/agent/loop.ts`** - References `config.promptCaching` which doesn't exist in environment config
-2. Various lint warnings in source files (unused variables, missing return types)
-
-These are unrelated to the test reorganization and require separate fixes.
-
-## Success Criteria Status
-
-| Criteria | Status |
-|----------|--------|
-| No .test.ts files in src/ | PASS (0 files found) |
-| All tests pass | PASS (1861 tests) |
-| tests/unit/ mirrors src/ | PASS (verified structure) |
-| Path aliases work | PASS (Vitest resolves correctly) |
-| Build excludes tests | PASS (tsconfig.build.json excludes tests/) |
+## Files Modified
+| File | Change |
+|------|--------|
+| `docs/orion-slack-manifest.md` | Added scopes, app_home, documentation |
+| `src/config/environment.ts` | Added `enableDmSupport` config |
+| `src/index.ts` | Registered DM/Group DM handlers |
+| `src/slack/handlers/message-core.ts` | NEW - Shared handler core |
+| `src/slack/handlers/direct-message.ts` | NEW - DM handler |
+| `src/slack/handlers/group-dm.ts` | NEW - Group DM handler |
+| `tests/unit/slack/handlers/direct-message.test.ts` | NEW - 13 tests |
+| `tests/unit/slack/handlers/group-dm.test.ts` | NEW - 13 tests |
 
 ## Notes
 
-- Git history preserved for all 105 moved files via `git mv`
-- The `promptCaching` config errors are pre-existing and should be addressed in a separate task
-- Consider adding eslint-import-resolver-typescript if ESLint import errors arise later
-- Migration scripts were deleted after successful completion
+### Design Decisions
+1. **Incremental Approach**: Per plan, created DM handlers first and verified they work before considering refactoring app-mention.ts. The shared message-core duplicates some logic but maintains backward compatibility.
 
-## Files for Review
+2. **Feature Flag**: `ENABLE_DM_SUPPORT=true` (default) allows disabling DM handlers if issues arise post-deployment.
 
-Key files to review for this reorganization:
-- `/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/tsconfig.json` - Path aliases
-- `/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/tsconfig.test.json` - New test config
-- `/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/vitest.config.ts` - Test config updates
-- `/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/tests/README.md` - Documentation
-- Any test file in `/Users/sid/Desktop/2-Coding/Active/2025-12 orion-slack-agent/tests/unit/` - Import pattern example
+3. **No History for DMs**: Initial implementation doesn't fetch conversation history for flat DMs. This can be added later by extending the message-core.
+
+4. **Parallel Paths**: Both Slack Assistant API and message handlers coexist. Event deduplication prevents double-processing.
+
+### Manual Verification Checklist
+- [ ] Send DM to Orion bot - Bot responds
+- [ ] Send message in group DM with Orion - Bot responds
+- [ ] Send @orion in channel - Bot responds (regression test)
+- [ ] Bot doesn't respond to its own messages
+- [ ] Bot doesn't respond to message edits
+- [ ] File attachments work in DMs
+
+### Rollback Strategy
+To disable DM support if issues arise:
+```bash
+export ENABLE_DM_SUPPORT=false
+```
+Or remove handler registrations from `src/index.ts`.

@@ -3,38 +3,82 @@
 #
 # To add new logos:
 # 1. Add PNG files to this directory
-# 2. Update the appropriate context section below
-# 3. Logos are selected based on: context + theme (dark/light)
+# 2. Update the appropriate variant section below
+# 3. Logos are selected based on: variant + theme (dark/light)
 
-logos:
-  # Default fallback logos
-  default:
+# =============================================================================
+# LOGO VARIANTS
+# =============================================================================
+# Each variant has dark/light versions for theme compatibility
+
+variants:
+  # Standard logos - just the logo mark
+  standard:
     dark: samba-logo-white.png
     light: samba-logo-black.png
+    description: "Simple logo mark, no tagline"
+    use_for:
+      - internal
+      - default
+    status: available
 
-  # Internal presentations (team meetings, updates)
+  # Tagline variants - logo with tagline beneath
+  tagline:
+    dark: samba-logo-tagline-white.png
+    light: samba-logo-tagline-black.png
+    description: "Logo with tagline beneath"
+    use_for:
+      - external
+      - marketing
+    status: pending  # User needs to provide these files
+
+  # Full lockup - complete brand lockup with company name
+  full:
+    dark: samba-logo-full-white.png
+    light: samba-logo-full-black.png
+    description: "Full brand lockup with company name"
+    use_for:
+      - investor
+      - formal
+      - board
+    status: pending  # User needs to provide these files
+
+  # Badge/icon - compact icon version
+  badge:
+    dark: samba-logo-badge-white.png
+    light: samba-logo-badge-black.png
+    description: "Compact badge/icon version"
+    use_for:
+      - partner
+      - co-branded
+      - favicon-style
+    status: pending  # User needs to provide these files
+
+# =============================================================================
+# CONTEXT-TO-VARIANT MAPPING
+# =============================================================================
+# Maps presentation context to preferred logo variant
+# Falls back to 'standard' if preferred variant not available
+
+context_mapping:
   internal:
-    dark: samba-logo-white.png
-    light: samba-logo-black.png
-
-  # External/client-facing presentations
+    preferred_variant: standard
+    fallback: standard
   external:
-    dark: samba-logo-white.png      # TODO: Add samba-logo-tagline-white.png
-    light: samba-logo-black.png     # TODO: Add samba-logo-tagline-black.png
-
-  # Investor/board presentations
+    preferred_variant: tagline
+    fallback: standard
   investor:
-    dark: samba-logo-white.png      # TODO: Add samba-logo-full-white.png
-    light: samba-logo-black.png     # TODO: Add samba-logo-full-black.png
-
-  # Partner/co-branded presentations
+    preferred_variant: full
+    fallback: standard
   partner:
-    dark: samba-logo-white.png      # TODO: Add samba-logo-badge-white.png
-    light: samba-logo-black.png     # TODO: Add samba-logo-badge-black.png
+    preferred_variant: badge
+    fallback: standard
 
-
-# Auto-branding configuration
+# =============================================================================
+# AUTO-BRANDING CONFIGURATION
+# =============================================================================
 # Defines which slides automatically get logos and their placement
+
 auto_branding:
   internal:
     title:
@@ -65,3 +109,37 @@ auto_branding:
     end:
       position: center
       size: large
+
+# =============================================================================
+# WIZARD PROMPT
+# =============================================================================
+# Text for the agent to present when asking about logo preference
+
+wizard_prompt: |
+  Which logo variant would you like?
+
+  1. **Standard** - Simple logo mark (best for internal presentations)
+  2. **With Tagline** - Logo + tagline (best for external/marketing)
+  3. **Full Lockup** - Complete brand lockup (best for investor decks)
+  4. **Badge** - Compact icon version (best for partner/co-branded)
+
+  Note: If a variant isn't available yet, I'll use the standard logo.
+
+# =============================================================================
+# ADDING NEW LOGO FILES
+# =============================================================================
+# When the user provides new logo variants, save them as:
+#
+# Tagline variants:
+#   - samba-logo-tagline-white.png (for dark theme)
+#   - samba-logo-tagline-black.png (for light theme)
+#
+# Full lockup variants:
+#   - samba-logo-full-white.png (for dark theme)
+#   - samba-logo-full-black.png (for light theme)
+#
+# Badge variants:
+#   - samba-logo-badge-white.png (for dark theme)
+#   - samba-logo-badge-black.png (for light theme)
+#
+# After adding files, update the 'status' field from 'pending' to 'available'

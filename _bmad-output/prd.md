@@ -14,7 +14,7 @@ lastStep: 11
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-17'
-last_updated: '2026-01-09'
+last_updated: '2026-01-21'
 course_correction: 'Claude Agent SDK → Direct Anthropic API migration; Epic 4 (Subagents) removed in favor of native parallel tool_use; GKE Agent Sandbox for code execution (2026-01-03); Anthropic Skills + Files API adoption, GKE becomes fallback (2026-01-07); Epic 8 repurposed for Anthropic API Enhancements (2026-01-09)'
 prd_version: '1.5'
 ---

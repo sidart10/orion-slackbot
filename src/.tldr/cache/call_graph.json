@@ -1,0 +1,14 @@
+{
+  "edges": [
+    {
+      "from_file": "tools/orion-sandbox/mcp-bootstrap.py",
+      "from_func": "call_tool",
+      "to_file": "tools/orion-sandbox/mcp-bootstrap.py",
+      "to_func": "call_mcp_tool"
+    }
+  ],
+  "languages": [
+    "python"
+  ],
+  "timestamp": 1769032188.5468109
+}

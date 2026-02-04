@@ -84,20 +84,83 @@ I(s) = true iff (
 )
 ```
 
-**Mandatory Context Questions:**
-Before ANY slide generation, ASK the user:
+---
 
-1. **"What type of presentation is this?"**
-   | Context | Description | Logo Behavior |
-   |---------|-------------|---------------|
-   | `internal` | Team meetings, internal updates | Small logo on title, large on end |
-   | `external` | Client-facing, marketing | Medium logo on title, large on end |
-   | `investor` | Board meetings, investor decks | Medium logo on title, large on end |
-   | `partner` | Co-branded partner materials | Logo on end slide only |
+## Wizard Protocol (MANDATORY)
 
-2. **"Dark or light theme?"**
-   - `dark` (default, recommended) - Void Black (#050505) background
-   - `light` - Stark White (#FFFFFF) background
+**CRITICAL:** Before generating ANY slides, complete this full discovery process. Ask ALL questions in Phase 1 as a SINGLE message, then proceed through phases sequentially.
+
+### Phase 1: Basics (REQUIRED)
+
+Ask as a SINGLE message with all questions:
+
+**1. Presentation Type?**
+| Type | Description | Logo Behavior |
+|------|-------------|---------------|
+| Internal | Team meetings, internal updates | Small logo on title, large on end |
+| External | Client-facing, marketing | Medium logo on title, large on end |
+| Investor | Board meetings, investor decks | Medium logo on title, large on end |
+| Partner | Co-branded partner materials | Logo on end slide only |
+
+**2. Theme?**
+- **Dark** (Void Black - recommended) - Professional, modern
+- **Light** (Stark White) - Clean, airy
+
+**3. How many slides approximately?**
+- Quick (3-5 slides) - Brief update
+- Standard (6-10 slides) - Typical presentation
+- Comprehensive (11-20 slides) - Deep dive
+- Custom: [specify number]
+
+### Phase 2: Structure (REQUIRED)
+
+**4. What sections/flow do you need?**
+
+Suggest common structures based on presentation type:
+
+| Type | Suggested Structure |
+|------|---------------------|
+| Investor | Problem → Solution → Market → Traction → Team → Ask |
+| External | Intro → Challenge → Approach → Results → Next Steps |
+| Internal | Update → Metrics → Wins → Blockers → Action Items |
+| Partner | Joint Value Prop → Integration → Use Cases → Roadmap |
+
+Or let user define custom sections.
+
+**5. Do you have specific content for each section?**
+
+Walk through EACH section and capture:
+- Key points/messages
+- Specific numbers or data to highlight
+- Quotes or testimonials to include
+
+### Phase 3: Visuals (REQUIRED)
+
+**6. Images - for each slide that could have visuals:**
+
+Ask for each visual slide:
+- "Do you have images to include?"
+- "Should I suggest placeholder descriptions?"
+- "Any brand photography guidelines?"
+
+**7. Logo preference?**
+
+Present available logo variants from the manifest:
+| Variant | Description | Best For |
+|---------|-------------|----------|
+| Standard | Simple logo, no tagline | Internal, default |
+| With Tagline | Logo + tagline beneath | External, marketing |
+| Full Lockup | Complete brand lockup | Investor, formal |
+| Badge | Compact icon version | Partner, co-branded |
+
+### Phase 4: Layout Preferences (OPTIONAL)
+
+**8. Layout variety?**
+
+Ask:
+- "Should I vary layouts or keep consistent?"
+- Offer layout options per slide type (see Layout Library below)
+- "Any specific layout preferences?"
 
 ---
 
@@ -380,6 +443,166 @@ IF checklist_item_failed:
 2. **Split Compositions**: Text left, visuals right
 3. **Extreme Hierarchy**: 72pt+ headlines, 9-12pt labels
 4. **Tek on Img**: Data overlays on photography
+
+---
+
+## Layout Library
+
+Use varied layouts to create visual interest. Select layouts based on content type.
+
+### Title Slides
+
+| Layout | Description | When to Use |
+|--------|-------------|-------------|
+| `centered` | Large centered title, subtitle below | Opening, bold statements |
+| `left-aligned` | Title left, image right | When you have a hero image |
+| `full-bleed` | Background image + overlay text | High-impact opening |
+
+### Content Slides
+
+| Layout | Description | When to Use |
+|--------|-------------|-------------|
+| `50-50` | Text left, image right (split) | Balanced content + visual |
+| `text-heavy` | Full width bullets/text | Detailed explanations |
+| `image-heavy` | Small text, large image | Visual stories |
+| `three-column` | 3 equal columns | Comparisons, features |
+| `two-thirds` | 2/3 content, 1/3 visual | Primary focus with accent |
+
+### Metrics Slides
+
+| Layout | Description | When to Use |
+|--------|-------------|-------------|
+| `hero-metric` | One huge number, centered | Single KPI focus |
+| `metric-row` | 3-4 metrics horizontal | Dashboard overview |
+| `metric-grid` | 2x2 or 3x2 grid | Multiple KPIs |
+
+### Special Slides
+
+| Layout | Description | When to Use |
+|--------|-------------|-------------|
+| `quote` | Large quote + attribution | Testimonials, insights |
+| `team` | Photo grid + names | Team introduction |
+| `timeline` | Horizontal timeline | History, roadmap |
+| `comparison` | Before/after or vs columns | Showing improvement |
+| `agenda` | Numbered list, large numbers | Opening agenda |
+
+---
+
+## Image Integration
+
+### For Each Visual Slide, Ask:
+
+1. "Do you have an image for [slide topic]?"
+2. If no: "What would you like the image to show?"
+3. Suggest: "A [description] image would work well here"
+
+### Image Placeholder Format
+
+When user doesn't have images, generate descriptive placeholders in code:
+
+```python
+# Add placeholder with description for later replacement
+slide = prs.add_slide()
+prs.add_body_text(slide,
+    "[IMAGE PLACEHOLDER: Team collaboration photo - diverse group around whiteboard]",
+    x=0.5, y=0.1, width=0.45, size=10, color='gray'
+)
+```
+
+### Stock Image Suggestions
+
+For common needs, suggest search terms:
+
+| Category | Search Terms |
+|----------|--------------|
+| Tech/Data | "data visualization", "AI interface", "analytics dashboard" |
+| People | "diverse team meeting", "professional portrait", "collaboration" |
+| Abstract | "network connections", "geometric patterns", "gradient backdrop" |
+| Business | "handshake", "office workspace", "conference room" |
+
+### HUD Overlay Guidelines
+
+For "Tek on Img" brand element:
+- Add HUD overlays only on slides with background images
+- Use `add_hud_coordinates()`, `add_tracking_dot()`, `add_bounding_box()`
+- Position overlays in corners or along edges
+- Use Consolas font for technical labels
+
+---
+
+## Example Wizard Flow
+
+This example shows the expected agent behavior:
+
+```
+**User:** "Create a presentation about our Q4 results"
+
+**Agent:** "I'll help you create a branded Samba presentation! Let me gather some details:
+
+**1. Presentation Type:**
+- [ ] Internal (team meetings)
+- [ ] External (client-facing)
+- [ ] Investor (board/pitch)
+- [ ] Partner (co-branded)
+
+**2. Theme:** Dark (recommended) or Light?
+
+**3. Approximate length:**
+- Quick (3-5 slides)
+- Standard (6-10)
+- Comprehensive (11-20)
+- Custom
+
+**4. What sections should we include?**
+For a Q4 results deck, I'd suggest:
+1. Title/Opening
+2. Executive Summary
+3. Key Metrics Dashboard
+4. Wins & Highlights
+5. Challenges & Learnings
+6. Q1 Outlook
+7. Thank You/Q&A
+
+Does this structure work, or would you like to adjust?"
+
+**User:** "Internal, dark theme, standard length. That structure works."
+
+**Agent:** "Great! Now for each section:
+
+**Section 1 - Title:**
+- Title text: 'Q4 2024 Results' or something else?
+- Subtitle?
+- Background image or solid?
+
+**Section 2 - Executive Summary:**
+- Key points to highlight?
+- Any specific numbers to feature?
+
+[continues for each section...]
+
+**Images:**
+- Do you have images for any slides?
+- For the metrics dashboard, should I use a data visualization style?
+
+**Logo:**
+For internal decks, I'll use the standard logo. Would you prefer:
+- Bottom-right on title + end slides (recommended)
+- All slides
+- End slide only"
+
+**User:** [provides answers for each section]
+
+**Agent:** [Only NOW generates the complete deck with proper variety]
+```
+
+### Key Behaviors
+
+1. **Ask ALL basics upfront** - Type, theme, count in first message
+2. **Propose structure** - Suggest sections based on type
+3. **Walk through content** - Gather details per section
+4. **Ask about visuals** - Images, charts, placeholders
+5. **Confirm logo preference** - Present variants
+6. **THEN generate** - Only after all info gathered
 
 ---
 

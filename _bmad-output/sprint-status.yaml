@@ -33,8 +33,9 @@
 # ==============
 # ALL EPICS COMPLETE! 🎉
 # Epic 1-3, 5-8 all done (Epic 4 removed as over-engineering)
+# Epic 8 verified complete via codebase audit (2026-01-21)
 #
-# NEXT ACTION: Consider what's next for Orion Slack Agent
+# NEXT ACTION: Production deployment / Consider what's next for Orion Slack Agent
 
 generated: 2026-01-09
 project: 2025-12 orion-slack-agent
@@ -146,12 +147,12 @@ development_status:
   # Reset (2026-01-09): Artifacts deleted, stories reset to backlog for re-generation
   # Bug Fix (2026-01-12): Story 8.6 added - Tool Search missing tool_search_tool_bm25
   # See: sprint-change-proposal-2026-01-12-tool-search-bugfix.md
-  # Completed (2026-01-12): Manual verification confirmed tool_search works
-  epic-8: in-progress
-  8-1-anthropic-citations-api: ready-for-dev
+  # Completed (2026-01-21): Codebase audit confirmed all implementations present
+  epic-8: done
+  8-1-anthropic-citations-api: done  # Verified: citations.enabled=true at document-blocks.ts:138 (2026-01-21)
   8-2-tool-search-tool: done
-  8-3-slack-file-ingestion: backlog
+  8-3-slack-file-ingestion: done  # Verified: Full pipeline in src/files/ingestion.ts + handlers (2026-01-21)
   8-4-mcp-auth-fix-ptc: done  # Implemented 2026-01-11, retroactive story 2026-01-12
   8-5-tool-call-summary-cleanup: done  # Implemented 2026-01-09 to 2026-01-11, retroactive story 2026-01-12
-  8-6-tool-search-bugfix: ready-for-dev  # Story context compiled 2026-01-12
+  8-6-tool-search-bugfix: done  # Verified: tool_search_tool_bm25 at loop.ts:740-745 (2026-01-21)
   epic-8-retrospective: optional

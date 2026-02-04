@@ -8,7 +8,7 @@ inputDocuments:
 project_name: '2025-12 orion-slack-agent'
 user_name: 'Sid'
 date: '2025-12-22'
-last_updated: '2026-01-09'
+last_updated: '2026-01-21'
 starterTemplate: 'Custom Structure (Direct API + Agent Skills) - no external template'
 ---
 
@@ -487,7 +487,7 @@ See: `sprint-change-proposal-2025-01-09.md`
 | 8.3 | Slack File Ingestion for Claude Context | done | P1 |
 | 8.4 | MCP Auth Fix for PTC Integration | done | P1 |
 | 8.5 | Tool Call Summary & Sandbox Output Cleanup | done | P1 |
-| 8.6 | Tool Search Bug Fix - Add tool_search_tool_bm25 | ready-for-dev | P0 |
+| 8.6 | Tool Search Bug Fix - Add tool_search_tool_bm25 | done | P0 |
 
 **Story Details:**
 
@@ -587,13 +587,12 @@ See: `sprint-change-proposal-2025-01-09.md`
 | 3 | Tool Connectivity (MCP) | 5 (3.1-3.5) | ✅ done | MVP |
 | 4 | ~~Subagents~~ | 0 | ❌ REMOVED | — |
 | 5 | Persistent Memory | 3 (5.1-5.3) | ✅ done | MVP |
-| 6 | Skills & Extensions Framework | 13 (6.1-6.13) | 🔄 11/13 done | MVP |
-| 7 | Slack Polish | 6 (7.1-7.6) | ✅ done | MVP |
-| 8 | Anthropic API Enhancements | 5 (8.1-8.5) | 📋 draft | Sprint 8 |
+| 6 | Skills & Extensions Framework | 13 (6.1-6.13) | ✅ done | MVP |
+| 7 | Slack Polish | 9 (7.1-7.9) | ✅ done | MVP |
+| 8 | Anthropic API Enhancements | 6 (8.1-8.6) | ✅ done | Sprint 8 |
 
-**MVP Status:** 38 stories across 7 epics — **36 done, 2 remaining** (6.10 ready-for-testing, 6.11 in-review)
-**Updated:** 2026-01-11 (Epic 7 scope reduced - 7.7, 7.8, 7.9 removed)
-**Sprint 8:** Epic 8 (8.1-8.5) — 5 stories
+**MVP Status:** All epics complete! 🎉
+**Updated:** 2026-01-21 (Epic 8 verified complete via codebase audit)
 **Phase 2 (Deferred):** Code generation patterns (FR19, FR23)
 
 ### UX Integration (Hybrid Approach)
