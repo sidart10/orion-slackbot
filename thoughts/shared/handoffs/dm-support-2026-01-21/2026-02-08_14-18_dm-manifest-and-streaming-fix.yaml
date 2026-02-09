@@ -1,0 +1,68 @@
+root_span_id: fe56db57-0d85-4497-9d57-cb042b95c8a0
+turn_span_id: 
+session_id: fe56db57-0d85-4497-9d57-cb042b95c8a0
+---
+session: dm-support-2026-01-21
+date: 2026-02-08
+status: blocked
+outcome: PARTIAL_MINUS
+---
+
+goal: Fix Samba slackbot not responding in personal/group DMs and fix streaming delivery failures
+now: Debug why manifest changes (assistant_view + message.mpim + message.groups) still don't resolve DM issues, and fix invalid_blocks streaming error
+
+test: "Send a DM to @samba directly (1:1) and verify it responds; @mention @samba in a group DM with bot added"
+
+done_this_session:
+  - task: Added message.mpim and message.groups to manifest bot_events
+    files: [docs/samba-slackbot-manifest.yaml]
+  - task: Added assistant_view feature block to manifest (required by assistant:write scope)
+    files: [docs/samba-slackbot-manifest.yaml]
+  - task: Analyzed full DM architecture - two parallel paths (Assistant API + message.im handler)
+    files: [src/index.ts, src/slack/handlers/direct-message.ts, src/slack/handlers/group-dm.ts, src/slack/handlers/user-message.ts, src/slack/handlers/message-core.ts]
+  - task: Identified streaming delivery bug (invalid_blocks from chat.startStream)
+    files: [src/utils/streaming.ts, src/slack/handlers/app-mention.ts]
+
+blockers:
+  - Manifest changes (assistant_view + message.mpim + message.groups) applied but DMs still not working - user reported "it didnt work"
+  - chat.startStream returns invalid_blocks error even in channels - this is a SEPARATE bug affecting ALL responses
+  - Need to determine if the assistant_view warning was blocking or if there's a deeper issue
+
+questions:
+  - Is the invalid_blocks streaming error related to DM failures or independent?
+  - Does the user need to reinstall the app after manifest changes (not just re-apply)?
+  - Is messages_tab_enabled:false preventing the assistant thread UI from appearing for 1:1 DMs?
+  - Are users trying to DM the bot directly (1:1) or only @mentioning in human-to-human DMs?
+
+decisions:
+  - added_message_mpim: Group DMs require message.mpim event subscription - code handler existed but manifest was missing subscription
+  - added_assistant_view: Slack warns that assistant:write scope requires assistant_view feature in manifest
+
+findings:
+  - dm_architecture: Two parallel paths handle DMs - Assistant API (assistant_thread_started -> userMessage in user-message.ts) and Direct message handler (message.im -> direct-message.ts). Event dedup in event-dedup.ts prevents double processing.
+  - manifest_gap: bot_events was missing message.mpim and message.groups. Scopes (mpim:history etc) were present but event subscriptions were not.
+  - streaming_bug: chat.startStream fails with invalid_blocks when markdown_text contains backtick-wrapped channel refs like `` `<#C03T8JBNM4L>` `` or unicode bullets. Error chain at src/utils/streaming.ts:230 -> src/slack/handlers/app-mention.ts:422. This affects ALL responses, not just DMs.
+  - app_mention_dm_limitation: app_mention events only fire in channels, never in DMs or group DMs. So @mentioning the bot in a DM won't trigger app_mention.
+  - dm_handler_noise: The dm_handler_called log fires for ALL message events (including channel messages) because app.message() is a global listener. The handler correctly filters by channel_type at direct-message.ts:65.
+  - feature_flag: DM handlers are gated behind config.enableDmSupport (environment.ts:67) which defaults to true unless ENABLE_DM_SUPPORT=false.
+
+worked:
+  - Reading actual Slack event logs to diagnose (much more useful than guessing from code)
+  - Tracing the full event flow from socket-mode receipt through handler routing
+
+failed:
+  - Initial diagnosis of messages_tab_enabled:false was wrong - the real issues were missing event subscriptions and streaming bugs
+  - Guessing at root cause without seeing actual logs led to incorrect first answer
+
+next:
+  - Investigate why manifest changes didn't fix DMs - check if app needs full reinstall vs just manifest re-apply
+  - Consider setting messages_tab_enabled:true to enable the Messages tab for 1:1 bot DMs
+  - Fix the invalid_blocks streaming error in src/utils/streaming.ts - the chat.startStream API rejects certain markdown formatting
+  - Test sanitizing markdown before sending to streaming API (strip unicode bullets, handle backtick-wrapped channel refs)
+  - Check Slack API docs for chat.startStream content restrictions vs chat.postMessage
+  - Verify the bot actually appears in the user's DM list after manifest update
+  - Test all 4 interaction modes after fixes - channel @mention, 1:1 DM, group DM with bot, private channel
+
+files:
+  created: [thoughts/shared/handoffs/dm-support-2026-01-21/2026-02-08_14-18_dm-manifest-and-streaming-fix.yaml]
+  modified: [docs/samba-slackbot-manifest.yaml]
