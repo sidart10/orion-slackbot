@@ -1,0 +1,1231 @@
+# Implementation Plan: Technical Debt Remediation
+
+Generated: 2026-02-25
+
+## Goal
+
+Systematically eliminate all 23 identified technical debt items in the Samba Agentic Slackbot, organized into 6 incremental sprints. The codebase currently has stale "Orion" branding in production identifiers, a 2,083-line god file (`loop.ts`), duplicated handler logic, security vulnerabilities in dependencies, and coverage gaps. This plan prioritizes safety: each sprint is independently shippable, reversible, and testable against the production Slack bot.
+
+## Existing Codebase Analysis
+
+### Architecture (verified by reading source files)
+
+```
+src/
+  agent/          # Core agent logic: loop.ts (2083L), orion.ts, verify.ts, verification.ts
+  config/         # environment.ts (hardcoded defaults), mcp-servers.ts (no tests)
+  files/          # gcs-upload.ts (hardcoded bucket, no tests)
+  observability/  # langfuse.ts, tracing.ts
+  skills/         # runtime.ts (__resetForTests export, no test file), prompt-builder.ts
+  slack/handlers/ # user-message.ts (1123L), app-mention.ts (729L), message-core.ts (709L)
+  tools/          # summarize/, mcp/, memory/, orion-sandbox/
+  utils/          # logger, streaming, formatting
+```
+
+### Key Findings from Code Reading
+
+1. **DocumentBlockParam** is defined in 3 places: `loop.ts:125`, `orion.ts:48`, `document-blocks.ts:29`. The `document-blocks.ts` version is already the canonical one (imported by `message-core.ts:50`), but `loop.ts` and `orion.ts` still have their own copies.
+
+2. **PTC result handlers**: Lines 1298-1370 (`code_execution_tool_result`) and 1372-1456 (`bash_code_execution_tool_result`) in `loop.ts` are nearly identical -- same file ID extraction, logging, error handling, and Langfuse event emission. Only difference is the block type name and inner content nesting structure.
+
+3. **Dual verification**: `loop.ts:1848-1870` calls both `verifyResponse()` (from `verification.ts` -- structured issues with codes and severity) and `verify()` (from `verify.ts` -- simple string array with 4 Slack formatting rules). The legacy `verify.ts` checks: empty response, bold markdown, markdown links, blockquotes.
+
+4. **Handler duplication**: `user-message.ts` and `app-mention.ts` duplicate the full message handling pipeline (file ingestion, system prompt loading, `runOrionAgent` call, references/feedback block posting, cleanup). `direct-message.ts` (133L) and `group-dm.ts` (126L) correctly delegate to `message-core.ts`.
+
+5. **Anthropic client proliferation**: `loop.ts:205` creates the singleton with proper beta headers. `user-message.ts:473` creates `new Anthropic({ apiKey })` per compaction request (missing beta headers). `generate-summary.ts:16` creates `new Anthropic()` at module level (no apiKey, no beta headers).
+
+6. **Branding**: "orion" appears in `package.json:2`, `instrumentation.ts:20`, `langfuse.ts:86`, `mcp/client.ts:65`, `README.md:1`, `gcs-upload.ts:20`, `docs/testing-standards.md:1`, `docker/Dockerfile` (via docker:build script), `environment.ts:134-144` (GKE cluster names), plus logging events (`orion_starting`, `orion_startup_failed`).
+
+7. **Hardcoded GCP defaults**: `environment.ts:142-144` has `'ai-workflows-459123'`, `'orion-sandbox-cluster'`, `'us-central1'` as fallback defaults. These should have no defaults in production (force explicit env vars).
+
+---
+
+## Sprint Structure Overview
+
+| Sprint | Theme | Debt Items | Risk | Duration |
+|--------|-------|------------|------|----------|
+| 1 | Security & Quick Wins | DEBT-01, 02, 13, 15, 20, 21, 23 | Low | 1-2 days |
+| 2 | Shared Anthropic Client & Verification Consolidation | DEBT-07, 16, 06 | Medium | 1-2 days |
+| 3 | Type Deduplication & Interface Cleanup | DEBT-05, 08 | Medium | 1 day |
+| 4 | Handler Consolidation (the big one) | DEBT-04 | High | 2-3 days |
+| 5 | loop.ts God File Decomposition | DEBT-03 | High | 3-4 days |
+| 6 | Testing & Dependency Upgrades | DEBT-09, 10, 11, 12, 14, 17, 18, 19, 22 | Medium | 3-4 days |
+
+---
+
+## Sprint 1: Security & Quick Wins
+
+**Goal**: Fix security vulnerabilities, rebrand from Orion to Samba, clean up trivial debt.
+
+### Task 1.1: Fix Dependency Vulnerabilities (DEBT-01)
+
+**Description**: Update `@slack/bolt` and `@google-cloud/storage` to patch 11 security vulnerabilities (1 critical regex injection, 6 high including qs DoS and axios prototype pollution).
+
+**Files to modify:**
+- `package.json` -- bump `@slack/bolt` and `@google-cloud/storage` versions
+- `pnpm-lock.yaml` -- regenerated
+
+**Steps:**
+1. Run `pnpm audit` to confirm current state
+2. Run `pnpm update @slack/bolt @google-cloud/storage`
+3. Run `pnpm audit` to verify resolution
+4. Run `pnpm test` to confirm no regressions
+5. If any vulnerabilities remain in transitive deps, add `pnpm.overrides` in `package.json`
+
+**Acceptance criteria:**
+- [ ] `pnpm audit` shows 0 critical and 0 high vulnerabilities
+- [ ] All tests pass
+- [ ] Bot starts without errors in dev mode
+
+**Estimated effort:** 30 minutes
+**Dependencies:** None
+**Risk:** Low -- patch updates. Rollback: revert `package.json` and `pnpm-lock.yaml`.
+
+---
+
+### Task 1.2: Rebrand "Orion" to "Samba" in Production Identifiers (DEBT-02)
+
+**Description**: Replace all user/operator-visible "orion" references with "samba". Internal function names like `runOrionAgent` and `orion_sandbox` tool are deferred (they are code-internal and not customer-facing).
+
+**Files to modify:**
+- `package.json:2` -- `"name": "orion-slack-agent"` -> `"samba-slack-agent"`
+- `package.json:18` -- `docker:build` script references `orion-slack-agent`
+- `src/instrumentation.ts:20` -- `SERVICE_NAME` -> `'samba-slack-agent'`
+- `src/observability/langfuse.ts:86` -- `service:` -> `'samba-slack-agent'`
+- `src/tools/mcp/client.ts:65` -- `CLIENT_INFO.name` -> `'samba-slack-agent'`
+- `README.md:1-2` -- Title and description
+- `docs/testing-standards.md:1` -- Title
+- `src/index.ts:45,122` -- `'orion_starting'`/`'orion_startup_failed'` event names -> `'samba_starting'`/`'samba_startup_failed'`
+- `cloudbuild.yaml:16,18,26,34,36,63,64` -- Cloud Run service name and image tags use `orion-slack-agent`
+- `cloud-run-service.yaml:12,33` -- Cloud Run service name and Artifact Registry image path
+- `docker-compose.yml:4` -- Service name references
+- `docker/Dockerfile:29,31` -- `.orion` directory references
+- `src/config/environment.ts:22` -- Config loader reads from `.orion/config.yaml` (decide: rename to `.samba` or keep as internal)
+
+**Steps:**
+1. Perform each rename in the source files listed above
+2. Update `cloudbuild.yaml` and `cloud-run-service.yaml` with new service/image names
+3. **IMPORTANT**: Coordinate GCP Artifact Registry repo rename separately (infra change, not just code)
+4. Decide on `.orion` config directory: rename to `.samba` and update `environment.ts:22`, OR document `.orion` as kept internal identifier
+5. Search entire codebase for remaining user-visible "orion" strings: `tldr search "orion" src/`
+6. Run `pnpm build` to confirm no TypeScript errors
+7. Run `pnpm test` to confirm tests pass (update any test assertions checking event names)
+
+**Acceptance criteria:**
+- [ ] No user-facing or operator-facing string contains "orion" (observability, package name, docs)
+- [ ] Internal code names (`runOrionAgent`, `orion_sandbox` tool) remain unchanged (separate task)
+- [ ] All tests pass
+- [ ] `pnpm build` succeeds
+
+**Estimated effort:** 1 hour
+**Dependencies:** None
+**Risk:** Low-Medium. Source renames are simple, but infra impacts are real:
+- Langfuse dashboards that filter on `service: 'orion-slack-agent'` will split at the rename boundary
+- Cloud Run deployment will create a NEW service if the name changes without updating infra
+- GCP Artifact Registry repo path (`orion/orion-slack-agent`) is an infra resource, not just a string
+- Deploy env var additions to Cloud Run BEFORE deploying code that requires them
+- Rollback: revert source changes (simple), but infra changes need separate rollback plan
+
+---
+
+### Task 1.3: Make GCS Bucket and GCP Defaults Configurable (DEBT-02 partial, DEBT-13)
+
+**Description**: Replace hardcoded GCS bucket name and GCP project defaults with environment variables.
+
+**Files to modify:**
+- `src/files/gcs-upload.ts:20` -- `GCS_USER_UPLOADS_BUCKET = 'orion-genmedia'` -> read from `config.gcsUploadsBucket`
+- `src/config/environment.ts:142-144` -- Remove hardcoded defaults for `gcpProjectId`, `gkeClusterName`, `gkeClusterRegion`; add `gcsUploadsBucket` with env var `GCS_UPLOADS_BUCKET`
+- `src/config/environment.ts:152-166` -- Add `gcpProjectId`, `gkeClusterName`, `gkeClusterRegion`, `gcsUploadsBucket` to production validation block
+- `.env.example` (if exists) -- add new env vars
+
+**Steps:**
+1. Add `gcsUploadsBucket: process.env.GCS_UPLOADS_BUCKET ?? ''` to config object
+2. Remove default values from `gcpProjectId`, `gkeClusterName`, `gkeClusterRegion` (set to `''`)
+3. Add all four to the production required vars list
+4. Update `gcs-upload.ts` to import from config instead of hardcoding
+5. Update `environment.test.ts` if it asserts on default values
+6. Run tests
+
+**Acceptance criteria:**
+- [ ] No hardcoded GCP project ID, cluster name, or bucket name in source
+- [ ] Production startup fails with clear error if env vars are missing
+- [ ] Development mode still works (empty defaults are fine since GCS calls are conditional)
+- [ ] All tests pass
+
+**Estimated effort:** 45 minutes
+**Dependencies:** None
+**Risk:** Low-Medium. Production deployment must include the new env vars. Document in deployment runbook. Rollback: revert and re-add defaults.
+
+---
+
+### Task 1.4: Remove Deprecated `buildSkillsPrompt` Export (DEBT-15)
+
+**Description**: The `buildSkillsPrompt` function in `skills/prompt-builder.ts` is marked `@deprecated` and its replacement `buildSkillsHint` is already in use by all handlers.
+
+**Files to modify:**
+- `src/skills/prompt-builder.ts` -- Remove the `buildSkillsPrompt` function (lines 26+)
+- `src/skills/index.ts:57` -- Remove from barrel export
+
+**Steps:**
+1. Search for any remaining callers: `tldr search "buildSkillsPrompt" src/`
+2. If no callers found, remove the function and its export
+3. If callers exist, update them to use `buildSkillsHint` first
+4. Run `pnpm build && pnpm test`
+
+**Acceptance criteria:**
+- [ ] `buildSkillsPrompt` no longer exported
+- [ ] No import of `buildSkillsPrompt` anywhere in `src/`
+- [ ] All tests pass
+
+**Estimated effort:** 15 minutes
+**Dependencies:** None
+**Risk:** Very low. The function is marked deprecated. Rollback: restore function.
+
+---
+
+### Task 1.5: Extract Inline SpanLike Type (DEBT-20)
+
+**Description**: Move the inline `SpanLike` type from `user-message.ts:252-255` to a shared location.
+
+**Files to modify:**
+- `src/observability/tracing.ts` -- Add `SpanLike` type export
+- `src/slack/handlers/user-message.ts:252-255` -- Import `SpanLike` instead of inline definition
+
+**Steps:**
+1. Read `tracing.ts` to find the right place for the type
+2. Add `export type SpanLike = { update: (data: Record<string, unknown>) => SpanLike; end: () => void; }`
+3. Replace inline definition in `user-message.ts` with import
+4. Run `pnpm build && pnpm test`
+
+**Acceptance criteria:**
+- [ ] `SpanLike` type defined once in `observability/tracing.ts`
+- [ ] `user-message.ts` imports it
+- [ ] All tests pass
+
+**Estimated effort:** 15 minutes
+**Dependencies:** None
+**Risk:** Very low.
+
+---
+
+### Task 1.6: Fix ESLint Missing Return Types (DEBT-21)
+
+**Description**: Add explicit return types to the 15 functions with ESLint warnings.
+
+**Steps:**
+1. Run `pnpm lint` to identify all 15 warnings
+2. Add return type annotations to each function
+3. Run `pnpm lint` to verify 0 warnings
+4. Run `pnpm test`
+
+**Acceptance criteria:**
+- [ ] `pnpm lint` produces 0 warnings for missing return types
+- [ ] All tests pass
+
+**Estimated effort:** 30 minutes
+**Dependencies:** None
+**Risk:** Very low.
+
+---
+
+### Task 1.7: Fix "Orion" Reference in Testing Docs (DEBT-23)
+
+**Description**: Update `docs/testing-standards.md:1` title from "Orion" to "Samba".
+
+**Files to modify:**
+- `docs/testing-standards.md:1` -- `"Testing Standards - Orion Slack Agent"` -> `"Testing Standards - Samba Slack Agent"`
+
+**Acceptance criteria:**
+- [ ] No documentation file title references "Orion"
+
+**Estimated effort:** 2 minutes
+**Dependencies:** Task 1.2 (do together)
+
+---
+
+### Sprint 1 Risk Analysis
+
+**What could go wrong:**
+- Dependency updates could introduce breaking changes in `@slack/bolt` API
+- Langfuse dashboards that filter on `service: 'orion-slack-agent'` will break
+
+**Mitigation:**
+- Pin to patch versions if needed via `pnpm.overrides`
+- Update Langfuse saved queries before deploying the branding change
+- Deploy dependency fix separately from branding change
+
+**Rollback strategy:** Each task is a separate commit. Revert individual commits as needed.
+
+**Testing strategy:**
+- `pnpm audit` for security
+- `pnpm build && pnpm test` for every change
+- Manual smoke test: send a message to the bot in dev Slack workspace
+
+---
+
+## Sprint 2: Shared Anthropic Client & Verification Consolidation
+
+**Goal**: Eliminate Anthropic client proliferation and merge the two verification systems.
+
+### Task 2.1: Create Shared Anthropic Client Singleton (DEBT-07, DEBT-16)
+
+**Description**: Currently 3 Anthropic client instances exist:
+- `loop.ts:205` -- Singleton with proper beta headers and apiKey
+- `user-message.ts:473` -- Per-request `new Anthropic({ apiKey })` during compaction (missing beta headers)
+- `generate-summary.ts:16` -- Module-level `new Anthropic()` (no apiKey, no beta headers)
+
+Create a single shared client module.
+
+**Files to create:**
+- `src/shared/anthropic-client.ts` -- Singleton factory with proper config
+
+**Files to modify:**
+- `src/agent/loop.ts:205-210` -- Import shared client instead of creating local one
+- `src/slack/handlers/user-message.ts:473` -- Import shared client instead of `new Anthropic()`
+- `src/tools/summarize/generate-summary.ts:16` -- Import shared client instead of `new Anthropic()`
+
+**Steps:**
+1. Create `src/shared/anthropic-client.ts`:
+   ```typescript
+   import Anthropic from '@anthropic-ai/sdk';
+   import { config } from '../config/environment.js';
+
+   let instance: Anthropic | null = null;
+
+   export function getAnthropicClient(): Anthropic {
+     if (!instance) {
+       instance = new Anthropic({
+         apiKey: config.anthropicApiKey,
+         defaultHeaders: {
+           'anthropic-beta': config.anthropic?.allBetas?.join(',')
+             ?? 'context-management-2025-06-27,advanced-tool-use-2025-11-20',
+         },
+       });
+     }
+     return instance;
+   }
+
+   /** Reset for testing */
+   export function __resetAnthropicClient(): void {
+     instance = null;
+   }
+   ```
+2. Update `loop.ts` to use `getAnthropicClient()` instead of local `const anthropic = new Anthropic(...)`
+3. Update `user-message.ts:473` to use `getAnthropicClient()` instead of per-request instantiation
+4. Update `generate-summary.ts:16` to use `getAnthropicClient()` instead of module-level `new Anthropic()`
+5. Write unit test for `src/shared/anthropic-client.ts`
+6. Run `pnpm build && pnpm test`
+
+**Acceptance criteria:**
+- [ ] Only one `new Anthropic()` call exists in the codebase (inside `anthropic-client.ts`)
+- [ ] All callers use `getAnthropicClient()`
+- [ ] Beta headers are present on all API calls (compaction, summarization, agent loop)
+- [ ] All tests pass
+
+**Estimated effort:** 1.5 hours
+**Dependencies:** None
+**Risk:** Medium. The beta headers affect API behavior. Verify that summarization and compaction still work correctly with the new headers. Rollback: revert the 4 file changes.
+
+---
+
+### Task 2.2: Consolidate Verification Systems (DEBT-06)
+
+**Description**: Merge the 4 rules from `verify.ts` into `verification.ts`, then delete `verify.ts`.
+
+Currently at `loop.ts:1848-1870`:
+```typescript
+verification = verifyResponse(attemptResponse, verificationContext);
+const legacyVerification = verify(attemptResponse);
+if (!legacyVerification.passed) {
+  verification = { /* merge logic */ };
+}
+```
+
+The 4 rules in `verify.ts` (empty response, bold markdown, markdown links, blockquotes) should become rules in `verification.ts`.
+
+**Files to modify:**
+- `src/agent/verification.ts` -- Add 4 new rules from `verify.ts` (EMPTY_RESPONSE, MARKDOWN_BOLD, MARKDOWN_LINKS, BLOCKQUOTE)
+- `src/agent/loop.ts:1848-1870` -- Remove the `verify()` call and merge logic; just use `verifyResponse()`
+- `src/agent/loop.ts:21` -- Remove import of `verify` from `./verify.js`
+- `tests/unit/agent/verify.test.ts` -- Migrate test cases to `verification.test.ts`
+
+**Files to delete:**
+- `src/agent/verify.ts` -- After migrating rules
+
+**Steps:**
+1. Read `verification.ts` fully to understand the rule structure
+2. Add the 4 legacy rules as new verification checks with proper codes: `EMPTY_RESPONSE`, `SLACK_MARKDOWN_BOLD`, `SLACK_MARKDOWN_LINKS`, `SLACK_BLOCKQUOTE`
+3. Update `loop.ts` to remove the dual-call pattern
+4. Migrate tests from `verify.test.ts` to `verification.test.ts`
+5. Delete `verify.ts` and `verify.test.ts`
+6. Run `pnpm build && pnpm test`
+
+**Acceptance criteria:**
+- [ ] `verify.ts` deleted
+- [ ] All 4 legacy rules exist in `verification.ts` with proper codes
+- [ ] `loop.ts` calls only `verifyResponse()` (no `verify()`)
+- [ ] All test cases from `verify.test.ts` pass in their new location
+- [ ] All tests pass
+
+**Estimated effort:** 2 hours
+**Dependencies:** None
+**Risk:** Medium. Verification is critical path -- a bad merge could let malformatted responses through. Mitigation: port test cases first, confirm they pass against the new rules, THEN update loop.ts.
+
+---
+
+### Sprint 2 Risk Analysis
+
+**What could go wrong:**
+- Shared Anthropic client could cause issues if different callers need different configs
+- Verification rule migration could miss edge cases
+
+**Mitigation:**
+- The shared client uses the superset config (beta headers). All callers benefit.
+- Port ALL test cases before deleting `verify.ts`
+- Run full test suite after each change
+
+**Rollback strategy:** Revert commits individually. Both tasks are safe to revert independently.
+
+**Testing strategy:**
+- Unit tests for shared client module
+- Migrated verification tests must pass
+- Integration test: send messages that trigger each verification rule
+
+---
+
+## Sprint 3: Type Deduplication & PTC Handler Consolidation
+
+**Goal**: Clean up duplicated types and consolidate the nearly-identical PTC result handlers.
+
+### Task 3.1: Consolidate DocumentBlockParam Types (DEBT-05)
+
+**Description**: `DocumentBlockParam` is defined in 3 places:
+- `src/agent/document-blocks.ts:29` as `DocumentBlock` (canonical -- used by `message-core.ts`)
+- `src/agent/loop.ts:125` as `DocumentBlockParam`
+- `src/agent/orion.ts:48` as `DocumentBlockParam`
+
+The canonical location should be `document-blocks.ts`. The `loop.ts` and `orion.ts` copies should be replaced with re-exports.
+
+**Files to modify:**
+- `src/agent/document-blocks.ts` -- Export `DocumentBlockParam` as an alias for `DocumentBlock` (for backwards compat)
+- `src/agent/loop.ts:125-148` -- Remove `DocumentBlockParam` and `ImageBlockParam` interfaces; import from `document-blocks.ts`
+- `src/agent/orion.ts:48-56` -- Remove `DocumentBlockParam` interface; import from `document-blocks.ts`
+- `src/agent/orion.ts:86` -- Update `AgentOptions.documentBlocks` type to use the imported type
+- `src/slack/handlers/user-message.ts:564` -- Remove `as unknown as` cast (types now match)
+- `src/slack/handlers/app-mention.ts:359` -- Remove `as unknown as` cast
+- `src/slack/handlers/message-core.ts:359` -- Remove `as unknown as` cast
+
+**Steps:**
+1. Add to `document-blocks.ts`:
+   - `ImageBlock` type (mirror of current `ImageBlockParam` in `loop.ts`)
+   - `export type DocumentBlockParam = DocumentBlock;` (alias for backwards compat)
+   - `export type ImageBlockParam = ImageBlock;`
+   - `export type ContentBlockParam = DocumentBlock | ImageBlock;`
+2. Update imports in `loop.ts`, `orion.ts` to use the shared types
+3. Remove the `as unknown as` casts in all 3 handlers (the types now match natively)
+4. Remove deprecated `documentBlocks` from `AgentOptions` if unused (check callers first)
+5. Run `pnpm build && pnpm test`
+
+**Acceptance criteria:**
+- [ ] `DocumentBlockParam` defined in exactly one file (`document-blocks.ts`)
+- [ ] `ImageBlockParam` defined in exactly one file (`document-blocks.ts`)
+- [ ] No `as unknown as import('../../agent/orion.js').DocumentBlockParam[]` casts remain
+- [ ] All tests pass
+
+**Estimated effort:** 1.5 hours
+**Dependencies:** None
+**Risk:** Low-Medium. Type changes caught at compile time.
+
+---
+
+### Task 3.2: Extract Shared PTC Result Handler (DEBT-08)
+
+**Description**: `loop.ts:1298-1370` and `loop.ts:1372-1456` handle `code_execution_tool_result` and `bash_code_execution_tool_result` respectively. They are nearly identical. Extract a shared function.
+
+**Files to modify:**
+- `src/agent/loop.ts` -- Extract `handlePtcResult()` function, call it from both blocks
+
+**Steps:**
+1. Create function above the streaming loop:
+   ```typescript
+   function handlePtcResult(
+     resultBlock: unknown,
+     blockType: string,
+     context: { traceId?: string },
+     state: { generatedFileIds: string[], ptcToolCallCount: number, ptcContainerStartTime?: number },
+     options: AgentOptions,
+   ): void {
+     // Unified extraction logic
+     // Use blockType to determine nesting structure
+   }
+   ```
+2. The key difference is content nesting:
+   - `code_execution_tool_result`: `resultBlock.content.files[]`
+   - `bash_code_execution_tool_result`: `resultBlock.content.content[]`
+3. Parameterize the file extraction path
+4. Replace both blocks with calls to `handlePtcResult()`
+5. Run tests (especially `loop.test.ts`)
+
+**Acceptance criteria:**
+- [ ] Single `handlePtcResult()` function handles both block types
+- [ ] ~70 lines removed from `loop.ts`
+- [ ] All PTC-related tests pass
+- [ ] Langfuse events still include correct blockType metadata
+
+**Estimated effort:** 1.5 hours
+**Dependencies:** None
+**Risk:** Medium. PTC is a critical feature. Ensure file ID extraction still works for both block types.
+
+---
+
+### Sprint 3 Risk Analysis
+
+**What could go wrong:**
+- Type changes could cause subtle compile errors in downstream consumers
+- PTC handler refactor could break file extraction for one of the two block types
+
+**Mitigation:**
+- `pnpm build` catches all type errors at compile time
+- Write a focused test for `handlePtcResult()` with both block types before refactoring
+
+**Rollback strategy:** Revert commits. Type changes are purely structural.
+
+---
+
+## Sprint 4: Handler Consolidation
+
+**Goal**: Migrate `user-message.ts` (1,123 lines) and `app-mention.ts` (729 lines) to use `message-core.ts`, matching the pattern already established by `direct-message.ts` (133 lines) and `group-dm.ts` (126 lines).
+
+### Task 4.0: Fix Active Streaming Bug (Pre-Requisite)
+
+**Description**: The `chat.startStream` API returns `invalid_blocks` for certain markdown content (backtick-wrapped channel refs, unicode bullets). This bug exists in handler code that Sprint 4 will refactor. Fix it BEFORE refactoring to avoid obscuring the root cause or propagating it into `message-core.ts`.
+
+**Files to investigate:**
+- `src/utils/streaming.ts:230` -- Where `invalid_blocks` error surfaces
+- `src/slack/handlers/app-mention.ts:422` -- Where error propagates
+
+**Steps:**
+1. Reproduce the `invalid_blocks` error with a test case
+2. Sanitize markdown content before passing to `chat.startStream`
+3. Add regression test
+4. Run `pnpm build && pnpm test`
+
+**Acceptance criteria:**
+- [ ] `chat.startStream` no longer returns `invalid_blocks` for markdown with channel refs or unicode bullets
+- [ ] Regression test covers the specific content patterns that triggered the error
+- [ ] Fix is in `streaming.ts` (shared utility), not in individual handlers
+
+**Estimated effort:** 2-3 hours
+**Dependencies:** None (should be done first)
+**Risk:** Medium -- streaming is critical path. But fixing before refactoring prevents the bug from being silently migrated into `message-core.ts`.
+
+---
+
+### Task 4.1: Audit Handler Differences
+
+**Description**: Before migrating, document every difference between the 3 handler implementations (user-message, app-mention, message-core) to ensure nothing is lost. **CRITICAL**: This audit must produce an explicit adapter design for `AssistantUserMessageMiddleware`.
+
+**Files to read:**
+- `src/slack/handlers/user-message.ts` -- Full read
+- `src/slack/handlers/app-mention.ts` -- Full read
+- `src/slack/handlers/message-core.ts` -- Full read
+- `src/slack/handlers/direct-message.ts` -- Reference for delegation pattern
+- `src/slack/handlers/group-dm.ts` -- Reference for delegation pattern
+
+**Steps:**
+1. Create a diff matrix of features across all 3 handlers
+2. Identify features in `user-message.ts` NOT in `message-core.ts`:
+   - Thread compaction (`shouldTriggerCompaction`, `compactThreadHistory`)
+   - Suggested prompts (`generateSuggestedPrompts`)
+   - Citation rate recording (`recordCitationOutcome`)
+   - Memory loading (`loadRelevantMemories`)
+   - Uncited claims detection (`detectUncitedClaims`)
+   - `SpanLike` observability span management
+3. Identify features in `app-mention.ts` NOT in `message-core.ts`:
+   - Reaction management (eyes emoji add/remove)
+   - Bot mention stripping
+   - Channel name / user name resolution
+4. **Design the AssistantUserMessageMiddleware adapter**: The Assistant API provides 5 non-standard callbacks (`say`, `setTitle`, `setStatus`, `setSuggestedPrompts`, `getThreadContext`) not present in standard `SlackEventMiddlewareArgs`. Design how these map to `MessageContext`/`HandleMessageOptions`:
+   - Option A: Add optional Assistant callbacks to `MessageContext` interface
+   - Option B: Keep `user-message.ts` as a permanent ~200-line adapter that normalizes before calling core
+   - Document the chosen approach with rationale
+5. Document which features should be added to `message-core.ts` vs. handled by callers
+
+**Acceptance criteria:**
+- [ ] Complete feature matrix documented
+- [ ] Decision on each feature: move to core vs. keep in caller
+- [ ] **Explicit adapter design for AssistantUserMessageMiddleware documented**
+- [ ] No functionality will be lost in migration
+
+**Estimated effort:** 2 hours (analysis only)
+**Dependencies:** Sprint 1 Task 1.5 (SpanLike extraction)
+
+---
+
+### Task 4.2: Enhance `message-core.ts` with Missing Features
+
+**Description**: Add the features identified in Task 4.1 to `message-core.ts` via configuration options, so all handlers can use them.
+
+**Files to modify:**
+- `src/slack/handlers/message-core.ts` -- Add optional feature flags / hooks to `HandleMessageOptions`:
+  - `compaction?: { enabled: boolean }` -- Thread compaction support
+  - `suggestedPrompts?: { enabled: boolean }` -- Post-response prompt suggestions
+  - `citationTracking?: { enabled: boolean }` -- Citation rate recording
+  - `memoryLoading?: { enabled: boolean }` -- Pre-request memory loading
+  - `reactions?: { acknowledge: string; complete: string }` -- Reaction management
+  - `mentionStripping?: boolean` -- Strip bot mentions from message text
+
+**Steps:**
+1. Add configuration interface extensions
+2. Implement each feature behind its flag
+3. Port compaction logic from `user-message.ts` into core (behind flag)
+4. Port reaction logic from `app-mention.ts` into core (behind flag)
+5. Port suggested prompts from `user-message.ts` (behind flag)
+6. Port memory loading from `user-message.ts` (behind flag)
+7. Write tests for each new feature path
+8. Run `pnpm build && pnpm test`
+
+**Acceptance criteria:**
+- [ ] `message-core.ts` supports all features currently in `user-message.ts` and `app-mention.ts`
+- [ ] Features are opt-in via configuration
+- [ ] Tests cover each feature toggle
+- [ ] `direct-message.ts` and `group-dm.ts` still work unchanged
+
+**Estimated effort:** 4-6 hours
+**Dependencies:** Task 4.1, Sprint 1 Task 1.5
+
+---
+
+### Task 4.3: Migrate `user-message.ts` to Delegate to `message-core.ts`
+
+**Description**: Rewrite `user-message.ts` to be a thin wrapper (~150 lines) that configures and calls `handleMessage` from `message-core.ts`.
+
+**Files to modify:**
+- `src/slack/handlers/user-message.ts` -- Replace 1,123 lines with ~150 line wrapper
+
+**Steps:**
+1. Create the wrapper that:
+   - Extracts Slack event data
+   - Configures `HandleMessageOptions` with compaction, prompts, citations, memory enabled
+   - Calls `handleMessage()`
+   - Handles the `AssistantUserMessageMiddleware` callback signature adaptation
+2. Run the full test suite
+3. Run `user-message.test.ts` specifically
+4. Manual smoke test in dev Slack
+
+**Acceptance criteria:**
+- [ ] `user-message.ts` under 200 lines
+- [ ] All existing `user-message.test.ts` tests pass
+- [ ] Behavior is identical (compaction, prompts, citations, memory, file upload all work)
+
+**Estimated effort:** 3 hours
+**Dependencies:** Task 4.2
+
+---
+
+### Task 4.4: Migrate `app-mention.ts` to Delegate to `message-core.ts`
+
+**Description**: Rewrite `app-mention.ts` to be a thin wrapper (~150 lines).
+
+**Files to modify:**
+- `src/slack/handlers/app-mention.ts` -- Replace 729 lines with ~150 line wrapper
+
+**Steps:**
+1. Create the wrapper that:
+   - Extracts Slack event data
+   - Strips bot mention from message text
+   - Configures reactions (eyes emoji)
+   - Calls `handleMessage()`
+2. Run the full test suite
+3. Run `app-mention.test.ts` specifically
+4. Manual smoke test: @mention the bot in a channel
+
+**Acceptance criteria:**
+- [ ] `app-mention.ts` under 200 lines
+- [ ] All existing `app-mention.test.ts` tests pass
+- [ ] Reactions (eyes add/remove) still work
+- [ ] Channel and thread mentions work correctly
+
+**Estimated effort:** 2 hours
+**Dependencies:** Task 4.2
+
+---
+
+### Sprint 4 Risk Analysis
+
+**What could go wrong:**
+- Subtle behavioral differences between handlers could cause regressions
+- The Assistant callback signature (`AssistantUserMessageMiddleware`) has different context than standard event handlers -- delegation might not be straightforward
+- Edge cases in compaction or citation tracking could be lost
+
+**Mitigation:**
+- Task 4.1 (audit) specifically catches differences before coding starts
+- Keep original files in git history for reference
+- Deploy `app-mention.ts` migration first (simpler) to validate the pattern before `user-message.ts`
+- Feature-flag the migration: keep old handler code commented/available for 1 sprint
+
+**Rollback strategy:** Revert to pre-migration handler. The old code is in git.
+
+**Testing strategy:**
+- All existing handler tests must pass without modification (behavior preservation)
+- Add integration tests for each handler path
+- Manual smoke test matrix:
+  - DM to bot (direct-message handler)
+  - @mention in channel (app-mention handler)
+  - Reply in assistant thread (user-message handler)
+  - File upload in each context
+  - Thread with >50 messages (compaction trigger)
+
+---
+
+## Sprint 5: loop.ts God File Decomposition
+
+**Goal**: Break `loop.ts` (2,083 lines) into focused modules, targeting loop.ts under 600 lines.
+
+### Task 5.1: Extract URL/Source Extraction Module
+
+**Description**: Lines 329-519 of `loop.ts` contain URL extraction logic (markdown links, plain image URLs, recursive source extraction from tool results). This is self-contained.
+
+**Files to create:**
+- `src/agent/source-extractor.ts`
+
+**Files to modify:**
+- `src/agent/loop.ts` -- Remove extracted functions, add import
+
+**Functions to extract:**
+- `extractMarkdownLinks()` (currently exported from loop.ts -- maintain export)
+- `extractPlainImageUrls()`
+- `extractUrlSourcesFromResult()`
+
+**Steps:**
+1. Create `src/agent/source-extractor.ts` with the 3 functions
+2. Move the `ContextSource` import/usage
+3. Update `loop.ts` imports
+4. Update any test imports (`loop.test.ts` may test `extractMarkdownLinks`)
+5. Run `pnpm build && pnpm test`
+
+**Acceptance criteria:**
+- [ ] ~190 lines removed from `loop.ts`
+- [ ] `source-extractor.ts` is independently testable
+- [ ] All existing tests pass
+
+**Estimated effort:** 1 hour
+**Dependencies:** None
+
+---
+
+### Task 5.2: Extract Container Lifecycle Manager
+
+**Description**: Lines 928-1010 handle PTC container parameter building, lifecycle lookups, and Langfuse events.
+
+**Files to create:**
+- `src/agent/container-manager.ts`
+
+**Files to modify:**
+- `src/agent/loop.ts` -- Replace inline code with `initializeContainer()` call
+
+**Steps:**
+1. Extract container initialization into:
+   ```typescript
+   export function initializeContainer(
+     context: AgentContext,
+     threadTs?: string
+   ): { activeContainer?: ContainerParameter; activeContainerId?: string }
+   ```
+2. Move Langfuse event emission for container reuse into the function
+3. Update `loop.ts` to call `initializeContainer()` and destructure the result
+4. Run tests
+
+**Acceptance criteria:**
+- [ ] ~80 lines removed from `loop.ts`
+- [ ] Container reuse logic centralized
+- [ ] Tests pass
+
+**Estimated effort:** 1 hour
+**Dependencies:** None
+
+---
+
+### Task 5.3: Extract Streaming Event Processor
+
+**Description**: The core streaming event loop (lines 1097-1542) processes `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, and `message_delta` events. This is the largest section.
+
+**Files to create:**
+- `src/agent/stream-processor.ts`
+
+**Files to modify:**
+- `src/agent/loop.ts` -- Replace inline event processing with calls to stream processor
+
+**Steps:**
+1. **First**: Document all closure-captured mutable variables by reading `loop.ts:1047-1206`. The pre-mortem identified ~12 mutable variables captured via closure. They must ALL be in the state object.
+2. Define an **exhaustive** `StreamState` interface (pre-mortem verified these are ALL required):
+   ```typescript
+   interface StreamState {
+     attemptResponse: string;
+     lastIterationResponse: string;
+     toolUsesThisCall: StreamingToolUse[];
+     toolInputBuffers: Map<number, string>;
+     accumulatedCitations: unknown[];
+     generatedFileIds: string[];
+     inputTokens: number;
+     outputTokens: number;
+     stopReason: string | null;
+     model: string | undefined;
+     activeContainerId: string | undefined;
+     activeContainer: ContainerParameter | undefined;
+     ptcContainerStartTime: number | undefined;
+     ptcToolCallCount: number;
+     toolsExecutedSuccessfully: boolean;
+   }
+   ```
+3. Create `StreamProcessor` class or `processStreamEvents()` function that takes and returns `StreamState`
+4. **Shadow-mode validation**: Before removing the old code, temporarily run BOTH old inline code and new processor in a dev branch, logging any state divergence. This catches missed variables.
+5. Carefully move the PTC result handler (from Task 3.2) into this module
+6. Run tests -- this is the riskiest extraction. Run `loop.test.ts` after EVERY sub-change, not just at the end.
+
+**Acceptance criteria:**
+- [ ] ~450 lines removed from `loop.ts`
+- [ ] Stream processing logic is independently testable
+- [ ] All streaming behavior preserved (tool accumulation, PTC, citations, token counting)
+- [ ] All tests pass
+
+**Estimated effort:** 4-6 hours
+**Dependencies:** Sprint 3 Task 3.2 (PTC handler extraction)
+
+---
+
+### Task 5.4: Extract Tool Execution Logic
+
+**Description**: Tool execution dispatch, MCP timeout lookups, and tool result processing.
+
+**Files to create:**
+- `src/agent/tool-executor.ts`
+
+**Files to modify:**
+- `src/agent/loop.ts` -- Import and delegate to tool executor
+
+**Steps:**
+1. Extract the tool execution section that processes `toolUsesThisCall` array
+2. Move source extraction from tool results
+3. Move tool timeout configuration lookup
+4. Run tests
+
+**Acceptance criteria:**
+- [ ] ~100 lines removed from `loop.ts`
+- [ ] Tool execution independently testable
+- [ ] All tests pass
+
+**Estimated effort:** 2 hours
+**Dependencies:** Task 5.1
+
+---
+
+### Task 5.5: Extract Output Chunking
+
+**Description**: Lines 1951-2019 contain `chunkVerifiedOutput()` and the yielding logic. Small but clean extraction.
+
+**Files to create:**
+- `src/agent/output-chunker.ts`
+
+**Files to modify:**
+- `src/agent/loop.ts` -- Import chunker
+
+**Acceptance criteria:**
+- [ ] ~70 lines removed from `loop.ts`
+- [ ] `loop.ts` is under 600 lines
+- [ ] All tests pass
+
+**Estimated effort:** 30 minutes
+**Dependencies:** None
+
+---
+
+### Task 5.6: Final Verification
+
+**Description**: After all extractions, verify loop.ts is under 600 lines and the module dependency graph is clean.
+
+**Steps:**
+1. `wc -l src/agent/loop.ts` -- must be under 600
+2. Run `pnpm build && pnpm test`
+3. Run `tldr arch src/agent/` to verify no circular dependencies
+4. Review that `loop.ts` now only contains:
+   - The `runAgentLoop()` generator function skeleton
+   - The main verification retry loop
+   - API call construction
+   - Imports and orchestration calls
+
+**Acceptance criteria:**
+- [ ] `loop.ts` under 600 lines
+- [ ] No circular dependencies in `src/agent/`
+- [ ] All tests pass
+- [ ] Full test suite coverage same or better than before
+
+**Estimated effort:** 1 hour
+**Dependencies:** Tasks 5.1-5.5
+
+---
+
+### Sprint 5 Risk Analysis
+
+**What could go wrong:**
+- Extracting the streaming event loop is extremely delicate -- closures capture many local variables
+- State passing between extracted modules could introduce bugs
+- The generator function (`async function*`) makes extraction harder than normal functions
+
+**Mitigation:**
+- Extract pure functions first (URL extraction, chunking) to build confidence
+- The stream processor should receive and return a well-typed state object, not closures
+- Run tests after EVERY extraction, not just at the end
+- Keep the generator skeleton in `loop.ts` -- only extract the processing logic, not the yield points
+- Consider a feature flag to switch between old and new implementations during testing
+
+**Rollback strategy:** Each extraction is a separate commit. Revert from the last failing extraction.
+
+**Testing strategy:**
+- `loop.test.ts` is the critical gate -- every extraction must pass all existing loop tests
+- Add unit tests for each new module
+- Integration test: full agent conversation with tool calls, PTC, file generation
+
+---
+
+## Sprint 6: Testing Coverage & Dependency Upgrades
+
+**Goal**: Close coverage gaps and upgrade major dependencies.
+
+### Task 6.1: Add `message-core.ts` Direct Tests (DEBT-10)
+
+**Description**: `message-core.ts` has 69.95% statement / 49.15% branch coverage from indirect tests only. Add direct unit tests.
+
+**Files to create:**
+- `tests/unit/slack/handlers/message-core.test.ts`
+
+**Steps:**
+1. Test the `handleMessage` function directly with mocked Slack client and agent
+2. Cover the uncovered branches:
+   - File upload path (with and without files)
+   - Error handling paths
+   - References/feedback block posting
+   - Status updater integration
+3. Target: 85% statement, 75% branch coverage
+
+**Acceptance criteria:**
+- [ ] `message-core.test.ts` exists with 15+ test cases
+- [ ] Statement coverage > 85%
+- [ ] Branch coverage > 75%
+
+**Estimated effort:** 3 hours
+**Dependencies:** Sprint 4 (handler consolidation stabilizes the code)
+
+---
+
+### Task 6.2: Improve `app-mention.ts` Branch Coverage (DEBT-11)
+
+**Description**: Branch coverage at 55.71%. Uncovered: file upload, image handling, feedback block, error cleanup (lines 481-715).
+
+**Note**: After Sprint 4, `app-mention.ts` will be a thin wrapper. The uncovered code will have moved to `message-core.ts`. This task becomes "ensure the new core paths are covered" rather than testing the old handler.
+
+**Files to modify:**
+- `tests/unit/slack/handlers/app-mention.test.ts` -- Add missing branch tests
+- `tests/unit/slack/handlers/message-core.test.ts` -- Cover the migrated paths
+
+**Acceptance criteria:**
+- [ ] Branch coverage > 75% for both files
+- [ ] File upload, image handling, error cleanup all covered
+
+**Estimated effort:** 2 hours
+**Dependencies:** Sprint 4 Task 4.4, Task 6.1
+
+---
+
+### Task 6.3: Cover `orion.ts` Lines 169-212 (DEBT-12)
+
+**Description**: executeTool callback, MCP timeout lookup, orion_sandbox context.
+
+**Files to modify:**
+- `tests/unit/agent/orion.test.ts` -- Add test cases
+
+**Acceptance criteria:**
+- [ ] Lines 169-212 covered
+- [ ] executeTool callback tested with MCP and local tools
+
+**Estimated effort:** 1.5 hours
+**Dependencies:** None
+
+---
+
+### Task 6.4: Cover `summarize/tool.ts` Main Execution Path (DEBT-14)
+
+**Description**: Lines 113-183 uncovered (the `handleSummarizeTool` function body).
+
+**Files to modify:**
+- `tests/unit/tools/summarize/tool.test.ts` (create if not exists) -- Test `handleSummarizeTool`
+
+**Steps:**
+1. Test with context set / not set
+2. Test success path with mocked summarize function
+3. Test failure path
+4. Test JSON serialization of response with/without sourceUrl
+
+**Acceptance criteria:**
+- [ ] Statement coverage > 85% for `tool.ts`
+- [ ] Main execution path tested
+
+**Estimated effort:** 1.5 hours
+**Dependencies:** None
+
+---
+
+### Task 6.5: Add Tests for `config/mcp-servers.ts` (DEBT-17)
+
+**Description**: High-churn file with complex env-var parsing, 6 commits in 90 days, zero tests.
+
+**Files to create:**
+- `tests/unit/config/mcp-servers.test.ts`
+
+**Steps:**
+1. Test `parseEnabled()` edge cases
+2. Test `extractUrl()` for URL-based and stdio configs
+3. Test `extractBearerToken()` from headers
+4. Test `extractDefaults()` and `extractAuthType()`
+5. Test full config loading with mocked file system
+
+**Acceptance criteria:**
+- [ ] All exported functions tested
+- [ ] Edge cases (missing env vars, malformed config) covered
+
+**Estimated effort:** 2 hours
+**Dependencies:** None
+
+---
+
+### Task 6.6: Add Tests for `files/gcs-upload.ts` (DEBT-18)
+
+**Files to create:**
+- `tests/unit/files/gcs-upload.test.ts`
+
+**Acceptance criteria:**
+- [ ] Upload, signed URL generation, and error handling tested with mocked GCS
+
+**Estimated effort:** 1.5 hours
+**Dependencies:** Sprint 1 Task 1.3 (configurable bucket)
+
+---
+
+### Task 6.7: Add Tests for `skills/runtime.ts` (DEBT-19)
+
+**Description**: Has `__resetForTests` export suggesting testability intent, but no test file.
+
+**Files to create:**
+- `tests/unit/skills/runtime.test.ts`
+
+**Acceptance criteria:**
+- [ ] Runtime initialization, skill tool registration tested
+- [ ] `__resetForTests` verified to work
+
+**Estimated effort:** 1.5 hours
+**Dependencies:** None
+
+---
+
+### Task 6.8: Cover `tools/mcp/index.ts` Barrel File (DEBT-22)
+
+**Description**: 0% coverage on a 60-line barrel file. This is likely just re-exports, so a simple import test suffices.
+
+**Files to create:**
+- `tests/unit/tools/mcp/index.test.ts`
+
+**Steps:**
+1. Import all exports and verify they are defined
+2. This is a barrel file -- coverage comes from import verification
+
+**Acceptance criteria:**
+- [ ] All exports verified as importable
+- [ ] Coverage > 80%
+
+**Estimated effort:** 15 minutes
+**Dependencies:** None
+
+---
+
+### Task 6.9: Upgrade Major Dependencies (DEBT-09)
+
+**Description**: Staged dependency upgrades. Do NOT upgrade all at once.
+
+**Phase A: Vitest 1.6 -> 3.x** (biggest risk -- 2 major version jump)
+- Run `pnpm update vitest @vitest/coverage-v8`
+- Fix any breaking changes in test configuration or APIs
+- Known breaking: Vitest 2+ changed config format and pool defaults, 3+ changed coverage reporter
+- Current config at `vitest.config.ts` enforces coverage thresholds (85%/78%/85%/85%) -- verify these still work
+- Run full test suite
+
+**Phase B: ESLint 8 -> 10 + typescript-eslint 6 -> 8**
+- **NOTE**: Project already uses flat config (`eslint.config.js`). No config migration needed -- just package upgrades.
+- Run `pnpm update eslint @eslint/js @typescript-eslint/eslint-plugin @typescript-eslint/parser`
+- Fix any new lint errors (typescript-eslint v8 changes import paths)
+- Run `pnpm lint`
+
+**Phase C: @anthropic-ai/sdk 0.71 -> 0.78**
+- Run `pnpm update @anthropic-ai/sdk`
+- Check changelog for breaking changes
+- Run tests focusing on agent loop, compaction, summarization
+
+**Phase D: glob 10 -> 13**
+- Run `pnpm update glob`
+- Check for API changes
+- Run tests
+
+**Acceptance criteria (each phase):**
+- [ ] Dependency updated to latest
+- [ ] All tests pass
+- [ ] No runtime errors in dev mode
+
+**Estimated effort:** 4-6 hours total (most time in Vitest migration)
+**Dependencies:** All other sprints complete (upgrade last to avoid confounding failures)
+**Risk:** High for Vitest. Mitigate by upgrading incrementally (1.x -> 2.x -> 3.x -> 4.x if needed).
+
+---
+
+### Sprint 6 Risk Analysis
+
+**What could go wrong:**
+- Vitest 4.x could have incompatible config or missing plugins
+- ESLint flat config migration is nontrivial
+- New Anthropic SDK version could change API behavior
+
+**Mitigation:**
+- Upgrade dependencies one at a time with separate commits
+- For Vitest, try the latest first -- only step through majors if it fails
+- For ESLint, the `@eslint/migrate-config` tool can auto-convert configs
+- Pin `@anthropic-ai/sdk` to exact version if any test fails
+
+**Rollback strategy:** Each dependency upgrade is a separate commit. Revert individually.
+
+**Testing strategy:**
+- Full `pnpm test` after each upgrade phase
+- `pnpm lint` after ESLint upgrade
+- Manual bot test after Anthropic SDK upgrade
+
+---
+
+## Testing Strategy (Overall)
+
+### Gate Requirements
+
+Every commit must pass:
+1. `pnpm build` -- TypeScript compilation
+2. `pnpm test` -- Full test suite
+3. `pnpm lint` -- ESLint (after Sprint 6 Phase B, or existing ESLint)
+
+### Manual Smoke Tests
+
+After each sprint, perform:
+- [ ] Send DM to bot and receive response
+- [ ] @mention bot in channel and receive threaded response
+- [ ] Upload a file and confirm it's processed
+- [ ] Trigger a multi-turn conversation (tool calling)
+- [ ] Verify Langfuse traces appear with correct service name
+
+### Coverage Gates
+
+Post-Sprint 6 targets:
+- Overall statement coverage: > 80%
+- `message-core.ts`: > 85% statement, > 75% branch
+- `loop.ts`: > 70% (with extracted modules > 85% each)
+- All new modules: > 85% statement coverage
+
+---
+
+## Definition of Done (Overall Effort)
+
+The technical debt remediation is complete when ALL of the following are true:
+
+- [ ] **DEBT-01**: `pnpm audit` shows 0 critical, 0 high vulnerabilities
+- [ ] **DEBT-02**: No user/operator-facing string contains "orion"
+- [ ] **DEBT-03**: `loop.ts` is under 600 lines
+- [ ] **DEBT-04**: `user-message.ts` under 200 lines, `app-mention.ts` under 200 lines
+- [ ] **DEBT-05**: `DocumentBlockParam` defined in exactly 1 file
+- [ ] **DEBT-06**: `verify.ts` deleted; all rules in `verification.ts`
+- [ ] **DEBT-07**: Single shared Anthropic client with consistent beta headers
+- [ ] **DEBT-08**: Single PTC result handler function
+- [ ] **DEBT-09**: All dependencies within 1 major version of latest
+- [ ] **DEBT-10**: `message-core.ts` has direct test file with > 85% coverage
+- [ ] **DEBT-11**: `app-mention.ts` branch coverage > 75%
+- [ ] **DEBT-12**: `orion.ts` lines 169-212 covered
+- [ ] **DEBT-13**: No hardcoded GCP defaults; env vars required in production
+- [ ] **DEBT-14**: `summarize/tool.ts` statement coverage > 85%
+- [ ] **DEBT-15**: `buildSkillsPrompt` removed
+- [ ] **DEBT-16**: `generate-summary.ts` uses shared Anthropic client
+- [ ] **DEBT-17**: `mcp-servers.ts` has test file
+- [ ] **DEBT-18**: `gcs-upload.ts` has test file
+- [ ] **DEBT-19**: `skills/runtime.ts` has test file
+- [ ] **DEBT-20**: `SpanLike` type in shared location
+- [ ] **DEBT-21**: 0 ESLint warnings for missing return types
+- [ ] **DEBT-22**: `mcp/index.ts` coverage > 80%
+- [ ] **DEBT-23**: Docs reference "Samba" not "Orion"
+- [ ] All tests pass: `pnpm build && pnpm test && pnpm lint`
+- [ ] Manual smoke test passed in dev Slack workspace
+
+## Estimated Total Effort
+
+| Sprint | Effort | Calendar Days |
+|--------|--------|---------------|
+| Sprint 1: Security & Quick Wins | 3-4 hours | 1 day |
+| Sprint 2: Client & Verification | 4-5 hours | 1-2 days |
+| Sprint 3: Types & PTC | 3 hours | 1 day |
+| Sprint 4: Handler Consolidation | 12-15 hours | 2-3 days |
+| Sprint 5: loop.ts Decomposition | 10-12 hours | 3-4 days |
+| Sprint 6: Testing & Upgrades | 14-18 hours | 3-4 days |
+| **Total** | **46-57 hours** | **11-15 days** |
+
+Sprint 4 and Sprint 5 are the highest-effort, highest-risk phases. They can be parallelized if two developers are available (no file overlaps between handler consolidation and loop decomposition).
+
+---
+
+## Risk Mitigations (Pre-Mortem)
+
+**Pre-Mortem Run:** 2026-03-04 | Mode: Deep | Tigers: 5 (3 HIGH, 2 MEDIUM) | Elephants: 2
+
+### Tigers Addressed:
+
+1. **[HIGH] Cloud Run/infra files missing from rename plan**
+   - Mitigation: Added `cloudbuild.yaml`, `cloud-run-service.yaml`, `docker-compose.yml`, `docker/Dockerfile`, `environment.ts:22` to Task 1.2 file list
+   - Added steps for GCP Artifact Registry coordination
+   - Added to: Sprint 1, Task 1.2
+
+2. **[HIGH] `.orion` config directory not addressed in rename**
+   - Mitigation: Added explicit decision point to Task 1.2 — rename to `.samba` or document as kept internal identifier
+   - Added to: Sprint 1, Task 1.2
+
+3. **[HIGH] Streaming loop extraction captures ~12 mutable variables via closures**
+   - Mitigation: Expanded `StreamState` interface to include ALL 15 verified mutable variables. Added shadow-mode validation step before removing old code.
+   - Added to: Sprint 5, Task 5.3
+
+4. **[HIGH] `AssistantUserMessageMiddleware` blocks clean handler unification**
+   - Mitigation: Added explicit adapter design requirement to Task 4.1 audit. Two options documented (extend `MessageContext` vs. permanent adapter layer).
+   - Added to: Sprint 4, Task 4.1
+
+5. **[MEDIUM] Removing GCP defaults without adding production validation could break deployment**
+   - Mitigation: Noted in Task 1.2 risk section — deploy env vars to Cloud Run BEFORE deploying requiring code
+   - Added to: Sprint 1 Risk Analysis
+
+### New Pre-Requisite Added:
+
+- **Task 4.0: Fix Active Streaming Bug** — The `invalid_blocks` streaming error must be fixed BEFORE Sprint 4 handler refactoring begins, to avoid propagating the bug into `message-core.ts` and obscuring root cause during bisection.
+
+### Elephants Acknowledged:
+
+1. **Active DM + streaming bugs exist** — Addressed by adding Task 4.0 as pre-requisite. DM fix is separate from this plan (tracked in handoff ledger).
+
+2. **No automated integration tests for Sprints 4-5** — Acknowledged risk. Sprint 4 Testing Strategy already calls for integration tests; recommend writing a minimal harness (mocked Slack client, real agent loop) as first action in Sprint 4.
+
+### Corrections Applied:
+
+- ESLint flat config migration (Task 6.9 Phase B): Already on flat config — removed migration step
+- Vitest version target: Corrected from 4.x to 3.x (current latest)
+
+### Paper Tigers (no action needed):
+
+- Langfuse dashboard breakage: Limited to event metadata, no saved queries found in code
+- Dependency security updates: Patch-level, low API surface risk
+- Type deduplication: Caught at compile time
+- ESLint config migration: Already done
